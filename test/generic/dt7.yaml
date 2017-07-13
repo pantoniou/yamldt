@@ -1,0 +1,21 @@
+node: &noderef
+  a: foo
+  b: bar
+  c: &cref
+    cn:
+     val: 1
+
+*cref:
+  cn: &cnref
+    val: 2
+
+*cnref:
+  val: 3
+
+node:
+  c:
+    cn:
+      val: 4
+
+dnode:
+  dval: 5

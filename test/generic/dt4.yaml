@@ -1,0 +1,47 @@
+compatible: [ "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx" ]
+interrupt-parent: *intr
+"#address-cells": 1
+"#size-cells": 1
+model: "TI AM335x BeagleBone Black"
+interrupt-controller: &intr
+  compatible: "ti,am33xx-intc"
+  interrupt-controller: true
+  "#interrupt-cells": 1
+  reg: [ 0x48200000, 0x00001000 ]
+chosen:
+  stdout-path: "/ocp/serial@44e09000"
+ocp: &ocp
+  compatible: "simple-bus"
+  "#address-cells": 1
+  "#size-cells": 1
+  ranges: true
+  ti,hwmods: "l3_main"
+  gpio@481ac000: &gpio
+    compatible: "ti,omap4-gpio"
+    ti,hwmods: "gpio3"
+    gpio-controller: true
+    "#gpio-cells": 2
+    reg: [ 0x481ac000, 0x00001000 ]
+    interrupts: 0x20
+  TIMER4:
+    gpio: [ *gpio, 2 ]
+  testdel:
+    this: yes
+    more: no
+  empty-tree: &empty
+    ~: ~
+  testbyte: !int8 [ 0, 1, 2, 3, 4]
+  testcomplex: !int8 [ 0, 1, !int64 [ 100, 200 ] ]
+*gpio:
+  recursion:
+    is:       
+      fun: "yes"
+*gpio:
+  more-fun: yes-please
+*gpio:
+  ti,hwmods: "gpio-fun"
+test: null
+*gpio:
+  interrupts: null
+*ocp:
+  testdel: null

@@ -1,0 +1,70 @@
+/*
+ * dtb.h - DTB generation header
+ *
+ * YAML to DTB generator
+ *
+ * (C) Copyright Pantelis Antoniou <pantelis.antoniou@konsulko.com>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *     (1) Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *
+ *     (2) Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in
+ *     the documentation and/or other materials provided with the
+ *     distribution.
+ *
+ *     (3)The name of the author may not be used to
+ *     endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+#ifndef DTB_H
+#define DTB_H
+
+#include <stdint.h>
+#include <sys/time.h>
+#include <linux/limits.h>
+
+#include "list.h"
+
+enum dt_data_area {
+	dt_struct,
+	dt_strings,
+	dt_mem_rsvmap,
+	dt_area_max = dt_mem_rsvmap,
+};
+
+struct dtb_emit_state {
+	/* DTB generation state */
+	unsigned int next_phandle;
+	struct property *memreserve_prop;
+
+	struct {
+		void *data;
+		unsigned int alloc;
+		unsigned int size;
+	} area[dt_area_max + 1];
+};
+
+struct yaml_dt_state;
+
+void dtb_init(struct yaml_dt_state *dt);
+void dtb_cleanup(struct yaml_dt_state *dt);
+void dtb_emit(struct yaml_dt_state *dt);
+
+#endif
