@@ -113,11 +113,16 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 	if (xtag) {
 		ref->xtag_builtin = get_builtin_tag(xtag);
 		if (!ref->xtag_builtin) {
-			fprintf(stderr, "Not builtin tag %s\n", xtag);
 			ref->xtag = strdup(xtag);
 			assert(ref->xtag);
 		}
 	}
+
+	/* always mark for debugging */
+	ref->line = dt->current_start_mark.line;
+	ref->column = dt->current_start_mark.column;
+	ref->end_line = dt->current_end_mark.line;
+	ref->end_column = dt->current_end_mark.column;
 
 	return ref;
 }
@@ -140,6 +145,7 @@ static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 
 static struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
 {
+	struct yaml_dt_state *dt = to_dt(t);
 	struct property *prop;
 
 	prop = malloc(sizeof(*prop));
@@ -148,6 +154,11 @@ static struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
 
 	prop->name = strdup(name);
 	assert(prop->name);
+
+	prop->line = dt->current_start_mark.line;
+	prop->column = dt->current_start_mark.column;
+	prop->end_line = dt->current_end_mark.line;
+	prop->end_column = dt->current_end_mark.column;
 
 	return prop;
 }
@@ -209,13 +220,14 @@ static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 
 static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 {
-	struct yaml_dt_state *dt __attribute__((unused));
+	struct yaml_dt_state *dt;
 	va_list ap;
 
 	dt = to_dt(t);
 
 	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
+	if (dt->debug)
+		vfprintf(stderr, fmt, ap);
 	va_end(ap);
 }
 
@@ -244,7 +256,10 @@ void dt_start(struct yaml_dt_state *dt)
 	dt->prop_seq_depth = 0;
 	dt->error_flag = false;
 
-	dtb_init(dt);
+	if (!dt->yaml)
+		dtb_init(dt);
+	else
+		yaml_init(dt);
 	tree_init(to_tree(dt), &yaml_tree_ops);
 }
 
@@ -260,7 +275,10 @@ void dt_end(struct yaml_dt_state *dt)
 		dt->current_prop = NULL;
 	}
 
-	dtb_cleanup(dt);
+	if (!dt->yaml)
+		dtb_cleanup(dt);
+	else
+		yaml_cleanup(dt);
 	tree_term(to_tree(dt));
 }
 
@@ -299,7 +317,8 @@ static void read_whole_input_file(struct yaml_dt_state *dt)
 int dt_setup(struct yaml_dt_state *dt,
 		const char *input_file,
 		const char *output_file,
-		bool debug, bool compatible)
+		bool debug, bool compatible,
+		bool yaml)
 {
 	memset(dt, 0, sizeof(*dt));
 
@@ -307,6 +326,7 @@ int dt_setup(struct yaml_dt_state *dt,
 	dt->output_file = output_file;
 	dt->debug = debug;
 	dt->compatible = compatible;
+	dt->yaml = yaml;
 
 	if (strcmp(dt->input_file, "-")) {
 		dt->input = fopen(dt->input_file, "rb");
@@ -495,9 +515,6 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 
 		ref = ref_alloc(to_tree(dt), rt, ref_label,
 				ref_label_len, xtag);
-		assert(ref);
-		ref->line = dt->current_start_mark.line;
-		ref->column = dt->current_start_mark.column;
 
 		dt_debug(dt, "new ref @%s%s%s\n",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
@@ -521,8 +538,11 @@ property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 	else
 		prop_ref_clear(to_tree(dt), prop);
 	assert(prop);
+
 	prop->line = dt->current_start_mark.line;
 	prop->column = dt->current_start_mark.column;
+	prop->end_line = dt->current_end_mark.line;
+	prop->end_column = dt->current_end_mark.column;
 
 	return prop;
 }
@@ -552,7 +572,10 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		dt_start(dt);
 		break;
 	case YAML_DOCUMENT_END_EVENT:
-		dtb_emit(dt);
+		if (!dt->yaml)
+			dtb_emit(dt);
+		else
+			yaml_emit(dt);
 		dt_end(dt);
 		break;
 
@@ -565,7 +588,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		/* creating root */
 		if (!dt->map_key && dt->depth == 0) {
 			assert(!tree_root(to_tree(dt)));
+
 			np = node_alloc(to_tree(dt), "", NULL);
+
 			dt->current_np = np;
 			tree_set_root(to_tree(dt), np);
 		} else if (dt->map_key) {
@@ -600,10 +625,17 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				}
 
 				np = node_alloc(to_tree(dt), dt->map_key, label);
+
+				np->line = dt->last_map_start_mark.line;
+				np->column = dt->last_map_start_mark.column;
+				np->end_line = dt->last_map_end_mark.line;
+				np->end_column = dt->last_map_end_mark.column;
+
 				dt_debug(dt, "creating node @%s%s%s\n",
 						dn_fullname(np, namebuf, sizeof(namebuf)),
 						label ? " label=" : "",
 						label ? label : "");
+
 			}
 
 			free(dt->map_key);
@@ -617,6 +649,12 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				}
 			} else {
 				dt_debug(dt, "ref node\n");
+
+				np->line = dt->last_alias_start_mark.line;
+				np->column = dt->last_alias_start_mark.column;
+				np->end_line = dt->last_alias_end_mark.line;
+				np->end_column = dt->last_alias_end_mark.column;
+
 				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
 			}
 			dt->current_np = np;
@@ -734,6 +772,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			memcpy(dt->map_key, event->data.scalar.value, event->data.scalar.length);
 			dt->map_key[event->data.scalar.length] = '\0';
 
+			dt->last_map_start_mark = event->start_mark;
+			dt->last_map_end_mark = event->end_mark;
+
 		} else {
 			assert(np);
 
@@ -779,6 +820,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			dt->map_key[0] = '*';
 			strcpy(dt->map_key + 1, (char *)event->data.alias.anchor);
 			dt->current_np_ref = true;
+
+			dt->last_alias_start_mark = event->start_mark;
+			dt->last_alias_end_mark = event->end_mark;
 
 			if (dt->debug)
 				printf("next up is a ref to %s\n", dt->map_key);
@@ -963,16 +1007,38 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 	exit(EXIT_FAILURE);
 }
 
-void dt_error_at(struct yaml_dt_state *dt,
+static void dt_print_at_msg(struct yaml_dt_state *dt,
 		 size_t line, size_t column,
 		 size_t end_line, size_t end_column,
-		 const char *fmt, ...)
+		 const char *type, const char *msg)
+{
+	char linebuf[1024];
+	char filebuf[PATH_MAX + 1];
+
+	get_error_location(dt, line, column,
+			filebuf, sizeof(filebuf),
+			linebuf, sizeof(linebuf),
+			&line);
+
+	if (end_line != line)
+		end_column = strlen(linebuf) + 1;
+
+	fprintf(stderr, "%s:%zd:%zd: %s: %s\n %s\n %*s^",
+			filebuf, line, column + 1,
+			type, msg, linebuf, (int)column, "");
+	while (++column < end_column - 1)
+		fprintf(stderr, "~");
+	fprintf(stderr, "\n");
+}
+
+void dt_print_at(struct yaml_dt_state *dt,
+		 size_t line, size_t column,
+		 size_t end_line, size_t end_column,
+		 const char *type, const char *fmt, ...)
 {
 	va_list ap;
 	char str[1024];
 	int len;
-	char linebuf[1024];
-	char filebuf[PATH_MAX + 1];
 
 	va_start(ap, fmt);
 	vsnprintf(str, sizeof(str) - 1, fmt, ap);
@@ -983,21 +1049,50 @@ void dt_error_at(struct yaml_dt_state *dt,
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	get_error_location(dt, line, column,
-			filebuf, sizeof(filebuf),
-			linebuf, sizeof(linebuf),
-			&line);
+	dt_print_at_msg(dt, line, column, end_line, end_column, type, str);
+}
 
-	if (end_line != line)
-		end_column = strlen(linebuf) + 1;
+void dt_warning_at(struct yaml_dt_state *dt,
+		 size_t line, size_t column,
+		 size_t end_line, size_t end_column,
+		 const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
 
-	fprintf(stderr, "%s:%zd:%zd: %s\n %s\n %*s^",
-			filebuf, line, column + 1,
-			str, linebuf, (int)column, "");
-	while (++column < end_column - 1)
-		fprintf(stderr, "~");
-	fprintf(stderr, "\n");
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
 
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	dt_print_at_msg(dt, line, column, end_line, end_column, "warning", str);
+	dt->error_flag = true;
+}
+
+void dt_error_at(struct yaml_dt_state *dt,
+		 size_t line, size_t column,
+		 size_t end_line, size_t end_column,
+		 const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
+
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
+
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	dt_print_at_msg(dt, line, column, end_line, end_column, "error", str);
 	dt->error_flag = true;
 }
 
@@ -1017,6 +1112,7 @@ static struct option opts[] = {
 	{ "output",	required_argument, 0, 'o' },
 	{ "debug",	no_argument, 0, 'd' },
 	{ "compatible",	no_argument, 0, 'C' },
+	{ "yaml",	no_argument, 0, 'y' },
 	{ "help",	no_argument, 0, 'h' },
 	{ "version",    no_argument, 0, 'v' },
 	{0, 0, 0, 0}
@@ -1026,8 +1122,9 @@ static void help(void)
 {
 	printf("yamldt [options] <input-file>\n"
 		" options are:\n"
-		"   -o, --output	Output DTB file\n"
+		"   -o, --output	Output DTB or YAML file\n"
 		"   -d, --debug		Debug messages\n"
+		"   -y, --yaml		Generate YAML output\n"
 		"   -C, --compatible	Bit exact compatibility mode\n"
 		"   -h, --help		Help\n"
 		"   -v, --version	Display version\n"
@@ -1041,12 +1138,12 @@ int main(int argc, char *argv[])
 	int cc, option_index = 0;
 	const char *input_file = NULL;
 	const char *output_file = NULL;
-	bool debug = false, compatible = false;
+	bool debug = false, compatible = false, yaml = false;
 
 	memset(dt, 0, sizeof(*dt));
 
 	while ((cc = getopt_long(argc, argv,
-			"o:Cdvh?", opts, &option_index)) != -1) {
+			"o:Cydvh?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			output_file = optarg;
@@ -1056,6 +1153,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'C':
 			compatible = true;
+			break;
+		case 'y':
+			yaml = true;
 			break;
 		case 'v':
 			printf("%s version %s\n", PACKAGE_NAME, VERSION);
@@ -1078,7 +1178,7 @@ int main(int argc, char *argv[])
 	}
 	input_file = argv[optind];
 
-	err = dt_setup(dt, input_file, output_file, debug, compatible);
+	err = dt_setup(dt, input_file, output_file, debug, compatible, yaml);
 	if (err)
 		return EXIT_FAILURE;
 

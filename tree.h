@@ -179,6 +179,9 @@ void node_free(struct tree *t, struct device_node *np);
 struct device_node *node_lookup_by_label(struct tree *t,
 		const char *label, int len);
 
+void tree_apply_ref_node(struct tree *t, struct device_node *npref,
+			 struct device_node *np);
+
 /* this should be enough */
 #define NODE_FULLNAME_MAX	4096
 const char *dn_fullname_multi(struct device_node *np, char **buf, int *size);

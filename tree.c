@@ -47,6 +47,12 @@
 
 #include "yamldt.h"
 
+#define tree_debug(_t, _fmt, ...) \
+	do { \
+		if (_t->ops->debugf) \
+			_t->ops->debugf(_t, _fmt, ##__VA_ARGS__); \
+	} while(0)
+
 struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len,
 		const char *xtag)
@@ -330,4 +336,115 @@ void tree_term(struct tree *t)
 	/* free the deleted properties */
 	list_for_each_entry_safe(prop, propn, &t->del_props, node)
 		prop_free(t, prop);
+}
+
+/* clear any crud that shouldn't be part of the base tree */
+static void sanitize_base(struct tree *t, struct device_node *np)
+{
+	struct device_node *child;
+	struct property *prop, *propn;
+	char namebuf[NODE_FULLNAME_MAX];
+
+	list_for_each_entry_safe(prop, propn, &np->properties, node) {
+		if (prop->is_delete || !strcmp(prop->name, "~")) {
+			tree_debug(t, "removing property %s @%s\n",
+				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+			prop_del(t, prop);
+		}
+	}
+
+	list_for_each_entry(child, &np->children, node)
+		sanitize_base(t, child);
+}
+
+void tree_apply_ref_node(struct tree *t, struct device_node *npref,
+			 struct device_node *np)
+{
+	struct property *prop, *propn;
+	struct property *propref, *proprefn;
+	struct label *l, *ln;
+	struct device_node *child, *childn, *childref, *childrefn;
+	bool found;
+	char namebuf[2][NODE_FULLNAME_MAX];
+
+	/* add label to noderef */
+	list_for_each_entry_safe(l, ln, &np->labels, node)
+		label_add(t, npref, l->label);
+
+	list_for_each_entry_safe(prop, propn, &np->properties, node) {
+
+		tree_debug(t, "using delete property %s @%s\n",
+			prop->name,
+			dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])));
+
+		if (prop->is_delete) {
+			list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
+				if (strcmp(propref->name, prop->name))
+					continue;
+
+				tree_debug(t, "deleting property %s at %s\n",
+					propref->name,
+					dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
+
+				prop_del(t, propref);
+			}
+
+			list_for_each_entry_safe(childref, childrefn, &npref->children, node) {
+				if (strcmp(childref->name, prop->name))
+					continue;
+
+				tree_debug(t, "deleting child %s at %s\n",
+					dn_fullname(childref, &namebuf[0][0], sizeof(namebuf[0])),
+					dn_fullname(npref, &namebuf[1][0], sizeof(namebuf[1])));
+
+				node_free(t, childref);
+			}
+
+			prop_del(t, prop);
+			continue;
+		}
+
+		found = false;
+		list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
+			if (!strcmp(propref->name, prop->name)) {
+				found = true;
+				break;
+			}
+		}
+
+		list_del(&prop->node);
+		prop->np = npref;
+
+		/* if found, free old copy */
+		if (found) {
+			/* carefully put it at the same point in the list */
+			list_add(&prop->node, &propref->node);
+			list_del(&propref->node);
+			propref->np = NULL;
+			prop_del(t, propref);
+		} else /* move property over to new parent */
+			list_add_tail(&prop->node, &npref->properties);
+	}
+
+	list_for_each_entry_safe(child, childn, &np->children, node) {
+
+		/* find matching child */
+		found = false;
+		list_for_each_entry(childref, &npref->children, node) {
+			if (!strcmp(childref->name, child->name)) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			/* child at ref does not exist, just move self over */
+			list_del(&child->node);
+			child->parent = npref;
+			list_add_tail(&child->node, &npref->children);
+			sanitize_base(t, child);
+		} else
+			tree_apply_ref_node(t, childref, child);
+
+	}
 }

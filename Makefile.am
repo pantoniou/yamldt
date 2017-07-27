@@ -10,7 +10,8 @@ bin_PROGRAMS = yamldt intexpr
 
 yamldt_SOURCES = yamldt.c yamldt.h list.h fdt.h libfdt_env.h \
 		 tree.c tree.h \
-		 dtb.c dtb.h \
+		 dtbgen.c dtbgen.h \
+		 yamlgen.c yamlgen.h \
 		 utils.c utils.h \
 		 syexpr.c syexpr.h
 yamldt_LDADD = -lm

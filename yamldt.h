@@ -50,7 +50,8 @@
 #include "fdt.h"
 
 #include "tree.h"
-#include "dtb.h"
+#include "dtbgen.h"
+#include "yamlgen.h"
 
 /* should be enough */
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
@@ -61,6 +62,7 @@ struct yaml_dt_state {
 	const char *output_file;
 	bool debug;
 	bool compatible;	/* bit exact mode */
+	bool yaml;		/* generate YAML */
 	FILE *input;
 	FILE *output;
 
@@ -81,6 +83,10 @@ struct yaml_dt_state {
 	yaml_event_t *current_event;
 	yaml_mark_t current_start_mark;
 	yaml_mark_t current_end_mark;
+	yaml_mark_t last_map_start_mark;
+	yaml_mark_t last_map_end_mark;
+	yaml_mark_t last_alias_start_mark;
+	yaml_mark_t last_alias_end_mark;
 
 	struct device_node *current_np;
 	bool current_np_isref;
@@ -97,8 +103,12 @@ struct yaml_dt_state {
 	/* tree build state */
 	struct tree tree;
 
-	/* DTB generation state */
-	struct dtb_emit_state dtb;
+	union {
+		/* DTB generation state */
+		struct dtb_emit_state dtb;
+		/* YAML generation state */
+		struct yaml_emit_state yamlgen;
+	};
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)
@@ -111,10 +121,22 @@ void dt_fatal(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)))
 		__attribute__ ((noreturn));
 
+void dt_print_at(struct yaml_dt_state *dt,
+		   size_t line, size_t column,
+		   size_t end_line, size_t end_column,
+		   const char *type, const char *fmt, ...)
+		   __attribute__ ((__format__ (__printf__, 7, 0)));
+
 void dt_error_at(struct yaml_dt_state *dt,
 		size_t line, size_t column,
 		size_t end_line, size_t end_column,
-		 const char *fmt, ...)
-		 __attribute__ ((__format__ (__printf__, 6, 0)));
+		const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 6, 0)));
+
+void dt_warning_at(struct yaml_dt_state *dt,
+		   size_t line, size_t column,
+		   size_t end_line, size_t end_column,
+		   const char *fmt, ...)
+		   __attribute__ ((__format__ (__printf__, 6, 0)));
 
 #endif

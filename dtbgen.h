@@ -1,5 +1,5 @@
 /*
- * dtb.h - DTB generation header
+ * dtbgen.h - DTB generation header
  *
  * YAML to DTB generator
  *
@@ -33,8 +33,8 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef DTB_H
-#define DTB_H
+#ifndef DTBGEN_H
+#define DTBGEN_H
 
 #include <stdint.h>
 #include <sys/time.h>

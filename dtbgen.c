@@ -1,5 +1,5 @@
 /*
- * dtb.c - DTB generation
+ * dtbgen.c - DTB generation
  *
  * (C) Copyright Pantelis Antoniou <pantelis.antoniou@konsulko.com>
  *
@@ -49,9 +49,9 @@
 
 #include "yamldt.h"
 
-static void dt_dump(struct yaml_dt_state *dt);
+static void dtb_dump(struct yaml_dt_state *dt);
 
-static void __prop_set_data(struct property *prop, bool append,
+static void prop_set_data(struct property *prop, bool append,
 			    const void *data, int size,
 			    bool append_zero, int offset)
 {
@@ -90,19 +90,19 @@ static void __prop_set_data(struct property *prop, bool append,
 	}
 }
 
-static void __prop_append(struct property *prop, const void *data,
+static void prop_append(struct property *prop, const void *data,
 			  int size, bool append_zero)
 {
-	__prop_set_data(prop, true, data, size, append_zero, -1);
+	prop_set_data(prop, true, data, size, append_zero, -1);
 }
 
-static void __prop_replace(struct property *prop, const void *data,
+static void prop_replace(struct property *prop, const void *data,
 			   int size, int offset)
 {
-	__prop_set_data(prop, false, data, size, false, offset);
+	prop_set_data(prop, false, data, size, false, offset);
 }
 
-static void __dn_append_auto_properties(struct yaml_dt_state *dt, struct device_node *np)
+static void append_auto_properties(struct yaml_dt_state *dt, struct device_node *np)
 {
 	struct device_node *child;
 	struct property *prop;
@@ -113,22 +113,22 @@ static void __dn_append_auto_properties(struct yaml_dt_state *dt, struct device_
 
 		phandle = cpu_to_fdt32(np->phandle);
 
-		__prop_append(prop, &phandle, sizeof(fdt32_t), false);
+		prop_append(prop, &phandle, sizeof(fdt32_t), false);
 
 		prop->np = np;
 		list_add_tail(&prop->node, &np->properties);
 	}
 
 	list_for_each_entry(child, &np->children, node)
-		__dn_append_auto_properties(dt, child);
+		append_auto_properties(dt, child);
 }
 
-static void dt_append_auto_properties(struct yaml_dt_state *dt)
+static void dtb_append_auto_properties(struct yaml_dt_state *dt)
 {
-	__dn_append_auto_properties(dt, tree_root(to_tree(dt)));
+	append_auto_properties(dt, tree_root(to_tree(dt)));
 }
 
-static void __dn_add_symbols(struct yaml_dt_state *dt, struct device_node *np,
+static void add_symbols(struct yaml_dt_state *dt, struct device_node *np,
 		struct device_node **symbols_np)
 {
 	struct device_node *child;
@@ -148,7 +148,7 @@ static void __dn_add_symbols(struct yaml_dt_state *dt, struct device_node *np,
 		dn_fullname(np, namebuf, sizeof(namebuf));
 		assert(strlen(namebuf) > 0);
 
-		__prop_append(prop, namebuf, strlen(namebuf), true);
+		prop_append(prop, namebuf, strlen(namebuf), true);
 
 		/* if it doesn't exist add __symbols__ */
 		if (!*symbols_np) {
@@ -165,15 +165,15 @@ static void __dn_add_symbols(struct yaml_dt_state *dt, struct device_node *np,
 		/* do not enter the generated node */
 		if (*symbols_np == child)
 			continue;
-		__dn_add_symbols(dt, child, symbols_np);
+		add_symbols(dt, child, symbols_np);
 	}
 }
 
-static void dt_add_symbols(struct yaml_dt_state *dt)
+static void dtb_add_symbols(struct yaml_dt_state *dt)
 {
 	struct device_node *symbols_np = NULL;
 
-	__dn_add_symbols(dt, tree_root(to_tree(dt)), &symbols_np);
+	add_symbols(dt, tree_root(to_tree(dt)), &symbols_np);
 }
 
 static int parse_int(const char *str, int len, unsigned long long *valp, bool *unsignedp)
@@ -379,7 +379,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	}
 
 	ref->offset = prop->size;
-	__prop_append(prop, data, size, append_0);
+	prop_append(prop, data, size, append_0);
 
 	if (is_delete)
 		prop->is_delete = is_delete;
@@ -389,7 +389,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	np = prop->np;
 }
 
-static void __dn_resolve(struct yaml_dt_state *dt, struct device_node *npt,
+static void resolve(struct yaml_dt_state *dt, struct device_node *npt,
 		  unsigned int flags)
 {
 	struct device_node *child;
@@ -443,7 +443,7 @@ static void __dn_resolve(struct yaml_dt_state *dt, struct device_node *npt,
 			assert (prop->size >= ref->offset + sizeof(fdt32_t));
 
 			phandlet = cpu_to_fdt32(np->phandle);
-			__prop_replace(prop, &phandlet, sizeof(fdt32_t), ref->offset);
+			prop_replace(prop, &phandlet, sizeof(fdt32_t), ref->offset);
 
 			dt_debug(dt, "resolved property %s at @%s (%u)\n",
 				prop->name,
@@ -453,10 +453,10 @@ static void __dn_resolve(struct yaml_dt_state *dt, struct device_node *npt,
 	}
 
 	list_for_each_entry(child, &npt->children, node)
-		__dn_resolve(dt, child, flags);
+		resolve(dt, child, flags);
 }
 
-static void dt_handle_special_properties(struct yaml_dt_state *dt)
+static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 {
 	struct property *prop, *propn;
 	struct ref *ref;
@@ -484,7 +484,7 @@ static void dt_handle_special_properties(struct yaml_dt_state *dt)
 			prop->np = NULL;
 
 			if (dt->dtb.memreserve_prop) {
-				__prop_append(dt->dtb.memreserve_prop, prop->data,
+				prop_append(dt->dtb.memreserve_prop, prop->data,
 					      prop->size, false);
 				prop_free(to_tree(dt), prop);
 			} else
@@ -493,7 +493,7 @@ static void dt_handle_special_properties(struct yaml_dt_state *dt)
 	}
 }
 
-static void dt_resolve_phandle_refs(struct yaml_dt_state *dt)
+static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 {
 	struct device_node *root;
 
@@ -502,128 +502,16 @@ static void dt_resolve_phandle_refs(struct yaml_dt_state *dt)
 	root = tree_root(to_tree(dt));
 
 	if (dt->compatible) {
-		__dn_resolve(dt, root, RF_CONTENT);
-		__dn_resolve(dt, root, RF_PHANDLES);
-		__dn_resolve(dt, root, RF_LABELS);
-		__dn_resolve(dt, root, RF_PATHS);
+		resolve(dt, root, RF_CONTENT);
+		resolve(dt, root, RF_PHANDLES);
+		resolve(dt, root, RF_LABELS);
+		resolve(dt, root, RF_PATHS);
 	} else
-		__dn_resolve(dt, root, RF_CONTENT | RF_LABELS |
-				       RF_PHANDLES | RF_PATHS);
+		resolve(dt, root, RF_CONTENT | RF_LABELS |
+				  RF_PHANDLES | RF_PATHS);
 }
 
-/* clear any crud that shouldn't be part of the base tree */
-void __dn_sanitize_base(struct yaml_dt_state *dt, struct device_node *np)
-{
-	struct device_node *child;
-	struct property *prop, *propn;
-	char namebuf[NODE_FULLNAME_MAX];
-
-	list_for_each_entry_safe(prop, propn, &np->properties, node) {
-		if (prop->is_delete || !strcmp(prop->name, "~")) {
-			dt_debug(dt, "removing property %s @%s\n",
-				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
-			prop_del(to_tree(dt), prop);
-		}
-	}
-
-	list_for_each_entry(child, &np->children, node)
-		__dn_sanitize_base(dt, child);
-}
-
-void __dn_apply_ref_node(struct yaml_dt_state *dt,
-		struct device_node *npref,
-		struct device_node *np)
-{
-	struct property *prop, *propn;
-	struct property *propref, *proprefn;
-	struct label *l, *ln;
-	struct device_node *child, *childn, *childref, *childrefn;
-	bool found;
-	char namebuf[2][NODE_FULLNAME_MAX];
-
-	/* add label to noderef */
-	list_for_each_entry_safe(l, ln, &np->labels, node)
-		label_add(to_tree(dt), npref, l->label);
-
-	list_for_each_entry_safe(prop, propn, &np->properties, node) {
-
-		if (prop->is_delete) {
-
-			dt_debug(dt, "using delete property %s @%s\n",
-				prop->name,
-				dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])));
-
-			list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
-				if (strcmp(propref->name, prop->name))
-					continue;
-				dt_debug(dt, "deleting property %s at %s\n",
-					propref->name,
-					dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
-				prop_del(to_tree(dt), propref);
-			}
-
-			list_for_each_entry_safe(childref, childrefn, &npref->children, node) {
-				if (strcmp(childref->name, prop->name))
-					continue;
-
-				dt_debug(dt, "deleting child %s at %s\n",
-					dn_fullname(childref, &namebuf[0][0], sizeof(namebuf[0])),
-					dn_fullname(npref, &namebuf[1][0], sizeof(namebuf[1])));
-				node_free(to_tree(dt), childref);
-			}
-
-			prop_del(to_tree(dt), prop);
-			continue;
-		}
-
-		found = false;
-		list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
-			if (!strcmp(propref->name, prop->name)) {
-				found = true;
-				break;
-			}
-		}
-
-		list_del(&prop->node);
-		prop->np = npref;
-
-		/* if found, free old copy */
-		if (found) {
-			/* carefully put it at the same point in the list */
-			list_add(&prop->node, &propref->node);
-			list_del(&propref->node);
-			propref->np = NULL;
-			prop_del(to_tree(dt), propref);
-		} else /* move property over to new parent */
-			list_add_tail(&prop->node, &npref->properties);
-	}
-
-	list_for_each_entry_safe(child, childn, &np->children, node) {
-
-		/* find matching child */
-		found = false;
-		list_for_each_entry(childref, &npref->children, node) {
-			if (!strcmp(childref->name, child->name)) {
-				found = true;
-				break;
-			}
-		}
-
-		/* if found, apply recursively */
-		if (found) {
-			__dn_apply_ref_node(dt, childref, child);
-			continue;
-		}
-
-		/* child at ref does not exist, just move self over */
-		list_del(&child->node);
-		child->parent = npref;
-		list_add_tail(&child->node, &npref->children);
-		__dn_sanitize_base(dt, child);
-	}
-}
-
-static void dt_apply_ref_nodes(struct yaml_dt_state *dt)
+static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 {
 	struct device_node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
@@ -634,10 +522,13 @@ static void dt_apply_ref_nodes(struct yaml_dt_state *dt)
 		/* lookup for node (skip *) */
 		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
 				strlen(np->name + 1));
-		if (npref == NULL)
-			dt_fatal(dt, "reference to unknown label %s\n",
-					np->name + 1);
-		__dn_apply_ref_node(dt, npref, np);
+		if (npref == NULL) {
+			dt_error_at(dt, np->line, np->column,
+				    np->end_line, np->end_column,
+				    "reference to unknown label %s\n",
+				    np->name + 1);
+		} else
+			tree_apply_ref_node(to_tree(dt), npref, np);
 
 		/* free everything now */
 		node_free(to_tree(dt), np);
@@ -723,7 +614,7 @@ static void dt_emit_str(struct yaml_dt_state *dt,
 		     align ? sizeof(fdt32_t) : 0);
 }
 
-static int __dn_count_properties(struct yaml_dt_state *dt, struct device_node *np)
+static int count_properties(struct yaml_dt_state *dt, struct device_node *np)
 {
 	struct property *prop;
 	struct device_node *child;
@@ -734,12 +625,12 @@ static int __dn_count_properties(struct yaml_dt_state *dt, struct device_node *n
 		count++;
 
 	list_for_each_entry(child, &np->children, node)
-		count += __dn_count_properties(dt, child);
+		count += count_properties(dt, child);
 
 	return count;
 }
 
-static int __dn_fill_prop_table(struct yaml_dt_state *dt, struct device_node *np,
+static int fill_prop_table(struct yaml_dt_state *dt, struct device_node *np,
 			   struct property **propp, int pos)
 {
 	struct property *prop;
@@ -749,7 +640,7 @@ static int __dn_fill_prop_table(struct yaml_dt_state *dt, struct device_node *np
 		propp[pos++] = prop;
 
 	list_for_each_entry(child, &np->children, node)
-		pos = __dn_fill_prop_table(dt, child, propp, pos);
+		pos = fill_prop_table(dt, child, propp, pos);
 
 	return pos;
 }
@@ -765,7 +656,7 @@ static int qsort_proplencmp(const void *arg1, const void *arg2)
 	return len1 > len2 ? -1 : (len1 < len2 ? 1 : 0);
 }
 
-static void dt_build_string_table_minimal(struct yaml_dt_state *dt)
+static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 {
 	struct device_node *root;
 	int i, j, count, l1, l2;
@@ -774,14 +665,14 @@ static void dt_build_string_table_minimal(struct yaml_dt_state *dt)
 
 	root = tree_root(to_tree(dt));
 	/* count how many properties we have and get an array of pointers */
-	count = __dn_count_properties(dt, root);
+	count = count_properties(dt, root);
 	if (count == 0)
 		return;
 
 	propt = malloc(count * sizeof(*propt));
 	assert(propt);
 	memset(propt, 0, count * sizeof(*propt));
-	__dn_fill_prop_table(dt, root, propt, 0);
+	fill_prop_table(dt, root, propt, 0);
 
 	dt_debug(dt, "#%d properties found\n", count);
 
@@ -825,7 +716,7 @@ static void dt_build_string_table_minimal(struct yaml_dt_state *dt)
 	free(propt);
 }
 
-static void __dn_build_string_table_compatible(struct yaml_dt_state *dt,
+static void build_string_table_compatible(struct yaml_dt_state *dt,
 		struct device_node *np)
 {
 	struct device_node *child;
@@ -861,23 +752,23 @@ static void __dn_build_string_table_compatible(struct yaml_dt_state *dt,
 	}
 
 	list_for_each_entry(child, &np->children, node)
-		__dn_build_string_table_compatible(dt, child);
+		build_string_table_compatible(dt, child);
 }
 
-static void dt_build_string_table_compatible(struct yaml_dt_state *dt)
+static void dtb_build_string_table_compatible(struct yaml_dt_state *dt)
 {
-	__dn_build_string_table_compatible(dt, tree_root(to_tree(dt)));
+	build_string_table_compatible(dt, tree_root(to_tree(dt)));
 }
 
-static void dt_build_string_table(struct yaml_dt_state *dt)
+static void dtb_build_string_table(struct yaml_dt_state *dt)
 {
 	if (!dt->compatible)
-		dt_build_string_table_minimal(dt);
+		dtb_build_string_table_minimal(dt);
 	else
-		dt_build_string_table_compatible(dt);
+		dtb_build_string_table_compatible(dt);
 }
 
-void __dn_flatten_node(struct yaml_dt_state *dt, struct device_node *np)
+static void flatten_node(struct yaml_dt_state *dt, struct device_node *np)
 {
 	struct device_node *child;
 	struct property *prop;
@@ -897,14 +788,14 @@ void __dn_flatten_node(struct yaml_dt_state *dt, struct device_node *np)
 	}
 
 	list_for_each_entry(child, &np->children, node)
-		__dn_flatten_node(dt, child);
+		flatten_node(dt, child);
 
 	dt_emit_32(dt, dt_struct, FDT_END_NODE, false);
 }
 
-static void dt_flatten_node(struct yaml_dt_state *dt)
+static void dtb_flatten_node(struct yaml_dt_state *dt)
 {
-	__dn_flatten_node(dt, tree_root(to_tree(dt)));
+	flatten_node(dt, tree_root(to_tree(dt)));
 	dt_emit_32(dt, dt_struct, FDT_END, false);
 }
 
@@ -971,18 +862,18 @@ void dtb_emit(struct yaml_dt_state *dt)
 		     size_mem_rsvmap;
 	int size;
 
-	dt_handle_special_properties(dt);
-	dt_apply_ref_nodes(dt);
-	dt_resolve_phandle_refs(dt);
+	dtb_handle_special_properties(dt);
+	dtb_apply_ref_nodes(dt);
+	dtb_resolve_phandle_refs(dt);
 
-	dt_append_auto_properties(dt);
-	dt_add_symbols(dt);
+	dtb_append_auto_properties(dt);
+	dtb_add_symbols(dt);
 
 	if (dt->debug)
-		dt_dump(dt);
+		dtb_dump(dt);
 
-	dt_build_string_table(dt);
-	dt_flatten_node(dt);
+	dtb_build_string_table(dt);
+	dtb_flatten_node(dt);
 
 	/* generate reserve entry */
 	if ((prop = dt->dtb.memreserve_prop) && (size = prop->size) > 0)
@@ -1142,7 +1033,7 @@ static void __dn_dump(struct yaml_dt_state *dt, struct device_node *np, int dept
 	printf("%*s};\n", depth * 4, "");
 }
 
-void dt_dump(struct yaml_dt_state *dt)
+static void dtb_dump(struct yaml_dt_state *dt)
 {
 	struct device_node *np;
 	struct list_head *ref_nodes;
