@@ -1,24 +1,73 @@
 # yamldt
 
-A YAML to DT blob generator/compiler.
+A YAML to DT blob generator/compiler, utilizing a YAML schema that
+is functionaly equivalent to DTS and supports all DTS features.
 
-`yamldl` parses a device tree description file in YAML and outputs
-a (bit-exact if the -C option is used) device tree blob.
+`yamldl` parses a device tree description (source) file in YAML format
+and outputs a (bit-exact if the -C option is used) device tree blob.
+
+Using the -y option it is also capable to generate a raw YAML file
+that is appriate to use with standard YAML parsing tools like
+schema checkers.
 
 ## Rationale
 
-YAML is a good fit as a DTS alternative. YAML is a human-readable
-data serialization language, and is expressive enough to cover all
-DTS source features.
+A DT aware YAML schema is a good fit as a DTS syntax alternative.
 
-The parsers are very mature, it is wide-spread and schema validation
-tools are available. Data in YAML can easily be converted to/form other
-forms that particular tools that we may use in the future.
+YAML is a human-readable data serialization language, and is expressive
+enough to cover all DTS source features.
+
+Simple YAML file are just key value pairs that are very easy to parse, even
+without using a formal YAML parser. For instance YAML in restricted
+environments may simple be appending a few lines of text in a given YAML file.
+
+The parsers of YAML are very mature, as it has been released in 2001.
+It is in wide-spread use and schema validation tools are available.
+YAML support is available for every major programming language.
+
+Projects currently use YAML as their configuration format:
+
+1. [github](https://github.com/github/linguist/blob/master/lib/linguist/languages.yml)
+2. [openstack](https://github.com/openstack/governance/blob/master/reference/projects.yaml)
+3. [jenkins](https://wiki.jenkins.io/display/JENKINS/YAML+Project+Plugin)
+4. [yedit](https://github.com/oyse/yedit/wiki)
+
+Data in YAML can easily be converted to/form other format that a
+particular tool that we may use in the future understands.
 
 More importantly YAML offers (an optional) type information for each
 data, which is IMHO crucial for thorough validation and checking
 against device tree bindings (when they will be converted to a
 machine readable format, preferably YAML).
+
+For example that will allow automatic binding (i.e. type) checking
+and type promotion using something similar to the following:
+
+```yaml
+foo:
+ compatible: "corp,foo"
+ status: "okay"
+ thingamagic: 12
+```
+
+If the binding for "corp,foo" contains an entry
+
+```yaml
+title: Corp FOO
+
+id: "corp,foo"
+
+properties:
+  thingamagic:
+   required: true
+   type: int64
+```
+
+A warning (or an automatic promotion of the type) may be generated.
+
+In a similar manner warnings (or errors) may be generated for mismatched
+references to nodes that are not valid, in a generic manner that is
+part of the design rule check cycle of a system design.
 
 ## Installation
 
@@ -34,14 +83,64 @@ as expected.
 
 # Usage
 
+The `yamldt` options available are:
+
 ```
 yamldt [options] <input-file>
  options are:
-   -o, --output	Output DTB file
+   -o, --output         Output DTB or YAML file
    -d, --debug		Debug messages
+   -y, --yaml           Generate YAML output
    -C, --compatible	Bit exact compatibility mode
    -h, --help		Help
    -v, --version	Display version
+```
+
+Given a source file in YAML `foo.yaml` you generate a dtb file
+with
+
+```yaml
+# foo.yaml
+foo: &foo
+  bar: true
+  baz:
+   - 12
+   - 8
+   - *foo
+  frob: [ "hello", "there" ]
+```
+
+Process with yamldt
+
+```
+$ yamldt -o foo.dtb foo.yaml
+$ ls -l foo.dtb
+-rw-rw-r-- 1 panto panto 153 Jul 27 18:50 foo.dtb
+$ fdtdump foo.dtb
+/dts-v1/;
+// magic:		0xd00dfeed
+// totalsize:		0xe1 (225)
+// off_dt_struct:	0x38
+// off_dt_strings:	0xc8
+// off_mem_rsvmap:	0x28
+// version:		17
+// last_comp_version:	16
+// boot_cpuid_phys:	0x0
+// size_dt_strings:	0x19
+// size_dt_struct:	0x90
+
+/ {
+    foo {
+        bar;
+        baz = <0x0000000c 0x00000008 0x00000001>;
+        frob = "hello", "there";
+        phandle = <0x00000001>;
+    };
+    __symbols__ {
+        foo = "/foo";
+    };
+};
+
 ```
 
 ## Test suite
@@ -55,17 +154,84 @@ https://github.com/pantoniou/dtc/tree/yaml
 
 The test-suite compiles all the DTS files in the Linux kernel for
 all arches to both YAML and dtb format. The generated YAML file
-is compiled again with yamldt using the compatible option to a
+is compiled again with `yamldt` using the compatible option to a
 different dtb file.
 
 The resulting dtb files are bit-exact.
 
+# Workflow
+
+It is expected that the first thing a user of `yamldt` would want
+to do is to convert an existing DTS configuration to YAML.
+
+Using a patched DTC as mentioned earlier you can generate a raw
+YAML file that functionally generates the same (bitexact with the
+-C option) DTB file.
+
+We're going to use as an example the beaglebone black and the
+am335x-boneblack.dts source as located in the port/ directory.
+
+The DTS source files in the kernel are using the C preprocessor
+so it's imperative to use it as a first pass (note you can pipe
+the output to cut down on the steps).
+
+```
+$ cpp -I ./ -I ../../port -I ../../include \
+-I ../../include/dt-bindings/input -nostdinc \
+-undef -x assembler-with-cpp -D__DTS__ \
+am335x-boneblack.dts > am335x-boneblack.cpp.dts
+```
+
+Compile this file with DTC to generate a DTB file, we'll use this
+as a reference.
+
+```
+$ dtc -@ -q -I dts -O dtb am335x-boneblack.cpp.dts \
+-o am335x-boneblack.dtc.dtb
+```
+
+Compile the same file with the patched DTC but now select a YAML
+output option.
+
+```
+$ dtc -@ -q -I dts -O yaml am335x-boneblack.cpp.dts \
+-o am335x-boneblack.dtc.yaml
+```
+
+This (raw) yaml file is functionally identical to the original DTS
+and parses down to the same exact file using the -C option.
+
+```
+$ yamldt -C am335x-boneblack.dtc.yaml -o am335x-boneblack.dtb
+$ ls -l *.dtb
+-rw-rw-r-- 1 panto panto 50045 Jul 27 19:10 am335x-boneblack.dtb
+-rw-rw-r-- 1 panto panto 50045 Jul 27 19:07 am335x-boneblack.dtc.dtb
+$ md5sum *.dtb
+3bcf838dc9c32c196f66870b7e6dfe81  am335x-boneblack.dtb
+3bcf838dc9c32c196f66870b7e6dfe81  am335x-boneblack.dtc.dtb
+```
+
+Compiling without the -C option resulting in the same functional file
+but is slightly smaller due to better string table optimization.
+
+```
+$ yamldt am335x-boneblack.dtc.yaml -o am335x-boneblack.dtb
+$ ls -l *.dtb
+-rw-rw-r-- 1 panto panto 50003 Jul 27 19:12 am335x-boneblack.dtb
+-rw-rw-r-- 1 panto panto 50045 Jul 27 19:07 am335x-boneblack.dtc.dtb
+```
+
+You can now start the conversion to YAML using the same file
+structure as the DTS files but with yaml instead of DTS.
+Large parts of the new YAML source can be copied verbatim from
+m335x-boneblack.dtc.yaml file.
+
 ## Notes on DTS to DTS conversion
 
 The conversion from DTS is straight forward:
-    
+
 For example:
-    
+
 ```
 /* foo.dts */
 / {
@@ -75,7 +241,7 @@ For example:
 	ref: refnode { baz; };
 };
 ```
-    
+
 ```yaml
 # foo.yaml
 foo: "bar"
@@ -84,12 +250,12 @@ phandle-ref: [ *ref 1 ]
 refnode: &ref
   baz: true
 ```
-    
+
 Major differences between DTS & YAML:
-    
+
 * YAML is using # as a comment marker, therefore properties with
   a # prefix get converted to explicit string literals:
-    
+
 ```
 #cells = <0>;
 ```
@@ -98,10 +264,10 @@ to YAML
 ```yaml
 "#cells": 0
 ```
-    
+
 * YAML is indentation sensitive, but it is a JSON superset.
   Therefore the following are equivalent:
-    
+
 ```yaml
 foo: [ 1, 2 ]
 ```
@@ -110,44 +276,44 @@ foo:
  - 1
  - 2
 ```
-    
- * The labels in DTS are defined and used as
-    
+
+* The labels in DTS are defined and used as
+
 ```
 foo: node { baz; };
 bar = <&foo>;
 ```
-    
+
 In YAML the equivalent method is called anchors and are defined
 as follows:
-    
+
 ```yaml
 node: &foo
   baz: true
 bar: *foo
 ```
-    
+
 * Explicit tags in YAML are using !, so the following
-    
+
 ```
 mac = [ 0 1 2 3 4 5 ];
 ```
-    
+
 Is used like this in YAML
-    
+
 ```yaml
 mac: !int8 [ 0, 1, 2, 3, 4, 5 ]
 ```
-    
+
 * DTS is using spaces to seperate array elements, YAML is either using
   indentation or commas in JSON form.
-    
+
 ```
 pinmux = <0x00 0x01>;
 ```
-    
+
 In YAML:
-    
+
 ```yaml
 pinmux:
   - 0x00
@@ -158,7 +324,7 @@ or
 ```yaml
 pinmux: [ 0x00, 0x01 ]
 ```
-    
+
 * Path references (<&/foo>) automatically are converted to pseudo
   YAML anchors (of the form yaml\_pseudo\_\_n\_\_)
 
@@ -168,12 +334,43 @@ pinmux: [ 0x00, 0x01 ]
 };
 ref = <&/foo>;
 ```
-    
+
 In YAML:
-    
+
 ```yaml
 foo: &yaml_pseudo__0__
 ref: *foo
+```
+
+* Integer expression evaluation similar in manner that the CPP preprocessor
+  performs is available. This is required in order for macros defined to
+  work. For example:
+
+  Given the following two files
+
+```c
+/* add.h */
+#define ADD(x, y) ((x) + (y))
+```
+
+```yaml
+# macro-use.yaml
+
+#include "add.h"
+
+result: ADD(10, 12)
+```
+
+  The output after the cpp preprocessor pass:
+
+```yaml
+result: ((10) + (12))
+```
+
+  Parsing with `yamldt` to DTB will generate a property
+
+```
+result = <22>;
 ```
 
 ## Example conversion
@@ -620,7 +817,7 @@ memory@80000000:
 chosen:
   stdout-path: !pathref uart0
 
-leds: 
+leds:
   pinctrl-names: "default"
   pinctrl-0: *user_leds_s0
   compatible: "gpio-leds"
@@ -739,7 +936,7 @@ fixedregulator0: &vmmcsd_fixed
   pinctrl-0: *uart0_pins
   status: "okay"
 
-*usb:  
+*usb:
   status: "okay"
 
 *usb_ctrl_mod:
