@@ -100,7 +100,7 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 	memset(ref, 0, sizeof(*ref));
 
 	/* try to avoid copy if the pointer given is in read data */
-	if (p < dt->input_file_contents || p >= dt->input_file_contents) {
+	if (data < dt->input_content || data >= dt->input_content + dt->input_size) {
 		p = malloc(len);
 		assert(p);
 		memcpy(p, data, len);
@@ -136,7 +136,7 @@ static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 		free(ref->xtag);
 
 	p = (void *)ref->data;
-	if (p < dt->input_file_contents || p >= dt->input_file_contents)
+	if (p < dt->input_content || p >= dt->input_content + dt->input_size)
 		free(p);
 
 	memset(ref, 0, sizeof(*ref));
@@ -243,7 +243,7 @@ static const struct tree_ops yaml_tree_ops = {
 	.debugf		= yaml_dt_tree_debugf,
 };
 
-void dt_start(struct yaml_dt_state *dt)
+static void dt_stream_start(struct yaml_dt_state *dt)
 {
 	/* initialize */
 	if (dt->map_key) {
@@ -263,7 +263,7 @@ void dt_start(struct yaml_dt_state *dt)
 	tree_init(to_tree(dt), &yaml_tree_ops);
 }
 
-void dt_end(struct yaml_dt_state *dt)
+static void dt_stream_end(struct yaml_dt_state *dt)
 {
 	if (dt->map_key) {
 		free(dt->map_key);
@@ -282,61 +282,153 @@ void dt_end(struct yaml_dt_state *dt)
 	tree_term(to_tree(dt));
 }
 
-static void read_whole_input_file(struct yaml_dt_state *dt)
+static void dt_document_start(struct yaml_dt_state *dt)
 {
-	void *buf, *readbuf;
-	size_t bufsz, nread, total;
+	if (dt->map_key) {
+		free(dt->map_key);
+		dt->map_key = NULL;
+	}
+	dt->current_np = tree_root(to_tree(dt));
+}
 
-	bufsz = 64 * 1024;	/* 64K default buffer */
+static void dt_document_end(struct yaml_dt_state *dt)
+{
+	if (dt->map_key) {
+		free(dt->map_key);
+		dt->map_key = NULL;
+	}
+}
 
-	buf = malloc(bufsz);
-	assert(buf);
+static int read_input_file(struct yaml_dt_state *dt, const char *file)
+{
+	struct input *in;
+	char *s, *e, *le;
+	size_t bufsz, nread, currline, adv, filesz;
+	FILE *fp;
+	struct stat st;
 
-	readbuf = NULL;
-	total = 0;
-	while ((nread = fread(buf, 1, bufsz, dt->input)) > 0) {
-		if (nread < bufsz && !readbuf) {
-			readbuf = buf;
-			buf = NULL;
-			total = nread;
-			break;
-		}
-		readbuf = realloc(readbuf, total + nread);
-		assert(readbuf);
-		memcpy(readbuf + total, buf, nread);
-		total += nread;
+	if (strcmp(file, "-")) {
+		fp = fopen(file, "rb");
+		if (!fp)
+			return -1;
+	} else {
+		file = "<stdin>";
+		fp = stdin;
 	}
 
-	if (buf)
-		free(buf);
+	in = malloc(sizeof(*in));
+	assert(in);
 
-	dt->input_file_contents = readbuf;
-	dt->input_file_size = total;
+	memset(in, 0, sizeof(*in));
+	in->name = strdup(file);
+	assert(in->name);
+	in->start = dt->input_size;
+
+	/* get the file size if we can */
+	filesz = 0;
+	if (fstat(fileno(fp), &st) != -1 && S_ISREG(st.st_mode))
+		filesz = st.st_size;
+
+	/* for non regular files the advance is 64K */
+	adv = filesz ? filesz : 64 * 1024;
+
+	do {
+		if (dt->input_size >= dt->input_alloc) {
+			dt->input_alloc += adv;
+			dt->input_content = realloc(dt->input_content,
+						    dt->input_alloc);
+			assert(dt->input_content);
+		}
+
+		s = dt->input_content + in->start + in->size;
+		bufsz = dt->input_alloc - dt->input_size;
+
+		nread = fread(s, 1, bufsz, fp);
+		if (nread <= 0 && ferror(fp))
+			return -1;
+		dt->input_size += nread;
+		in->size += nread;
+
+		/* avoid extra calls to fread */
+		if (filesz && in->size >= filesz)
+			break;
+
+	} while (nread >= bufsz);
+
+	dt_debug(dt, "%s: read %zd bytes @%zd\n",
+			in->name, in->size, in->start);
+
+	s = dt->input_content + in->start;
+	e = s + in->size;
+
+	in->start_line = dt->input_lines;
+
+	currline = 0;
+	while (s < e) {
+		le = strchr(s, '\n');
+		currline++;
+		if (!le)
+			break;
+		s = le + 1;
+	}
+
+	in->lines = currline;
+	dt->input_lines += currline;
+
+	dt_debug(dt, "%s: has %zd lines starting at line @%zd\n",
+			in->name, in->lines, in->start_line);
+
+	list_add_tail(&in->node, &dt->inputs);
+
+	fclose(fp);
+
+	return 0;
+}
+
+static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
+{
+	int len = strlen(marker);
+	bool ignore_first_newline;
+	char c, *s;
+
+	s = dt->input_content + dt->input_size;
+	ignore_first_newline = dt->input_size > 0 && *s != '\n' && *marker == '\n';
+
+	if (dt->input_size + len > dt->input_alloc) {
+		dt->input_alloc += len;
+		dt->input_content = realloc(dt->input_content, dt->input_alloc);
+		assert(dt->input_content);
+	}
+	memcpy(dt->input_content + dt->input_size, marker, len);
+	dt->input_size += len;
+
+	while ((c = *marker++) != '\0') {
+		if (c == '\n' && !ignore_first_newline)
+			dt->input_lines++;
+		ignore_first_newline = false;
+	}
 }
 
 int dt_setup(struct yaml_dt_state *dt,
-		const char *input_file,
+		char * const *input_file, int input_file_count,
 		const char *output_file,
-		bool debug, bool compatible,
-		bool yaml)
+		bool debug, bool compatible, bool yaml)
 {
+	int i, ret;
+
 	memset(dt, 0, sizeof(*dt));
 
-	dt->input_file = input_file;
+	if (!yaml_parser_initialize(&dt->parser)) {
+		fprintf(stderr, "Could not initialize the parser object\n");
+		return -1;
+	}
+
 	dt->output_file = output_file;
 	dt->debug = debug;
 	dt->compatible = compatible;
 	dt->yaml = yaml;
 
-	if (strcmp(dt->input_file, "-")) {
-		dt->input = fopen(dt->input_file, "rb");
-		if (!dt->input) {
-			fprintf(stderr, "Failed to open %s for input\n",
-					dt->input_file);
-			return -1;
-		}
-	} else
-		dt->input = stdin;
+	INIT_LIST_HEAD(&dt->inputs);
 
 	if (strcmp(dt->output_file, "-")) {
 		dt->output = fopen(dt->output_file, "wb");
@@ -348,19 +440,30 @@ int dt_setup(struct yaml_dt_state *dt,
 	} else
 		dt->output = stdout;
 
-	if (!yaml_parser_initialize(&dt->parser)) {
-		fprintf(stderr, "Could not initialize the parser object\n");
-		return -1;
+	for (i = 0; i < input_file_count; i++) {
+		ret = read_input_file(dt, input_file[i]);
+		if (ret == -1) {
+			fprintf(stderr, "Could not initialize the parser object\n");
+			return -1;
+		}
+		if (i < (input_file_count - 1))
+			append_input_marker(dt, "---\n");
 	}
-	read_whole_input_file(dt);
-	yaml_parser_set_input_string(&dt->parser, dt->input_file_contents,
-				     dt->input_file_size);
+
+#if 0
+	fwrite(dt->input_content, 1, dt->input_size, stdout);
+
+	abort();
+#endif
+
+	yaml_parser_set_input_string(&dt->parser, dt->input_content, dt->input_size);
 
 	return 0;
 }
 
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 {
+	struct input *in, *inn;
 	bool rm_file;
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
@@ -369,16 +472,20 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	if (dt->current_event)
 		yaml_event_delete(dt->current_event);
 
-	if (dt->input && dt->input != stdin)
-		fclose(dt->input);
+	list_for_each_entry_safe(in, inn, &dt->inputs, node) {
+		list_del(&in->node);
+		free(in->name);
+		free(in);
+	}
+
 	if (dt->output && dt->output != stdout)
 		fclose(dt->output);
 
 	yaml_parser_delete(&dt->parser);
 	fflush(stdout);
 
-	if (dt->input_file_contents)
-		free(dt->input_file_contents);
+	if (dt->input_content)
+		free(dt->input_content);
 
 	if (dt->buffer)
 		free(dt->buffer);
@@ -555,6 +662,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	bool found_existing;
 	char *label;
 	char namebuf[NODE_FULLNAME_MAX];
+	int len;
 
 	assert(!dt->current_event);
 	dt->current_event = event;
@@ -565,18 +673,24 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	case YAML_NO_EVENT:
 		break;
 	case YAML_STREAM_START_EVENT:
+		dt_debug(dt, "SSE\n");
+		dt_stream_start(dt);
 		break;
 	case YAML_STREAM_END_EVENT:
-		break;
-	case YAML_DOCUMENT_START_EVENT:
-		dt_start(dt);
-		break;
-	case YAML_DOCUMENT_END_EVENT:
+		dt_debug(dt, "SEV\n");
 		if (!dt->yaml)
 			dtb_emit(dt);
 		else
 			yaml_emit(dt);
-		dt_end(dt);
+		dt_stream_end(dt);
+		break;
+	case YAML_DOCUMENT_START_EVENT:
+		dt_debug(dt, "DSE\n");
+		dt_document_start(dt);
+		break;
+	case YAML_DOCUMENT_END_EVENT:
+		dt_debug(dt, "DEE\n");
+		dt_document_end(dt);
 		break;
 
 	case YAML_MAPPING_START_EVENT:
@@ -587,12 +701,15 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 		/* creating root */
 		if (!dt->map_key && dt->depth == 0) {
-			assert(!tree_root(to_tree(dt)));
 
-			np = node_alloc(to_tree(dt), "", NULL);
+			np = tree_root(to_tree(dt));
 
-			dt->current_np = np;
-			tree_set_root(to_tree(dt), np);
+			if (!np) {
+				np = node_alloc(to_tree(dt), "", NULL);
+				dt->current_np = np;
+				tree_set_root(to_tree(dt), np);
+			}
+
 		} else if (dt->map_key) {
 
 			found_existing = false;
@@ -763,14 +880,26 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		np = dt->current_np;
 
 		if (!dt->map_key) {
-			if (!np)
-				dt_fatal(dt, "Unexpected scalar (is this a YAML input file?)\n");
+			len = event->data.scalar.length;
+
+			if (!np) {
+				/* in case of a corrput file, make sure the output is sane */
+				if (len > 40)
+					len = 40;
+				if (len > sizeof(namebuf) - 1)
+					len = sizeof(namebuf) - 1;
+
+				memcpy(namebuf, event->data.scalar.value, len);
+				namebuf[len] = '\0';
+				dt_fatal(dt, "Unexpected scalar %s (is this a YAML input file?)\n",
+						namebuf);
+			}
 
 			/* TODO check event->data.scalar.style */
-			dt->map_key = malloc(event->data.scalar.length + 1);
+			dt->map_key = malloc(len + 1);
 			assert(dt->map_key);
-			memcpy(dt->map_key, event->data.scalar.value, event->data.scalar.length);
-			dt->map_key[event->data.scalar.length] = '\0';
+			memcpy(dt->map_key, event->data.scalar.value, len);
+			dt->map_key[len] = '\0';
 
 			dt->last_map_start_mark = event->start_mark;
 			dt->last_map_end_mark = event->end_mark;
@@ -895,20 +1024,21 @@ static void get_error_location(struct yaml_dt_state *dt,
 			size_t *linep)
 {
 	char *s, *e, *ls, *le, *p, *pe;
-	size_t curline;
+	size_t currline;
 	size_t lastline, tlastline;
+	struct input *in;
 
 	*filebuf = '\0';
 	*linebuf = '\0';
 
-	s = dt->input_file_contents;
-	e = dt->input_file_contents + dt->input_file_size;
+	s = dt->input_content;
+	e = dt->input_content + dt->input_size;
 
-	curline = 0;
+	currline = 0;
 	ls = s;
 	le = NULL;
 	lastline = 0;
-	while (ls < e && curline < line) {
+	while (ls < e && currline < line) {
 
 		/* get file marker (if it exists) */
 		p = ls;
@@ -937,7 +1067,7 @@ static void get_error_location(struct yaml_dt_state *dt,
 		if (!le)
 			break;
 		ls = le + 1;
-		curline++;
+		currline++;
 	}
 
 	if (*ls) {
@@ -951,11 +1081,20 @@ static void get_error_location(struct yaml_dt_state *dt,
 		linebuf[le - ls] = '\0';
 	}
 
-	/* no markers? */
+	/* no markers? iterate in the input list */
 	if (!*filebuf) {
-		snprintf(filebuf, filebufsize, "%s",
-				strcmp(dt->input_file, "-") ? dt->input_file : "<stdin>");
+
+		filebuf[0] = '\0';
+		list_for_each_entry(in, &dt->inputs, node) {
+			if (line >= in->start_line &&
+			    line <= in->start_line + in->lines) {
+				strncat(filebuf, in->name, filebufsize);
+				lastline = line - in->start_line;
+				break;
+			}
+		}
 		filebuf[filebufsize - 1] = '\0';
+
 		lastline++;
 	}
 
@@ -1001,7 +1140,7 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 		fprintf(stderr, "~");
 	fprintf(stderr, "\n");
 
-	dt_end(dt);
+	dt_stream_end(dt);
 	dt_cleanup(dt, true);
 
 	exit(EXIT_FAILURE);
@@ -1120,7 +1259,7 @@ static struct option opts[] = {
 
 static void help(void)
 {
-	printf("yamldt [options] <input-file>\n"
+	printf("yamldt [options] <input-file> [<input-file>...]\n"
 		" options are:\n"
 		"   -o, --output	Output DTB or YAML file\n"
 		"   -d, --debug		Debug messages\n"
@@ -1136,7 +1275,6 @@ int main(int argc, char *argv[])
 	struct yaml_dt_state dt_state, *dt = &dt_state;
 	int err;
 	int cc, option_index = 0;
-	const char *input_file = NULL;
 	const char *output_file = NULL;
 	bool debug = false, compatible = false, yaml = false;
 
@@ -1176,9 +1314,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Missing input file argument\n");
 		return EXIT_FAILURE;
 	}
-	input_file = argv[optind];
 
-	err = dt_setup(dt, input_file, output_file, debug, compatible, yaml);
+	err = dt_setup(dt, argv + optind, argc - optind,
+			output_file, debug, compatible, yaml);
 	if (err)
 		return EXIT_FAILURE;
 
