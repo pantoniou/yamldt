@@ -511,6 +511,138 @@ static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 				  RF_PHANDLES | RF_PATHS);
 }
 
+static struct ref *get_reg_property_ref(struct yaml_dt_state *dt,
+					struct device_node *np)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	list_for_each_entry(prop, &np->properties, node) {
+		if (!strcmp(prop->name, "reg")) {
+			list_for_each_entry(ref, &prop->refs, node) {
+				if (ref->type == r_scalar)
+					return ref;
+			}
+		}
+	}
+	return NULL;
+}
+
+static void rename_with_unit_address(struct yaml_dt_state *dt,
+				     struct device_node *np)
+{
+	struct ref *ref;
+	char *s;
+	const char *rdata;
+	int len, rlen;
+	char namebuf[NODE_FULLNAME_MAX];
+
+	/* get reg ref */
+	ref = get_reg_property_ref(dt, np);
+
+	/* get probable unit address component */
+	s = strchr(np->name, '@');
+
+	/* do nothing if ref does not exist or unit id does */
+	if (!ref || s)
+		return;
+
+	rdata = ref->data;
+	rlen = ref->len;
+
+	/* unit addresses that are hexadecimal lose the prefix */
+	if (rlen > 2 && rdata[0] == '0' && rdata[1] == 'x') {
+		rlen -= 2;
+		rdata += 2;
+	}
+
+	len = strlen(np->name);
+	s = malloc(len + 1 + rlen + 1);
+	assert(s);
+	memcpy(s, np->name, len);
+	s[len] = '@';
+	memcpy(s + len + 1, rdata, rlen);
+	s[len + 1 + rlen] = '\0';
+	free(np->name);
+	np->name = s;
+
+	dt_warning_at(dt, np->line, np->column,
+		np->end_line, np->end_column,
+		"renamed %s to include unit address\n",
+		dn_fullname(np, namebuf, sizeof(namebuf)));
+}
+
+static bool needs_unit_address_rename(struct yaml_dt_state *dt,
+				      struct device_node *np1,
+				      struct device_node *np2)
+{
+	struct ref *ref1, *ref2;
+	char *s1, *s2;
+
+	if (np1 == np2 || strcmp(np1->name, np2->name))
+		return false;
+
+	/* get reg ref */
+	ref1 = get_reg_property_ref(dt, np1);
+	ref2 = get_reg_property_ref(dt, np2);
+
+	/* get probable unit address component */
+	s1 = strchr(np1->name, '@');
+	s2 = strchr(np2->name, '@');
+
+	return ref1 && ref2 && !s1 && !s2;
+}
+
+static void late_resolve_node(struct yaml_dt_state *dt,
+			      struct device_node *np)
+{
+	struct device_node *child, *childt;
+
+	/* handle renames first */
+	list_for_each_entry(child, &np->children, node) {
+
+		list_for_each_entry(childt, &np->children, node)
+			child->marker = false;
+
+		list_for_each_entry(childt, &np->children, node) {
+			childt->marker = needs_unit_address_rename(dt, child, childt);
+			if (childt->marker)
+				child->marker = true;
+		}
+
+		if (child->marker) {
+			rename_with_unit_address(dt, child);
+			list_for_each_entry(childt, &np->children, node) {
+				if (childt != child && childt->marker) {
+					rename_with_unit_address(dt, childt);
+					childt->marker = false;
+				}
+			}
+			child->marker = false;
+		}
+	}
+
+resolve_again:
+	/* handle refs */
+	list_for_each_entry(child, &np->children, node) {
+		list_for_each_entry(childt, &np->children, node) {
+			if (child == childt || strcmp(child->name, childt->name))
+				continue;
+			tree_apply_ref_node(to_tree(dt), child, childt);
+			node_free(to_tree(dt), childt);
+			goto resolve_again;
+		}
+	}
+
+	list_for_each_entry(child, &np->children, node)
+		late_resolve_node(dt, child);
+}
+
+static void dtb_late_resolve(struct yaml_dt_state *dt)
+{
+	late_resolve_node(dt, tree_root(to_tree(dt)));
+}
+
 static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 {
 	struct device_node *np, *npn, *npref;
@@ -863,6 +995,8 @@ void dtb_emit(struct yaml_dt_state *dt)
 	int size;
 
 	dtb_handle_special_properties(dt);
+	if (dt->late)
+		dtb_late_resolve(dt);
 	dtb_apply_ref_nodes(dt);
 	dtb_resolve_phandle_refs(dt);
 

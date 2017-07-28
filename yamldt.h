@@ -69,6 +69,7 @@ struct yaml_dt_state {
 	bool debug;
 	bool compatible;	/* bit exact mode */
 	bool yaml;		/* generate YAML */
+	bool late;		/* late resolution mode */
 	const char *output_file;
 	FILE *output;
 	void *input_content;

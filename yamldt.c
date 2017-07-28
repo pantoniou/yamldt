@@ -412,7 +412,7 @@ static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
 int dt_setup(struct yaml_dt_state *dt,
 		char * const *input_file, int input_file_count,
 		const char *output_file,
-		bool debug, bool compatible, bool yaml)
+		bool debug, bool compatible, bool yaml, bool late)
 {
 	int i, ret;
 
@@ -427,6 +427,7 @@ int dt_setup(struct yaml_dt_state *dt,
 	dt->debug = debug;
 	dt->compatible = compatible;
 	dt->yaml = yaml;
+	dt->late = late;
 
 	INIT_LIST_HEAD(&dt->inputs);
 
@@ -713,7 +714,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		} else if (dt->map_key) {
 
 			found_existing = false;
-			if (dt->current_np) {
+			if (dt->current_np && !dt->late) {
 				list_for_each_entry(np, &dt->current_np->children, node) {
 					/* match on same name or root */
 					if (!strcmp(dt->map_key, np->name) ||
@@ -1210,7 +1211,6 @@ void dt_warning_at(struct yaml_dt_state *dt,
 		str[--len] = '\0';
 
 	dt_print_at_msg(dt, line, column, end_line, end_column, "warning", str);
-	dt->error_flag = true;
 }
 
 void dt_error_at(struct yaml_dt_state *dt,
@@ -1248,12 +1248,13 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 }
 
 static struct option opts[] = {
-	{ "output",	required_argument, 0, 'o' },
-	{ "debug",	no_argument, 0, 'd' },
-	{ "compatible",	no_argument, 0, 'C' },
-	{ "yaml",	no_argument, 0, 'y' },
-	{ "help",	no_argument, 0, 'h' },
-	{ "version",    no_argument, 0, 'v' },
+	{ "output",	 required_argument, 0, 'o' },
+	{ "debug",	 no_argument, 0, 'd' },
+	{ "compatible",	 no_argument, 0, 'C' },
+	{ "late-resolve",no_argument, 0, 'l' },
+	{ "yaml",	 no_argument, 0, 'y' },
+	{ "help",	 no_argument, 0, 'h' },
+	{ "version",     no_argument, 0, 'v' },
 	{0, 0, 0, 0}
 };
 
@@ -1265,6 +1266,7 @@ static void help(void)
 		"   -d, --debug		Debug messages\n"
 		"   -y, --yaml		Generate YAML output\n"
 		"   -C, --compatible	Bit exact compatibility mode\n"
+		"   -l, --late-resolve	Late resolution mode\n"
 		"   -h, --help		Help\n"
 		"   -v, --version	Display version\n"
 		);
@@ -1276,12 +1278,12 @@ int main(int argc, char *argv[])
 	int err;
 	int cc, option_index = 0;
 	const char *output_file = NULL;
-	bool debug = false, compatible = false, yaml = false;
+	bool debug = false, compatible = false, yaml = false, late = false;
 
 	memset(dt, 0, sizeof(*dt));
 
 	while ((cc = getopt_long(argc, argv,
-			"o:Cydvh?", opts, &option_index)) != -1) {
+			"o:Clydvh?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			output_file = optarg;
@@ -1291,6 +1293,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'C':
 			compatible = true;
+			break;
+		case 'l':
+			late = true;
 			break;
 		case 'y':
 			yaml = true;
@@ -1316,7 +1321,7 @@ int main(int argc, char *argv[])
 	}
 
 	err = dt_setup(dt, argv + optind, argc - optind,
-			output_file, debug, compatible, yaml);
+			output_file, debug, compatible, yaml, late);
 	if (err)
 		return EXIT_FAILURE;
 

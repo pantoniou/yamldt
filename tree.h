@@ -73,6 +73,7 @@ struct device_node {
 	/* for error tracking */
 	size_t line, column;
 	size_t end_line, end_column;
+	bool marker : 1;	/* generic marker */
 };
 
 struct label {

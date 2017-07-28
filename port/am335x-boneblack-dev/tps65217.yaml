@@ -1,0 +1,53 @@
+# Copyright (C) 2012 Texas Instruments Incorporated - http://www.ti.com/
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+
+# Integrated Power Management Chip
+# http://www.ti.com/lit/ds/symlink/tps65217.pdf
+
+*tps:
+  compatible: "ti,tps65217"
+  interrupt-controller: true
+  "#interrupt-cells": 1
+
+  charger:
+    compatible: "ti,tps65217-charger"
+    status: "disabled"
+
+  pwrbutton:
+    compatible: "ti,tps65217-pwrbutton"
+    status: "disabled"
+
+  regulators:
+    "#address-cells": 1
+    "#size-cells": 0
+
+    regulator@0: &dcdc1_reg
+      reg: 0
+      regulator-compatible: "dcdc1"
+
+    regulator@1: &dcdc2_reg
+      reg: 1
+      regulator-compatible: "dcdc2"
+
+    regulator@2: &dcdc3_reg
+      reg: 2
+      regulator-compatible: "dcdc3"
+
+    regulator@3: &ldo1_reg
+      reg: 3
+      regulator-compatible: "ldo1"
+
+    regulator@4: &ldo2_reg
+      reg: 4
+      regulator-compatible: "ldo2"
+
+    regulator@5: &ldo3_reg
+      reg: 5
+      regulator-compatible: "ldo3"
+
+    regulator@6: &ldo4_reg
+      reg: 6
+      regulator-compatible: "ldo4"

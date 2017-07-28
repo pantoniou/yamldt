@@ -373,7 +373,7 @@ void tree_apply_ref_node(struct tree *t, struct device_node *npref,
 
 	list_for_each_entry_safe(prop, propn, &np->properties, node) {
 
-		tree_debug(t, "using delete property %s @%s\n",
+		tree_debug(t, "using property %s @%s\n",
 			prop->name,
 			dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])));
 
