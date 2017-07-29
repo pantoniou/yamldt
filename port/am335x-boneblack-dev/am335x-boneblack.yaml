@@ -6,10 +6,6 @@
 # published by the Free Software Foundation.
 #
 
-#include "am33xx.yaml"
-#include "am335x-bone-common.yaml"
-#include "am335x-boneblack-common.yaml"
-
 model: "TI AM335x BeagleBone Black"
 compatible: [ "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx" ]
 

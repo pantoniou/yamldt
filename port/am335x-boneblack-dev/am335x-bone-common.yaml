@@ -4,6 +4,9 @@
 # it under the terms of the GNU General Public License version 2 as
 # published by the Free Software Foundation.
 
+#include <dt-bindings/pinctrl/am33xx.h>
+#include <dt-bindings/gpio/gpio.h>
+
 cpus:
   cpu@0:
     cpu0-supply: *dcdc2_reg

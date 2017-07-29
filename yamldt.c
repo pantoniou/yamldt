@@ -409,10 +409,7 @@ static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
 	}
 }
 
-int dt_setup(struct yaml_dt_state *dt,
-		char * const *input_file, int input_file_count,
-		const char *output_file,
-		bool debug, bool compatible, bool yaml, bool late)
+int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg)
 {
 	int i, ret;
 
@@ -423,11 +420,12 @@ int dt_setup(struct yaml_dt_state *dt,
 		return -1;
 	}
 
-	dt->output_file = output_file;
-	dt->debug = debug;
-	dt->compatible = compatible;
-	dt->yaml = yaml;
-	dt->late = late;
+	dt->output_file = cfg->output_file;
+	dt->debug = cfg->debug;
+	dt->compatible = cfg->compatible;
+	dt->yaml = cfg->yaml;
+	dt->late = cfg->late;
+	dt->object = cfg->object;
 
 	INIT_LIST_HEAD(&dt->inputs);
 
@@ -441,23 +439,18 @@ int dt_setup(struct yaml_dt_state *dt,
 	} else
 		dt->output = stdout;
 
-	for (i = 0; i < input_file_count; i++) {
-		ret = read_input_file(dt, input_file[i]);
+	for (i = 0; i < cfg->input_file_count; i++) {
+		ret = read_input_file(dt, cfg->input_file[i]);
 		if (ret == -1) {
-			fprintf(stderr, "Could not initialize the parser object\n");
+			fprintf(stderr, "Could not initialize parser\n");
 			return -1;
 		}
-		if (i < (input_file_count - 1))
+		if (i < (cfg->input_file_count - 1))
 			append_input_marker(dt, "---\n");
 	}
 
-#if 0
-	fwrite(dt->input_content, 1, dt->input_size, stdout);
-
-	abort();
-#endif
-
-	yaml_parser_set_input_string(&dt->parser, dt->input_content, dt->input_size);
+	yaml_parser_set_input_string(&dt->parser, dt->input_content,
+				     dt->input_size);
 
 	return 0;
 }
@@ -1250,9 +1243,10 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 static struct option opts[] = {
 	{ "output",	 required_argument, 0, 'o' },
 	{ "debug",	 no_argument, 0, 'd' },
+	{ "yaml",	 no_argument, 0, 'y' },
 	{ "compatible",	 no_argument, 0, 'C' },
 	{ "late-resolve",no_argument, 0, 'l' },
-	{ "yaml",	 no_argument, 0, 'y' },
+	{ "object",	 no_argument, 0, 'c' },
 	{ "help",	 no_argument, 0, 'h' },
 	{ "version",     no_argument, 0, 'v' },
 	{0, 0, 0, 0}
@@ -1267,6 +1261,7 @@ static void help(void)
 		"   -y, --yaml		Generate YAML output\n"
 		"   -C, --compatible	Bit exact compatibility mode\n"
 		"   -l, --late-resolve	Late resolution mode\n"
+		"   -c, --object	Object mode\n"
 		"   -h, --help		Help\n"
 		"   -v, --version	Display version\n"
 		);
@@ -1277,28 +1272,31 @@ int main(int argc, char *argv[])
 	struct yaml_dt_state dt_state, *dt = &dt_state;
 	int err;
 	int cc, option_index = 0;
-	const char *output_file = NULL;
-	bool debug = false, compatible = false, yaml = false, late = false;
+	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
 
 	memset(dt, 0, sizeof(*dt));
+	memset(cfg, 0, sizeof(*cfg));
 
 	while ((cc = getopt_long(argc, argv,
-			"o:Clydvh?", opts, &option_index)) != -1) {
+			"o:Clycdvh?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
-			output_file = optarg;
+			cfg->output_file = optarg;
 			break;
 		case 'd':
-			debug = true;
+			cfg->debug = true;
 			break;
 		case 'C':
-			compatible = true;
+			cfg->compatible = true;
 			break;
 		case 'l':
-			late = true;
+			cfg->late = true;
 			break;
 		case 'y':
-			yaml = true;
+			cfg->yaml = true;
+			break;
+		case 'c':
+			cfg->object = true;
 			break;
 		case 'v':
 			printf("%s version %s\n", PACKAGE_NAME, VERSION);
@@ -1310,18 +1308,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (!output_file) {
+	if (!cfg->output_file) {
 		fprintf(stderr, "Missing output file\n");
 		return EXIT_FAILURE;
 	}
 
 	if (optind >= argc) {
-		fprintf(stderr, "Missing input file argument\n");
+		fprintf(stderr, "Missing input file arguments\n");
 		return EXIT_FAILURE;
 	}
 
-	err = dt_setup(dt, argv + optind, argc - optind,
-			output_file, debug, compatible, yaml, late);
+	cfg->input_file = argv + optind;
+	cfg->input_file_count = argc - optind;
+
+	err = dt_setup(dt, cfg);
 	if (err)
 		return EXIT_FAILURE;
 

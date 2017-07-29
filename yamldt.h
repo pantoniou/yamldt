@@ -55,6 +55,18 @@
 
 /* should be enough */
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
+
+struct yaml_dt_config {
+	char * const *input_file;
+	int input_file_count;
+	const char *output_file;
+	bool debug;
+	bool compatible;
+	bool yaml;
+	bool late;
+	bool object;
+};
+
 struct input {
 	struct list_head node;
 	char *name;
@@ -70,6 +82,7 @@ struct yaml_dt_state {
 	bool compatible;	/* bit exact mode */
 	bool yaml;		/* generate YAML */
 	bool late;		/* late resolution mode */
+	bool object;		/* object mode */
 	const char *output_file;
 	FILE *output;
 	void *input_content;

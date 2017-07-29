@@ -185,7 +185,9 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	case r_anchor:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
-		if (!np) {
+		if (!np && !dt->object) {
+			fprintf(stderr, "object=%s\n", dt->object ? "true" : "false");
+
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, ref->line, ref->column,
@@ -193,6 +195,13 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
+		}
+
+		/* object mode, just leave references here */
+		if (!np && dt->object) {
+			fputc('*', dt->output);
+			fwrite(ref->data, ref->len, 1, dt->output);
+			break;
 		}
 
 		/* if not the first label, switch it to the first */
@@ -213,7 +222,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	case r_path:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
-		if (!np) {
+		if (!np && !dt->object) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, ref->line, ref->column,
@@ -221,6 +230,13 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
+		}
+
+		/* object mode, just leave references here */
+		if (!np && dt->object) {
+			fputs("!pathref ", dt->output);
+			fwrite(ref->data, ref->len, 1, dt->output);
+			break;
 		}
 
 		/* if not the first label, switch it to the first */
@@ -249,8 +265,8 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
 		is_int = ret == 0;
 
-		/* output explicit tag */
-		if (xtag)
+		/* output explicit tag (which is not a string) */
+		if (xtag && strcmp(xtag, "!str"))
 			fprintf(dt->output, "%s ", xtag);
 
 		/* TODO type checking/conversion here */
@@ -409,24 +425,40 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 
 	list_for_each_entry_safe(np, npn, ref_nodes, node) {
-		list_del(&np->node);
 
 		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
 				strlen(np->name + 1));
 
-		if (npref == NULL) {
+		if (!npref && !dt->object)
 			dt_error_at(dt, np->line, np->column,
-				    np->end_line, np->end_column,
-				    "reference to unknown label %s\n",
-				    np->name + 1);
-		} else
+				np->end_line, np->end_column,
+				"reference to unknown label %s\n",
+				np->name + 1);
+
+		if (npref)
 			tree_apply_ref_node(to_tree(dt), npref, np);
 
 		/* free everything now */
-		node_free(to_tree(dt), np);
+		if (npref || !dt->object) {
+			list_del(&np->node);
+			node_free(to_tree(dt), np);
+		}
+	}
+
+	if (!dt->object)
+		return;
+
+	/* move all remaining unref nodes to root */
+	list_for_each_entry_safe(np, npn, ref_nodes, node) {
+
+		if (tree_root(to_tree(dt))) {
+			list_del(&np->node);
+			np->parent = tree_root(to_tree(dt));
+			list_add_tail(&np->node, &np->parent->children);
+		} else
+			node_free(to_tree(dt), np);
 	}
 }
-
 
 void yaml_init(struct yaml_dt_state *dt)
 {
