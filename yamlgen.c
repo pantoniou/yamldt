@@ -172,9 +172,6 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	prop = ref->prop;
 	assert(prop);
 
-	if (ref->offset < 0)
-		return;
-
 	/* get tag */
 	xtag = ref->xtag;
 	if (!xtag)

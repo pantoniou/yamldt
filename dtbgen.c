@@ -228,9 +228,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	prop = ref->prop;
 	assert(prop);
 
-	if (ref->offset < 0)
-		return;
-
 	data = NULL;
 	size = 0;
 

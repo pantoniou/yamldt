@@ -612,7 +612,7 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 	} else
 		dt_fatal(dt, "Illegal type to append\n");
 
-	if (ref_label && ref_label_len > 0 && rt >= 0) {
+	if (ref_label && ref_label_len > 0) {
 
 		ref = ref_alloc(to_tree(dt), rt, ref_label,
 				ref_label_len, xtag);
