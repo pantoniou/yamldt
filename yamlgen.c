@@ -223,6 +223,8 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	const char *xtag = NULL;
 	const char *tag = NULL;
 	char namebuf[NODE_FULLNAME_MAX];
+	char *refname;
+	int refnamelen;
 
 	prop = ref->prop;
 	assert(prop);
@@ -233,18 +235,20 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		xtag = ref->xtag_builtin;
 	tag = xtag;
 
+	/* 60 bytes for a display purposes should be enough */
+	refnamelen = ref->len > 60 ? 60 : (ref->len);
+	refname = alloca(refnamelen + 1);
+	memcpy(refname, ref->data, refnamelen);
+	refname[refnamelen] = '\0';
+
 	switch (ref->type) {
 	case r_anchor:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np && !dt->object) {
-			fprintf(stderr, "object=%s\n", dt->object ? "true" : "false");
-
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
-				    namebuf);
+				    refname);
 			return;
 		}
 
@@ -273,11 +277,9 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np && !dt->object) {
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
-				    namebuf);
+				    refname);
 			return;
 		}
 
@@ -333,12 +335,14 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		if (is_int_tag(tag)) {
 			if (!is_int) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-						"Invalid integer syntax\n");
+					    "Invalid integer syntax; %s\n",
+					    refname);
 				return;
 			}
 			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-					    "Integer out of range\n");
+					    "Integer out of range: %s\n",
+					    refname);
 				return;
 			}
 
@@ -360,7 +364,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		} else {
 			fwrite(ref->data, ref->len, 1, dt->output);
 			dt_warning_at(dt, &to_dt_ref(ref)->m,
-				"Unknown tag %s\n", tag);
+				"Unknown tag %s: %s\n", tag, refname);
 		}
 
 		break;

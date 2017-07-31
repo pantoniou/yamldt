@@ -431,6 +431,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg)
 	dt->yaml = cfg->yaml;
 	dt->late = cfg->late;
 	dt->object = cfg->object;
+	dt->dts = cfg->dts;
 
 	INIT_LIST_HEAD(&dt->inputs);
 
@@ -1063,7 +1064,7 @@ static void get_error_location(struct yaml_dt_state *dt,
 		currline++;
 	}
 
-	if (*ls) {
+	if (ls < e && *ls) {
 		le = strchr(ls, '\n');
 		if (!le)
 			le = ls + strlen(ls);
@@ -1248,6 +1249,7 @@ static struct option opts[] = {
 	{ "compatible",	 no_argument, 0, 'C' },
 	{ "late-resolve",no_argument, 0, 'l' },
 	{ "object",	 no_argument, 0, 'c' },
+	{ "dts",	 no_argument, 0, 's' },
 	{ "help",	 no_argument, 0, 'h' },
 	{ "version",     no_argument, 0, 'v' },
 	{0, 0, 0, 0}
@@ -1263,6 +1265,7 @@ static void help(void)
 		"   -C, --compatible	Bit exact compatibility mode\n"
 		"   -l, --late-resolve	Late resolution mode\n"
 		"   -c, --object	Object mode\n"
+		"   -s, --dts		DTS output instead of DTB\n"
 		"   -h, --help		Help\n"
 		"   -v, --version	Display version\n"
 		);
@@ -1274,12 +1277,13 @@ int main(int argc, char *argv[])
 	int err;
 	int cc, option_index = 0;
 	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
+	const char *s;
 
 	memset(dt, 0, sizeof(*dt));
 	memset(cfg, 0, sizeof(*cfg));
 
 	while ((cc = getopt_long(argc, argv,
-			"o:Clycdvh?", opts, &option_index)) != -1) {
+			"o:Clycsdvh?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			cfg->output_file = optarg;
@@ -1295,9 +1299,14 @@ int main(int argc, char *argv[])
 			break;
 		case 'y':
 			cfg->yaml = true;
+			cfg->dts = false;
 			break;
 		case 'c':
 			cfg->object = true;
+			break;
+		case 's':
+			cfg->dts = true;
+			cfg->yaml = false;
 			break;
 		case 'v':
 			printf("%s version %s\n", PACKAGE_NAME, VERSION);
@@ -1321,6 +1330,22 @@ int main(int argc, char *argv[])
 
 	cfg->input_file = argv + optind;
 	cfg->input_file_count = argc - optind;
+
+	/* automatically set output options */
+	s = strrchr(cfg->output_file, '.');
+	if (s) {
+		if (!strcmp(s, ".yaml"))
+			cfg->yaml = true;
+		else if (!strcmp(s, ".o.yaml")) {
+			cfg->yaml = true;
+			cfg->object = true;
+		} else if (!strcmp(s, ".dtb") && !cfg->yaml)
+			;
+		else if (!strcmp(s, ".dtbo") && !cfg->yaml) {
+			cfg->object = true;
+		} else if (!strcmp(s, ".dts") && !cfg->yaml)
+			cfg->dts = true;
+	}
 
 	err = dt_setup(dt, cfg);
 	if (err)

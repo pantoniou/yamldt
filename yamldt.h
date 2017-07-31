@@ -100,6 +100,7 @@ struct yaml_dt_config {
 	bool yaml;
 	bool late;
 	bool object;
+	bool dts;
 };
 
 struct input {
@@ -118,6 +119,7 @@ struct yaml_dt_state {
 	bool yaml;		/* generate YAML */
 	bool late;		/* late resolution mode */
 	bool object;		/* object mode */
+	bool dts;		/* object DTS instead of DTB */
 	const char *output_file;
 	FILE *output;
 	void *input_content;

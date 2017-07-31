@@ -78,7 +78,11 @@ struct dtb_property {
 
 struct dtb_ref {
 	struct dt_ref dt;
+	const char *tag;		/* actual tag used for property gen */
 	unsigned int offset;
+	unsigned long long val;
+	bool is_int : 1;
+	bool resolved : 1;
 };
 #define to_dtb_ref(_r) 	\
 	container_of(container_of(_r, struct dt_ref, r), struct dtb_ref, dt)
@@ -356,12 +360,14 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	int size = 0;
 	bool is_delete = false;
 	bool is_unsigned;
-	bool is_int;
+	bool is_int = false;
 	bool append_0 = false;
 	fdt32_t phandlet;
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *tag = NULL;
 	const char *p;
+	char *refname;
+	int refnamelen;
 
 	prop = ref->prop;
 	assert(prop);
@@ -375,16 +381,20 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	if (!tag)
 		tag = ref->xtag_builtin;
 
+	/* 60 bytes for a display purposes should be enough */
+	refnamelen = ref->len > 60 ? 60 : (ref->len);
+	refname = alloca(refnamelen + 1);
+	memcpy(refname, ref->data, refnamelen);
+	refname[refnamelen] = '\0';
+
 	switch (ref->type) {
 	case r_anchor:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np) {
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
-				    namebuf);
+				    refname);
 			return;
 		}
 
@@ -398,11 +408,9 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np) {
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
-				    namebuf);
+				    refname);
 			return;
 		}
 
@@ -443,7 +451,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		    !strcmp(tag, "!uint") || !strcmp(tag, "!uint32")) {
 			if (!is_int) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-					    "Tagged int is invalid: %s\n", p);
+					    "Tagged int is invalid: %s\n",
+					    refname);
 				return;
 			}
 			val32 = cpu_to_fdt32((uint32_t)val);
@@ -452,7 +461,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8")) {
 			if (!is_int) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-					    "Tagged int is invalid: %s\n", p);
+					    "Tagged int is invalid: %s\n",
+					    refname);
 				return;
 			}
 			val8 = (uint8_t)val;
@@ -461,7 +471,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16")) {
 			if (!is_int) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-					    "Tagged int is invalid: %s\n", p);
+					    "Tagged int is invalid: %s\n",
+					    refname);
 				return;
 			}
 			val16 = cpu_to_fdt16((uint16_t)val);
@@ -470,7 +481,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!int64") || !strcmp(tag, "!uint64")) {
 			if (!is_int) {
 				dt_error_at(dt, &to_dt_ref(ref)->m,
-					    "Tagged int is invalid: %s\n", p);
+					    "Tagged int is invalid: %s\n",
+					    refname);
 				return;
 			}
 			val64 = cpu_to_fdt64((uint64_t)val);
@@ -482,13 +494,17 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			append_0 = true;
 		} else if (!strcmp(tag, "!bool")) {
 			if (len == 4 && !memcmp(p,  "true", 4)) {
+				val = 1;
 				data = NULL;
 				size = 0;
 			} else {
+				val = 0;
+				data = NULL;
+				size = 0;
 				dt_warning_at(dt, &to_dt_ref(ref)->m,
 					      "False boolean will not be"
-					      " present in DTB output\n");
-				return;
+					      " present in DTB output; %s\n",
+					      refname);
 			}
 		} else if (!strcmp(tag, "!null")) {
 			data = NULL;
@@ -496,7 +512,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			is_delete = true;
 		} else {
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"Unsupported tag %s\n", tag);
+				"Unsupported tag %s: %s\n", tag,
+				refname);
 			return;
 		}
 
@@ -507,7 +524,12 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		break;
 	}
 
+	assert(tag != NULL);
 	to_dtb_ref(ref)->offset = dtbprop->size;
+	to_dtb_ref(ref)->tag = tag;
+	to_dtb_ref(ref)->val = val;
+	to_dtb_ref(ref)->is_int = is_int;
+	to_dtb_ref(ref)->resolved = true;
 	prop_append(prop, data, size, append_0);
 
 	if (is_delete)
@@ -597,6 +619,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 	struct dtb_property *dtbprop;
 	struct ref *ref;
 	struct node *root;
+	bool resolve_error;
 
 	assert(dt);
 
@@ -609,17 +632,25 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 		/* detach and keep memreserve property */
 		if (!strcmp(prop->name, "/memreserve/")) {
 
-			list_for_each_entry(ref, &prop->refs, node)
-				ref_resolve(dt, ref);
-
 			dtbprop = to_dtb_prop(prop);
 
-			/* must be aligned */
-			if (dtbprop->size % (2 * sizeof(uint64_t)))
-				dt_fatal(dt, "Invalid memreserve size (%d)\n",
-						dtbprop->size);
+			resolve_error = false;
+			list_for_each_entry(ref, &prop->refs, node) {
+				ref_resolve(dt, ref);
+				if (!to_dtb_ref(ref)->resolved)
+					resolve_error = true;
+			}
+
 			list_del(&prop->node);
 			prop->np = NULL;
+
+			if (resolve_error ||
+			    dtbprop->size % (2 * sizeof(uint64_t))) {
+				dt_error_at(dt, &to_dt_property(prop)->m,
+						"Invalid memreserve property\n");
+				prop_free(to_tree(dt), prop);
+				continue;
+			}
 
 			if (dtb->memreserve_prop) {
 				prop_append(dtb->memreserve_prop,
@@ -1149,6 +1180,252 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 	free(dtb);
 }
 
+static char *depth_pfx(struct yaml_dt_state *dt, char *buf, int size, int depth)
+{
+	snprintf(buf, size, "%*s", depth * 4, "");
+	buf[size - 1] = '\0';
+	return buf;
+}
+
+static int depth_pfx_size(struct yaml_dt_state *dt, int depth)
+{
+	return depth * 4 + 2;
+}
+
+static int depth_pfx_col(struct yaml_dt_state *dt, int depth)
+{
+	return depth * 4;
+}
+
+static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int depth)
+{
+	FILE *fp = dt->output;
+	struct ref *ref, *refn, *reft;
+	int i, col, pos, count;
+	const char *tag, *stag;
+	bool output_name = false;
+	bool found_true_bool = false;
+	char *pfx;
+
+	/* no data, don't print */
+	if (list_empty(&prop->refs))
+		return;
+
+	pfx = depth_pfx(dt, alloca(depth_pfx_size(dt, depth)),
+			depth_pfx_size(dt, depth), depth);
+
+	col = depth_pfx_col(dt, depth) + strlen(prop->name);
+
+	pos = 0;
+	ref = list_entry(&prop->refs, struct ref, node);
+	list_for_each_entry_continue(ref, &prop->refs, node) {
+
+		if (ref->type == r_seq_start ||
+		    ref->type == r_seq_end ||
+		    ref->type == r_null)
+			continue;
+
+		if (ref->type == r_anchor)
+			stag = "!int";		/* paths are strings */
+		else if (ref->type == r_path)
+			stag = "!str";		/* paths are strings */
+		else
+			stag = to_dtb_ref(ref)->tag;
+		assert(stag != NULL);
+
+		/* get run of the same type */
+		count = 1;
+		refn = ref;
+		list_for_each_entry_continue(refn, &prop->refs, node) {
+
+			if (ref == refn)
+				continue;
+			if (refn->type == r_seq_start ||
+			    refn->type == r_seq_end ||
+			    refn->type == r_null)
+				continue;
+
+			if (refn->type == r_anchor)
+				tag = "!int";		/* paths are strings */
+			else if (refn->type == r_path)
+				tag = "!str";		/* paths are strings */
+			else
+				tag = to_dtb_ref(refn)->tag;
+			assert(tag != NULL);
+
+			/* we're out? rewind back a bit */
+			if (strcmp(tag, stag))
+				break;
+
+			count++;
+		}
+
+		if (!strcmp(stag, "!bool")) {
+			if (to_dtb_ref(ref)->val)
+				found_true_bool = true;
+			goto skip;
+		}
+
+		if (!output_name) {
+			fprintf(fp, "%s%s", pfx, prop->name);
+			fprintf(fp, " =");
+			col += strlen(" =");
+			output_name = true;
+		}
+
+		fputc(' ', fp);
+
+		/* TODO handle !int<X> tags in the middle */
+		if (!strcmp(stag, "!int16") || !strcmp(stag, "!uint16"))
+			fprintf(fp, "/bits/ %d ", 16);
+		else if (!strcmp(stag, "!int32") || !strcmp(stag, "!uint32"))
+			fprintf(fp, "/bits/ %d ", 32);
+		else if (!strcmp(stag, "!int64") || !strcmp(stag, "!uint64"))
+			fprintf(fp, "/bits/ %d ", 64);
+
+		if (!strcmp(stag, "!int") || !strcmp(stag, "!uint") ||
+		    !strcmp(stag, "!int16") || !strcmp(stag, "!uint16") ||
+		    !strcmp(stag, "!int32") || !strcmp(stag, "!uint32") ||
+		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64"))
+			fputc('<', fp);
+		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
+			fputc('[', fp);
+
+		i = 0;
+		reft = list_entry(ref->node.prev, struct ref, node);
+		list_for_each_entry_continue(reft, &prop->refs, node) {
+			if (reft == refn)
+				break;
+
+			if (i > 0)
+				fputc(' ', fp);
+
+			if (reft->type == r_anchor || !strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+				fputc('&', fp);
+
+			if (!strcmp(stag, "!str") && strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+				fputc('"', fp);
+
+			if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
+				fprintf(fp, " %02x", to_dtb_ref(reft)->is_int ?
+					    (unsigned int)to_dtb_ref(reft)->val & 0xff : 0);
+			else
+				fwrite(reft->data, reft->len, 1, fp);
+
+			if (!strcmp(stag, "!str") && strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+				fputc('"', fp);
+
+			if ((!strcmp(stag, "!str") || !strcmp(stag, "!pathref")) &&
+			    (i + 1) < count)
+				fputc(',', fp);
+
+			i++;
+		}
+
+		if (!strcmp(stag, "!int") || !strcmp(stag, "!uint") ||
+		    !strcmp(stag, "!int16") || !strcmp(stag, "!uint16") ||
+		    !strcmp(stag, "!int32") || !strcmp(stag, "!uint32") ||
+		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64"))
+			fputc('>', fp);
+		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
+			fputc(']', fp);
+
+              skip:
+		pos += count;
+
+		/* last one? break */
+		if (&refn->node == &prop->refs)
+			break;
+
+		ref = list_entry(refn->node.prev, struct ref, node);
+	}
+
+	/* found a true boolean without any properties? */
+	if (!output_name && found_true_bool) {
+		fprintf(fp, "%s%s", pfx, prop->name);
+		output_name = true;
+	}
+
+	if (output_name)
+		fprintf(fp, ";\n");
+}
+
+static void dts_emit_node(struct yaml_dt_state *dt, struct node *np, int depth)
+{
+	FILE *fp = dt->output;
+	struct node *child;
+	struct property *prop;
+	struct label *l;
+	const char *name;
+	int count;
+	char *pfx;
+
+	pfx = depth_pfx(dt, alloca(depth_pfx_size(dt, depth)),
+			depth_pfx_size(dt, depth), depth);
+
+	name = np->name;
+	if (!name || strlen(name) == 0)
+		name = "/";
+
+	fprintf(fp, "%s", pfx);
+	count = 0;
+	list_for_each_entry(l, &np->labels, node) {
+		if (count == 1)
+			printf(" /*");
+		fprintf(fp, "%s%s:", count > 0 ? " " : "", l->label);
+		count++;
+	}
+	if (count > 1)
+		fprintf(fp, " */");
+	fprintf(fp, "%s%s {\n", count > 0 ? " " : "", name);
+
+	list_for_each_entry(prop, &np->properties, node)
+		dts_emit_prop(dt, prop, depth + 1);
+
+	list_for_each_entry(child, &np->children, node)
+		dts_emit_node(dt, child, depth + 1);
+
+	fprintf(fp, "%s};\n", pfx);
+}
+
+static void dts_emit(struct yaml_dt_state *dt)
+{
+	FILE *fp = dt->output;
+	struct property *prop;
+	struct dtb_emit_state *dtb = to_dtb(dt);
+	struct ref *ref;
+	unsigned long long start, size;
+
+	fprintf(fp, "/dts-v1/");
+
+	fputs(";\n", fp);
+
+	prop = dtb->memreserve_prop;
+	if (prop) {
+		ref = list_entry(&prop->refs, struct ref, node);
+		list_for_each_entry_continue(ref, &prop->refs, node) {
+			/* must have been already put into place */
+			if (!to_dtb_ref(ref)->is_int)
+				dt_fatal(dt, "Illegal /memreserve/ property\n");
+			start = to_dtb_ref(ref)->val;
+
+			/* get next */
+			ref = list_entry(ref->node.next, struct ref, node);
+			if (&ref->node == &prop->refs)
+				dt_fatal(dt, "Illegal /memreserve/ property\n");
+
+			/* must have been already put into place */
+			if (!to_dtb_ref(ref)->is_int)
+				dt_fatal(dt, "Illegal /memreserve/ property\n");
+			size = to_dtb_ref(ref)->val;
+
+			fprintf(fp, "/memreserve/ %08llx %08llx\n", start, size);
+		}
+	}
+
+	dts_emit_node(dt, tree_root(to_tree(dt)), 0);
+}
+
 void dtb_emit(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
@@ -1163,6 +1440,12 @@ void dtb_emit(struct yaml_dt_state *dt)
 		dtb_late_resolve(dt);
 	dtb_apply_ref_nodes(dt);
 	dtb_resolve_phandle_refs(dt);
+
+	/* we can output the DTS here (we don't want the extra nodes) */
+	if (dt->dts) {
+		dts_emit(dt);
+		return;
+	}
 
 	dtb_append_auto_properties(dt);
 	dtb_add_symbols(dt);
@@ -1205,12 +1488,12 @@ void dtb_emit(struct yaml_dt_state *dt)
 	fdth.size_dt_struct = cpu_to_fdt32(size_dt_struct);
 
 	fwrite(&fdth, size_fdt_hdr, 1, dt->output);
-	fwrite(dtb->area[dt_mem_rsvmap].data, dtb->area[dt_mem_rsvmap].size,
-			1, dt->output);
-	fwrite(dtb->area[dt_struct].data, dtb->area[dt_struct].size,
-			1, dt->output);
-	fwrite(dtb->area[dt_strings].data, dtb->area[dt_strings].size,
-			1, dt->output);
+	fwrite(dtb->area[dt_mem_rsvmap].data,
+	       dtb->area[dt_mem_rsvmap].size, 1, dt->output);
+	fwrite(dtb->area[dt_struct].data,
+	       dtb->area[dt_struct].size, 1, dt->output);
+	fwrite(dtb->area[dt_strings].data,
+	       dtb->area[dt_strings].size, 1, dt->output);
 }
 
 static void print_prop(int col, int width, const char *data, int len)
