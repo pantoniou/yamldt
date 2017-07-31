@@ -3,8 +3,10 @@ TOPDIR ?= ../..
 YAMLSO := am33xx.o.yaml am33xx-clocks.o.yaml am335x-bone-common.o.yaml \
 	  am335x-boneblack-common.o.yaml am335x-boneblack.o.yaml
 
-YAMLS   := am335x-boneblack.pure.yaml
-DTBS    := $(addsuffix .dtb, $(basename $(YAMLS)))
+YAMLS  := am335x-boneblack.pure.yaml
+DTBS   := $(addsuffix .dtb, $(basename $(YAMLS)))
+DTSS   := $(addsuffix .dts, $(basename $(YAMLS)))
+YDEPS  := $(addsuffix  .Yd, $(basename $(YAMLSO)))
 
 # include $(TOPDIR)/port/Makefile.inc
 
@@ -20,7 +22,7 @@ FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
 YAMLDTFLAGS ?= -C
 FDTDUMPFLAGS ?=
-YDEPFLAGS = -MT $@ -MMD -MP -MF $*.Yd
+YDEPFLAGS = -MT $@ -MMD -MP -MF $*.o.Yd
 
 %.o.yaml: %.yaml
 	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
@@ -29,16 +31,18 @@ YDEPFLAGS = -MT $@ -MMD -MP -MF $*.Yd
 %.dtb: %.yaml
 	$(YAMLDT) $(YAMLDTFLAGS) $< -o $@
 
-YDEPS    := $(addsuffix .Yd, $(basename $(YAMLSO)))
+%.dts: %.yaml
+	$(YAMLDT) $(YAMLDTFLAGS) -s $< -o $@
 
 .PHONY: all clean distclean check
 
-all: $(DTBS)
+all: $(DTBS) $(DTSS)
 
 clean:
-	rm -f $(YDEPS) $(YAMLSO) $(TARGETS)
+	rm -f $(YDEPS) $(YAMLSO) $(TARGETS) $(DTBS) $(DTSS)
 
 check:
+	@echo YDEPS=$(YDEPS)
 	@echo nothing to do for check
 
 am335x-boneblack.pure.yaml: $(YAMLSO)
