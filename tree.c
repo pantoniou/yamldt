@@ -137,7 +137,7 @@ struct label *label_alloc(struct tree *t, const char *label)
 	return t->ops->label_alloc(t, label);
 }
 
-void label_add(struct tree *t, struct device_node *np,
+void label_add(struct tree *t, struct node *np,
 		const char *label)
 {
 	struct label *l;
@@ -165,10 +165,10 @@ void label_free(struct tree *t, struct label *l)
 	t->ops->label_free(t, l);
 }
 
-struct device_node *node_alloc(struct tree *t, const char *name,
+struct node *node_alloc(struct tree *t, const char *name,
 			     const char *label)
 {
-	struct device_node *np;
+	struct node *np;
 
 	assert(t && name);
 
@@ -184,9 +184,9 @@ struct device_node *node_alloc(struct tree *t, const char *name,
 	return np;
 }
 
-void node_free(struct tree *t, struct device_node *np)
+void node_free(struct tree *t, struct node *np)
 {
-	struct device_node *child, *childn;
+	struct node *child, *childn;
 	struct property *prop, *propn;
 	struct label *l, *ln;
 
@@ -207,10 +207,10 @@ void node_free(struct tree *t, struct device_node *np)
 	t->ops->node_free(t, np);
 }
 
-static struct device_node *__node_lookup_by_label(struct tree *t, struct device_node *np,
+static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
 		const char *label, int len)
 {
-	struct device_node *child, *found;
+	struct node *child, *found;
 	struct label *l;
 
 	list_for_each_entry(l, &np->labels, node) {
@@ -227,7 +227,7 @@ static struct device_node *__node_lookup_by_label(struct tree *t, struct device_
 	return NULL;
 }
 
-struct device_node *node_lookup_by_label(struct tree *t,
+struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len)
 {
 	assert(t && label);
@@ -241,9 +241,9 @@ struct device_node *node_lookup_by_label(struct tree *t,
 	return __node_lookup_by_label(t, t->root, label, len);
 }
 
-const char *dn_fullname_multi(struct device_node *np, char **buf, int *size)
+const char *dn_fullname_multi(struct node *np, char **buf, int *size)
 {
-	struct device_node *npt;
+	struct node *npt;
 	char *p;
 	int len, tlen;
 	const char *ret;
@@ -293,7 +293,7 @@ const char *dn_fullname_multi(struct device_node *np, char **buf, int *size)
 	return ret;
 }
 
-const char *dn_fullname(struct device_node *np, char *buf, int size)
+const char *dn_fullname(struct node *np, char *buf, int size)
 {
 	return dn_fullname_multi(np, &buf, &size);
 }
@@ -318,7 +318,7 @@ void tree_init(struct tree *t, const struct tree_ops *ops)
 
 void tree_term(struct tree *t)
 {
-	struct device_node *np, *npn;
+	struct node *np, *npn;
 	struct property *prop, *propn;
 
 	/* free the root */
@@ -339,9 +339,9 @@ void tree_term(struct tree *t)
 }
 
 /* clear any crud that shouldn't be part of the base tree */
-static void sanitize_base(struct tree *t, struct device_node *np)
+static void sanitize_base(struct tree *t, struct node *np)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop, *propn;
 	char namebuf[NODE_FULLNAME_MAX];
 
@@ -357,13 +357,13 @@ static void sanitize_base(struct tree *t, struct device_node *np)
 		sanitize_base(t, child);
 }
 
-void tree_apply_ref_node(struct tree *t, struct device_node *npref,
-			 struct device_node *np)
+void tree_apply_ref_node(struct tree *t, struct node *npref,
+			 struct node *np)
 {
 	struct property *prop, *propn;
 	struct property *propref, *proprefn;
 	struct label *l, *ln;
-	struct device_node *child, *childn, *childref, *childrefn;
+	struct node *child, *childn, *childref, *childrefn;
 	bool found;
 	char namebuf[2][NODE_FULLNAME_MAX];
 

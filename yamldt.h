@@ -114,7 +114,7 @@ struct yaml_dt_state {
 	yaml_mark_t last_alias_start_mark;
 	yaml_mark_t last_alias_end_mark;
 
-	struct device_node *current_np;
+	struct node *current_np;
 	bool current_np_isref;
 	struct property *current_prop;
 	bool current_prop_existed; 

@@ -156,7 +156,7 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 
 static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int depth)
 {
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	struct label *l;
 	int ret, len;
@@ -327,9 +327,9 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 
 void __yaml_flatten_node(struct yaml_dt_state *dt,
-			 struct device_node *np, int depth)
+			 struct node *np, int depth)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 	struct ref *ref;
 	struct label *l = NULL;
@@ -418,7 +418,7 @@ static void yaml_flatten_node(struct yaml_dt_state *dt)
 
 static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 {
-	struct device_node *np, *npn, *npref;
+	struct node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 
 	list_for_each_entry_safe(np, npn, ref_nodes, node) {

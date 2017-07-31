@@ -46,11 +46,11 @@
 
 #include "list.h"
 
-struct device_node;
+struct node;
 
 struct property {
 	struct list_head node;
-	struct device_node *np;
+	struct node *np;
 	char *name;
 	struct list_head refs;
 	bool is_delete : 1;	/* set to true it is signals deletion */
@@ -65,9 +65,9 @@ struct property {
 	size_t end_line, end_column;
 };
 
-struct device_node {
+struct node {
 	struct list_head node;
-	struct device_node *parent;
+	struct node *parent;
 	struct list_head children;
 	struct list_head properties;
 	struct list_head labels;
@@ -82,7 +82,7 @@ struct device_node {
 
 struct label {
 	struct list_head node;
-	struct device_node *np;
+	struct node *np;
 	char *label;
 };
 
@@ -98,7 +98,7 @@ enum ref_type {
 struct ref {
 	struct list_head node;
 	enum ref_type type;
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	const void *data;
 	int len;
@@ -127,27 +127,27 @@ struct tree_ops {
 	struct label *(*label_alloc)(struct tree *t, const char *name);
 	void (*label_free)(struct tree *t, struct label *l);
 
-	struct device_node *(*node_alloc)(struct tree *t, const char *name,
+	struct node *(*node_alloc)(struct tree *t, const char *name,
 					 const char *label);
-	void (*node_free)(struct tree *t, struct device_node *np);
+	void (*node_free)(struct tree *t, struct node *np);
 
 	void (*debugf)(struct tree *t, const char *fmt, ...)
 			__attribute__ ((__format__ (__printf__, 2, 0)));
 };
 
 struct tree {
-	struct device_node *root;
+	struct node *root;
 	struct list_head ref_nodes;
 	struct list_head del_props;
 	const struct tree_ops *ops;
 };
 
-static inline struct device_node *tree_root(struct tree *t)
+static inline struct node *tree_root(struct tree *t)
 {
 	return t->root;
 }
 
-static inline void tree_set_root(struct tree *t, struct device_node *np)
+static inline void tree_set_root(struct tree *t, struct node *np)
 {
 	t->root = np;
 }
@@ -170,7 +170,7 @@ struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const char *xtag);
 void ref_free(struct tree *t, struct ref *ref);
 
-void label_add(struct tree *t, struct device_node *np, const char *label);
+void label_add(struct tree *t, struct node *np, const char *label);
 void label_free(struct tree *t, struct label *l);
 
 struct property *prop_alloc(struct tree *t, const char *name);
@@ -178,18 +178,18 @@ void prop_free(struct tree *t, struct property *prop);
 void prop_del(struct tree *t, struct property *prop);
 void prop_ref_clear(struct tree *t, struct property *prop);
 
-struct device_node *node_alloc(struct tree *t, const char *name, const char *label);
-void node_free(struct tree *t, struct device_node *np);
+struct node *node_alloc(struct tree *t, const char *name, const char *label);
+void node_free(struct tree *t, struct node *np);
 
-struct device_node *node_lookup_by_label(struct tree *t,
+struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len);
 
-void tree_apply_ref_node(struct tree *t, struct device_node *npref,
-			 struct device_node *np);
+void tree_apply_ref_node(struct tree *t, struct node *npref,
+			 struct node *np);
 
 /* this should be enough */
 #define NODE_FULLNAME_MAX	4096
-const char *dn_fullname_multi(struct device_node *np, char **buf, int *size);
-const char *dn_fullname(struct device_node *np, char *buf, int bufsize);
+const char *dn_fullname_multi(struct node *np, char **buf, int *size);
+const char *dn_fullname(struct node *np, char *buf, int bufsize);
 
 #endif

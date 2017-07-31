@@ -102,9 +102,9 @@ static void prop_replace(struct property *prop, const void *data,
 	prop_set_data(prop, false, data, size, false, offset);
 }
 
-static void append_auto_properties(struct yaml_dt_state *dt, struct device_node *np)
+static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 	fdt32_t phandle;
 
@@ -128,10 +128,10 @@ static void dtb_append_auto_properties(struct yaml_dt_state *dt)
 	append_auto_properties(dt, tree_root(to_tree(dt)));
 }
 
-static void add_symbols(struct yaml_dt_state *dt, struct device_node *np,
-		struct device_node **symbols_np)
+static void add_symbols(struct yaml_dt_state *dt, struct node *np,
+		struct node **symbols_np)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 	struct label *l;
 	char namebuf[NODE_FULLNAME_MAX];
@@ -171,7 +171,7 @@ static void add_symbols(struct yaml_dt_state *dt, struct device_node *np,
 
 static void dtb_add_symbols(struct yaml_dt_state *dt)
 {
-	struct device_node *symbols_np = NULL;
+	struct node *symbols_np = NULL;
 
 	add_symbols(dt, tree_root(to_tree(dt)), &symbols_np);
 }
@@ -206,7 +206,7 @@ static int parse_int(const char *str, int len, unsigned long long *valp, bool *u
 
 static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 {
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	int ret, len;
 	uint8_t val8;
@@ -386,12 +386,12 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	np = prop->np;
 }
 
-static void resolve(struct yaml_dt_state *dt, struct device_node *npt,
+static void resolve(struct yaml_dt_state *dt, struct node *npt,
 		  unsigned int flags)
 {
-	struct device_node *child;
+	struct node *child;
 	struct ref *ref, *refn;
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	struct label *l;
 	fdt32_t phandlet;
@@ -457,7 +457,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 {
 	struct property *prop, *propn;
 	struct ref *ref;
-	struct device_node *root;
+	struct node *root;
 
 	assert(dt);
 
@@ -492,7 +492,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 
 static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 {
-	struct device_node *root;
+	struct node *root;
 
 	assert(dt);
 
@@ -509,7 +509,7 @@ static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 }
 
 static struct ref *get_reg_property_ref(struct yaml_dt_state *dt,
-					struct device_node *np)
+					struct node *np)
 {
 	struct property *prop;
 	struct ref *ref;
@@ -526,7 +526,7 @@ static struct ref *get_reg_property_ref(struct yaml_dt_state *dt,
 }
 
 static void rename_with_unit_address(struct yaml_dt_state *dt,
-				     struct device_node *np)
+				     struct node *np)
 {
 	struct ref *ref;
 	char *s;
@@ -570,8 +570,8 @@ static void rename_with_unit_address(struct yaml_dt_state *dt,
 }
 
 static bool needs_unit_address_rename(struct yaml_dt_state *dt,
-				      struct device_node *np1,
-				      struct device_node *np2)
+				      struct node *np1,
+				      struct node *np2)
 {
 	struct ref *ref1, *ref2;
 	char *s1, *s2;
@@ -591,9 +591,9 @@ static bool needs_unit_address_rename(struct yaml_dt_state *dt,
 }
 
 static void late_resolve_node(struct yaml_dt_state *dt,
-			      struct device_node *np)
+			      struct node *np)
 {
-	struct device_node *child, *childt;
+	struct node *child, *childt;
 
 	/* handle renames first */
 	list_for_each_entry(child, &np->children, node) {
@@ -642,7 +642,7 @@ static void dtb_late_resolve(struct yaml_dt_state *dt)
 
 static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 {
-	struct device_node *np, *npn, *npref;
+	struct node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 
 	list_for_each_entry_safe(np, npn, ref_nodes, node) {
@@ -743,10 +743,10 @@ static void dt_emit_str(struct yaml_dt_state *dt,
 		     align ? sizeof(fdt32_t) : 0);
 }
 
-static int count_properties(struct yaml_dt_state *dt, struct device_node *np)
+static int count_properties(struct yaml_dt_state *dt, struct node *np)
 {
 	struct property *prop;
-	struct device_node *child;
+	struct node *child;
 	int count;
 
 	count = 0;
@@ -759,11 +759,11 @@ static int count_properties(struct yaml_dt_state *dt, struct device_node *np)
 	return count;
 }
 
-static int fill_prop_table(struct yaml_dt_state *dt, struct device_node *np,
+static int fill_prop_table(struct yaml_dt_state *dt, struct node *np,
 			   struct property **propp, int pos)
 {
 	struct property *prop;
-	struct device_node *child;
+	struct node *child;
 
 	list_for_each_entry(prop, &np->properties, node)
 		propp[pos++] = prop;
@@ -787,7 +787,7 @@ static int qsort_proplencmp(const void *arg1, const void *arg2)
 
 static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 {
-	struct device_node *root;
+	struct node *root;
 	int i, j, count, l1, l2;
 	struct property **propt, *prop, *prop2;
 	const char *s1, *s2;
@@ -846,9 +846,9 @@ static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 }
 
 static void build_string_table_compatible(struct yaml_dt_state *dt,
-		struct device_node *np)
+		struct node *np)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 	void *s, *e, *data;
 	int l1, l2;
@@ -897,9 +897,9 @@ static void dtb_build_string_table(struct yaml_dt_state *dt)
 		dtb_build_string_table_compatible(dt);
 }
 
-static void flatten_node(struct yaml_dt_state *dt, struct device_node *np)
+static void flatten_node(struct yaml_dt_state *dt, struct node *np)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 
 	dt_emit_32(dt, dt_struct, FDT_BEGIN_NODE, false);
@@ -930,7 +930,7 @@ static void dtb_flatten_node(struct yaml_dt_state *dt)
 
 static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 {
-	struct device_node *root, *np, *child;
+	struct node *root, *np, *child;
 	struct property *prop;
 	fdt32_t val;
 
@@ -1124,9 +1124,9 @@ static void print_prop(int col, int width, const char *data, int len)
 	}
 }
 
-static void __dn_dump(struct yaml_dt_state *dt, struct device_node *np, int depth)
+static void __dn_dump(struct yaml_dt_state *dt, struct node *np, int depth)
 {
-	struct device_node *child;
+	struct node *child;
 	struct property *prop;
 	struct label *l;
 	const char *name;
@@ -1166,7 +1166,7 @@ static void __dn_dump(struct yaml_dt_state *dt, struct device_node *np, int dept
 
 static void dtb_dump(struct yaml_dt_state *dt)
 {
-	struct device_node *np;
+	struct node *np;
 	struct list_head *ref_nodes;
 
 	if (!dt->debug)

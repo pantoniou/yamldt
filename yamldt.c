@@ -192,10 +192,10 @@ static void yaml_dt_label_free(struct tree *t, struct label *l)
 	free(l);
 }
 
-static struct device_node *yaml_dt_node_alloc(struct tree *t, const char *name,
+static struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
 					     const char *label)
 {
-	struct device_node *np;
+	struct node *np;
 
 	np = malloc(sizeof(*np));
 	assert(np);
@@ -207,7 +207,7 @@ static struct device_node *yaml_dt_node_alloc(struct tree *t, const char *name,
 	return np;
 }
 
-static void yaml_dt_node_free(struct tree *t, struct device_node *np)
+static void yaml_dt_node_free(struct tree *t, struct node *np)
 {
 	free(np->name);
 
@@ -493,7 +493,7 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 static void finalize_current_property(struct yaml_dt_state *dt)
 {
 	char namebuf[NODE_FULLNAME_MAX];
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 
 	if (!dt)
@@ -536,7 +536,7 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 static void append_to_current_property(struct yaml_dt_state *dt,
 		yaml_event_t *event)
 {
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	struct ref *ref;
 	yaml_event_type_t type;
@@ -650,7 +650,7 @@ property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 
 static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 {
-	struct device_node *np;
+	struct node *np;
 	struct property *prop;
 	yaml_event_type_t type = event->type;
 	bool found_existing;
