@@ -60,9 +60,6 @@ struct property {
 	int size;
 	/* DTB generation */
 	unsigned int offset;		/* DTB offset to the string table */
-	/* for error tracking */
-	size_t line, column;
-	size_t end_line, end_column;
 };
 
 struct node {
@@ -74,9 +71,6 @@ struct node {
 	char *name;
 	/* DTB generation */
 	unsigned int phandle;
-	/* for error tracking */
-	size_t line, column;
-	size_t end_line, end_column;
 	bool marker : 1;	/* generic marker */
 };
 
@@ -106,9 +100,6 @@ struct ref {
 	const char *xtag_builtin;
 	/* for DTB */
 	unsigned int offset;
-	/* for error tracking */
-	size_t line, column;
-	size_t end_line, end_column;
 };
 
 struct tree;

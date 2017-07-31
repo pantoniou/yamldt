@@ -60,6 +60,39 @@
 /* should be enough */
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
 
+struct dt_yaml_mark {
+	yaml_mark_t start;
+	yaml_mark_t end;
+};
+
+struct dt_node {
+	struct node n;
+	struct dt_yaml_mark m;
+};
+#define to_dt_node(_n) 	container_of(_n, struct dt_node, n)
+#define to_node(_np)		(&(_np)->n)
+
+struct dt_property {
+	struct property p;
+	struct dt_yaml_mark m;
+};
+#define to_dt_property(_p) 	container_of(_p, struct dt_property, p)
+#define to_property(_prop)	(&(_prop)->p)
+
+struct dt_ref {
+	struct ref r;
+	struct dt_yaml_mark m;
+};
+#define to_dt_ref(_r) 		container_of(_r, struct dt_ref, r)
+#define to_ref(_ref)		(&(_ref)->r)
+
+struct dt_label {
+	struct label l;
+	struct dt_yaml_mark m;
+};
+#define to_dt_label(_l) 	container_of(_l, struct dt_label, l)
+#define to_label(_label)	(&(_label)->l)
+
 struct yaml_dt_config {
 	char * const *input_file;
 	int input_file_count;
@@ -107,12 +140,9 @@ struct yaml_dt_state {
 
 	yaml_parser_t parser;
 	yaml_event_t *current_event;
-	yaml_mark_t current_start_mark;
-	yaml_mark_t current_end_mark;
-	yaml_mark_t last_map_start_mark;
-	yaml_mark_t last_map_end_mark;
-	yaml_mark_t last_alias_start_mark;
-	yaml_mark_t last_alias_end_mark;
+	struct dt_yaml_mark current_mark;
+	struct dt_yaml_mark last_map_mark;
+	struct dt_yaml_mark last_alias_mark;
 
 	struct node *current_np;
 	bool current_np_isref;
@@ -148,21 +178,18 @@ void dt_fatal(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((noreturn));
 
 void dt_print_at(struct yaml_dt_state *dt,
-		   size_t line, size_t column,
-		   size_t end_line, size_t end_column,
-		   const char *type, const char *fmt, ...)
-		   __attribute__ ((__format__ (__printf__, 7, 0)));
+		 const struct dt_yaml_mark *m,
+		 const char *type, const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 4, 0)));
 
 void dt_error_at(struct yaml_dt_state *dt,
-		size_t line, size_t column,
-		size_t end_line, size_t end_column,
-		const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 6, 0)));
+		 const struct dt_yaml_mark *m,
+		 const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 3, 0)));
 
 void dt_warning_at(struct yaml_dt_state *dt,
-		   size_t line, size_t column,
-		   size_t end_line, size_t end_column,
+		   const struct dt_yaml_mark *m,
 		   const char *fmt, ...)
-		   __attribute__ ((__format__ (__printf__, 6, 0)));
+		   __attribute__ ((__format__ (__printf__, 3, 0)));
 
 #endif

@@ -92,12 +92,15 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len, const char *xtag)
 {
 	struct yaml_dt_state *dt = to_dt(t);
+	struct dt_ref *dt_ref;
 	struct ref *ref;
 	void *p;
 
-	ref = malloc(sizeof(*ref));
-	assert(ref);
-	memset(ref, 0, sizeof(*ref));
+	dt_ref = malloc(sizeof(*dt_ref));
+	assert(dt_ref);
+	memset(dt_ref, 0, sizeof(*dt_ref));
+
+	ref = to_ref(dt_ref);
 
 	/* try to avoid copy if the pointer given is in read data */
 	if (data < dt->input_content || data >= dt->input_content + dt->input_size) {
@@ -119,10 +122,7 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 	}
 
 	/* always mark for debugging */
-	ref->line = dt->current_start_mark.line;
-	ref->column = dt->current_start_mark.column;
-	ref->end_line = dt->current_end_mark.line;
-	ref->end_column = dt->current_end_mark.column;
+	dt_ref->m = dt->current_mark;
 
 	return ref;
 }
@@ -130,6 +130,7 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 {
 	struct yaml_dt_state *dt = to_dt(t);
+	struct dt_ref *dt_ref = to_dt_ref(ref);
 	void *p;
 
 	if (ref->xtag)
@@ -139,80 +140,101 @@ static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 	if (p < dt->input_content || p >= dt->input_content + dt->input_size)
 		free(p);
 
-	memset(ref, 0, sizeof(*ref));
-	free(ref);
+	memset(dt_ref, 0, sizeof(*dt_ref));
+	free(dt_ref);
 }
 
 static struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
 {
 	struct yaml_dt_state *dt = to_dt(t);
+	struct dt_property *dt_prop;
 	struct property *prop;
 
-	prop = malloc(sizeof(*prop));
-	assert(prop);
-	memset(prop, 0, sizeof(*prop));
+	dt_prop = malloc(sizeof(*dt_prop));
+	assert(dt_prop);
+	memset(dt_prop, 0, sizeof(*dt_prop));
+
+	prop = to_property(dt_prop);
 
 	prop->name = strdup(name);
 	assert(prop->name);
 
-	prop->line = dt->current_start_mark.line;
-	prop->column = dt->current_start_mark.column;
-	prop->end_line = dt->current_end_mark.line;
-	prop->end_column = dt->current_end_mark.column;
+	dt_prop->m = dt->current_mark;
 
 	return prop;
 }
 
 static void yaml_dt_prop_free(struct tree *t, struct property *prop)
 {
+	struct dt_property *dt_prop = to_dt_property(prop);
+
 	if (prop->data)
 		free(prop->data);
 	free(prop->name);
-	memset(prop, 0, sizeof(*prop));
-	free(prop);
+
+	memset(dt_prop, 0, sizeof(*dt_prop));
+	free(dt_prop);
 }
 
 static struct label *yaml_dt_label_alloc(struct tree *t, const char *name)
 {
+	struct yaml_dt_state *dt = to_dt(t);
+	struct dt_label *dt_l;
 	struct label *l;
 
-	l = malloc(sizeof(*l));
-	assert(l);
-	memset(l, 0, sizeof(*l));
+	dt_l = malloc(sizeof(*dt_l));
+	assert(dt_l);
+	memset(dt_l, 0, sizeof(*dt_l));
+
+	l = to_label(dt_l);
+
 	l->label = strdup(name);
 	assert(l->label);
+
+	dt_l->m = dt->current_mark;
 
 	return l;
 }
 
 static void yaml_dt_label_free(struct tree *t, struct label *l)
 {
+	struct dt_label *dt_l = to_dt_label(l);
+
 	free(l->label);
-	memset(l, 0, sizeof(*l));
-	free(l);
+
+	memset(dt_l, 0, sizeof(*dt_l));
+	free(dt_l);
 }
 
 static struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
 					     const char *label)
 {
+	struct yaml_dt_state *dt = to_dt(t);
+	struct dt_node *dt_np;
 	struct node *np;
 
-	np = malloc(sizeof(*np));
-	assert(np);
-	memset(np, 0, sizeof(*np));
+	dt_np = malloc(sizeof(*dt_np));
+	assert(dt_np);
+	memset(dt_np, 0, sizeof(*dt_np));
+
+	np = to_node(dt_np);
 
 	np->name = strdup(name);
 	assert(np->name);
+
+	dt_np->m = dt->current_mark;
 
 	return np;
 }
 
 static void yaml_dt_node_free(struct tree *t, struct node *np)
 {
+	struct dt_node *dt_np = to_dt_node(np);
+
 	free(np->name);
 
-	memset(np, 0, sizeof(*np));
-	free(np);
+	memset(dt_np, 0, sizeof(*dt_np));
+	free(dt_np);
 }
 
 static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
@@ -634,16 +656,16 @@ static struct property *
 property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 		 struct property *prop)
 {
+	struct dt_property *dt_prop;
+
 	if (!prop)
 		prop = prop_alloc(to_tree(dt), dt->map_key);
 	else
 		prop_ref_clear(to_tree(dt), prop);
 	assert(prop);
+	dt_prop = to_dt_property(prop);
 
-	prop->line = dt->current_start_mark.line;
-	prop->column = dt->current_start_mark.column;
-	prop->end_line = dt->current_end_mark.line;
-	prop->end_column = dt->current_end_mark.column;
+	dt_prop->m = dt->current_mark;
 
 	return prop;
 }
@@ -660,8 +682,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 	assert(!dt->current_event);
 	dt->current_event = event;
-	dt->current_start_mark = event->start_mark;
-	dt->current_end_mark = event->end_mark;
+
+	dt->current_mark.start = event->start_mark;
+	dt->current_mark.end = event->end_mark;
 
 	switch (type) {
 	case YAML_NO_EVENT:
@@ -737,10 +760,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 				np = node_alloc(to_tree(dt), dt->map_key, label);
 
-				np->line = dt->last_map_start_mark.line;
-				np->column = dt->last_map_start_mark.column;
-				np->end_line = dt->last_map_end_mark.line;
-				np->end_column = dt->last_map_end_mark.column;
+				/* mark as the last map */
+				to_dt_node(np)->m = dt->last_map_mark;
 
 				dt_debug(dt, "creating node @%s%s%s\n",
 						dn_fullname(np, namebuf, sizeof(namebuf)),
@@ -761,10 +782,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			} else {
 				dt_debug(dt, "ref node\n");
 
-				np->line = dt->last_alias_start_mark.line;
-				np->column = dt->last_alias_start_mark.column;
-				np->end_line = dt->last_alias_end_mark.line;
-				np->end_column = dt->last_alias_end_mark.column;
+				/* mark as the last map */
+				to_dt_node(np)->m = dt->last_alias_mark;
 
 				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
 			}
@@ -895,8 +914,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			memcpy(dt->map_key, event->data.scalar.value, len);
 			dt->map_key[len] = '\0';
 
-			dt->last_map_start_mark = event->start_mark;
-			dt->last_map_end_mark = event->end_mark;
+			dt->last_map_mark = dt->current_mark;
 
 		} else {
 			assert(np);
@@ -944,8 +962,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			strcpy(dt->map_key + 1, (char *)event->data.alias.anchor);
 			dt->current_np_ref = true;
 
-			dt->last_alias_start_mark = event->start_mark;
-			dt->last_alias_end_mark = event->end_mark;
+			dt->last_alias_mark = dt->current_mark;
 
 			if (dt->debug)
 				printf("next up is a ref to %s\n", dt->map_key);
@@ -1114,10 +1131,10 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	line = dt->current_start_mark.line;
-	column = dt->current_start_mark.column;
-	end_line = dt->current_end_mark.line;
-	end_column = dt->current_end_mark.column;
+	line = dt->current_mark.start.line;
+	column = dt->current_mark.start.column;
+	end_line = dt->current_mark.end.line;
+	end_column = dt->current_mark.end.column;
 
 	get_error_location(dt, line, column,
 			filebuf, sizeof(filebuf),
@@ -1141,12 +1158,17 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 }
 
 static void dt_print_at_msg(struct yaml_dt_state *dt,
-		 size_t line, size_t column,
-		 size_t end_line, size_t end_column,
-		 const char *type, const char *msg)
+			    const struct dt_yaml_mark *m,
+			    const char *type, const char *msg)
 {
 	char linebuf[1024];
 	char filebuf[PATH_MAX + 1];
+	size_t line, column, end_line, end_column;
+
+	line = m->start.line;
+	column = m->start.column;
+	end_line = m->end.line;
+	end_column = m->end.column;
 
 	get_error_location(dt, line, column,
 			filebuf, sizeof(filebuf),
@@ -1165,8 +1187,7 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 }
 
 void dt_print_at(struct yaml_dt_state *dt,
-		 size_t line, size_t column,
-		 size_t end_line, size_t end_column,
+		 const struct dt_yaml_mark *m,
 		 const char *type, const char *fmt, ...)
 {
 	va_list ap;
@@ -1182,13 +1203,12 @@ void dt_print_at(struct yaml_dt_state *dt,
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	dt_print_at_msg(dt, line, column, end_line, end_column, type, str);
+	dt_print_at_msg(dt, m, type, str);
 }
 
 void dt_warning_at(struct yaml_dt_state *dt,
-		 size_t line, size_t column,
-		 size_t end_line, size_t end_column,
-		 const char *fmt, ...)
+		   const struct dt_yaml_mark *m,
+		   const char *fmt, ...)
 {
 	va_list ap;
 	char str[1024];
@@ -1203,12 +1223,11 @@ void dt_warning_at(struct yaml_dt_state *dt,
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	dt_print_at_msg(dt, line, column, end_line, end_column, "warning", str);
+	dt_print_at_msg(dt, m, "warning", str);
 }
 
 void dt_error_at(struct yaml_dt_state *dt,
-		 size_t line, size_t column,
-		 size_t end_line, size_t end_column,
+		 const struct dt_yaml_mark *m,
 		 const char *fmt, ...)
 {
 	va_list ap;
@@ -1224,7 +1243,7 @@ void dt_error_at(struct yaml_dt_state *dt,
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	dt_print_at_msg(dt, line, column, end_line, end_column, "error", str);
+	dt_print_at_msg(dt, m, "error", str);
 	dt->error_flag = true;
 }
 

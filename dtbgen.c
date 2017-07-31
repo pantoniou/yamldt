@@ -243,8 +243,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		if (!np) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_error_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
@@ -262,8 +261,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		if (!np) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_error_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
@@ -305,8 +303,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32") ||
 		    !strcmp(tag, "!uint") || !strcmp(tag, "!uint32")) {
 			if (!is_int) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
+				dt_error_at(dt, &to_dt_ref(ref)->m,
 					    "Tagged int is invalid: %s\n", p);
 				return;
 			}
@@ -315,8 +312,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val32);
 		} else if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8")) {
 			if (!is_int) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
+				dt_error_at(dt, &to_dt_ref(ref)->m,
 					    "Tagged int is invalid: %s\n", p);
 				return;
 			}
@@ -325,8 +321,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val8);
 		} else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16")) {
 			if (!is_int) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
+				dt_error_at(dt, &to_dt_ref(ref)->m,
 					    "Tagged int is invalid: %s\n", p);
 				return;
 			}
@@ -335,8 +330,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val16);
 		} else if (!strcmp(tag, "!int64") || !strcmp(tag, "!uint64")) {
 			if (!is_int) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
+				dt_error_at(dt, &to_dt_ref(ref)->m,
 					    "Tagged int is invalid: %s\n", p);
 				return;
 			}
@@ -352,9 +346,9 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 				data = NULL;
 				size = 0;
 			} else {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
-					    "We don't support false booleans\n");
+				dt_warning_at(dt, &to_dt_ref(ref)->m,
+					      "False boolean will not be"
+					      " present in DTB output\n");
 				return;
 			}
 		} else if (!strcmp(tag, "!null")) {
@@ -362,8 +356,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = 0;
 			is_delete = true;
 		} else {
-			dt_error_at(dt, ref->line, ref->column,
-				ref->end_line, ref->end_column,
+			dt_error_at(dt, &to_dt_ref(ref)->m,
 				"Unsupported tag %s\n", tag);
 			return;
 		}
@@ -563,8 +556,7 @@ static void rename_with_unit_address(struct yaml_dt_state *dt,
 	free(np->name);
 	np->name = s;
 
-	dt_warning_at(dt, np->line, np->column,
-		np->end_line, np->end_column,
+	dt_warning_at(dt, &to_dt_node(np)->m,
 		"renamed %s to include unit address\n",
 		dn_fullname(np, namebuf, sizeof(namebuf)));
 }
@@ -652,8 +644,7 @@ static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
 				strlen(np->name + 1));
 		if (npref == NULL) {
-			dt_error_at(dt, np->line, np->column,
-				    np->end_line, np->end_column,
+			dt_error_at(dt, &to_dt_node(np)->m,
 				    "reference to unknown label %s\n",
 				    np->name + 1);
 		} else

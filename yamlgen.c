@@ -187,8 +187,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_error_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
@@ -207,8 +206,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		    memcmp(l->label, ref->data, ref->len)) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_warning_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_warning_at(dt, &to_dt_ref(ref)->m,
 				    "Switching label %s to label %s\n",
 				    namebuf, l->label);
 		}
@@ -222,8 +220,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		if (!np && !dt->object) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_error_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    namebuf);
 			return;
@@ -242,8 +239,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		    memcmp(l->label, ref->data, ref->len)) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_warning_at(dt, ref->line, ref->column,
-				    ref->end_line, ref->end_column,
+			dt_warning_at(dt, &to_dt_ref(ref)->m,
 				    "Switching label %s to label %s\n",
 				    namebuf, l->label);
 		}
@@ -281,17 +277,13 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 		if (is_int_tag(tag)) {
 			if (!is_int) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
+				dt_error_at(dt, &to_dt_ref(ref)->m,
 						"Invalid integer syntax\n");
 				return;
 			}
 			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
-				dt_error_at(dt, ref->line, ref->column,
-					ref->end_line, ref->end_column,
-						"Integer out of range%s%s\n",
-						is_unsigned ? " unsigned" : "",
-						is_hex ? " hex" : "");
+				dt_error_at(dt, &to_dt_ref(ref)->m,
+					    "Integer out of range\n");
 				return;
 			}
 
@@ -312,8 +304,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 			fwrite(ref->data, ref->len, 1, dt->output);
 		} else {
 			fwrite(ref->data, ref->len, 1, dt->output);
-			dt_warning_at(dt, ref->line, ref->column,
-				ref->end_line, ref->end_column,
+			dt_warning_at(dt, &to_dt_ref(ref)->m,
 				"Unknown tag %s\n", tag);
 		}
 
@@ -427,8 +418,7 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 				strlen(np->name + 1));
 
 		if (!npref && !dt->object)
-			dt_error_at(dt, np->line, np->column,
-				np->end_line, np->end_column,
+			dt_error_at(dt, &to_dt_node(np)->m,
 				"reference to unknown label %s\n",
 				np->name + 1);
 
