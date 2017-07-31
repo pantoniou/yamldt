@@ -87,7 +87,7 @@ static const char *get_builtin_tag(const char *tag)
 	return NULL;
 }
 
-static struct ref *
+struct ref *
 yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len, const char *xtag)
 {
@@ -127,7 +127,7 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 	return ref;
 }
 
-static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
+void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_ref *dt_ref = to_dt_ref(ref);
@@ -144,7 +144,7 @@ static void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 	free(dt_ref);
 }
 
-static struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
+struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_property *dt_prop;
@@ -164,7 +164,7 @@ static struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
 	return prop;
 }
 
-static void yaml_dt_prop_free(struct tree *t, struct property *prop)
+void yaml_dt_prop_free(struct tree *t, struct property *prop)
 {
 	struct dt_property *dt_prop = to_dt_property(prop);
 
@@ -176,7 +176,7 @@ static void yaml_dt_prop_free(struct tree *t, struct property *prop)
 	free(dt_prop);
 }
 
-static struct label *yaml_dt_label_alloc(struct tree *t, const char *name)
+struct label *yaml_dt_label_alloc(struct tree *t, const char *name)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_label *dt_l;
@@ -196,7 +196,7 @@ static struct label *yaml_dt_label_alloc(struct tree *t, const char *name)
 	return l;
 }
 
-static void yaml_dt_label_free(struct tree *t, struct label *l)
+void yaml_dt_label_free(struct tree *t, struct label *l)
 {
 	struct dt_label *dt_l = to_dt_label(l);
 
@@ -206,7 +206,7 @@ static void yaml_dt_label_free(struct tree *t, struct label *l)
 	free(dt_l);
 }
 
-static struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
+struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
 					     const char *label)
 {
 	struct yaml_dt_state *dt = to_dt(t);
@@ -227,7 +227,7 @@ static struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
 	return np;
 }
 
-static void yaml_dt_node_free(struct tree *t, struct node *np)
+void yaml_dt_node_free(struct tree *t, struct node *np)
 {
 	struct dt_node *dt_np = to_dt_node(np);
 
@@ -237,10 +237,7 @@ static void yaml_dt_node_free(struct tree *t, struct node *np)
 	free(dt_np);
 }
 
-static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 2, 0)));
-
-static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
+void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 {
 	struct yaml_dt_state *dt;
 	va_list ap;
@@ -252,18 +249,6 @@ static void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 		vfprintf(stderr, fmt, ap);
 	va_end(ap);
 }
-
-static const struct tree_ops yaml_tree_ops = {
-	.ref_alloc	= yaml_dt_ref_alloc,
-	.ref_free	= yaml_dt_ref_free,
-	.prop_alloc	= yaml_dt_prop_alloc,
-	.prop_free	= yaml_dt_prop_free,
-	.label_alloc	= yaml_dt_label_alloc,
-	.label_free	= yaml_dt_label_free,
-	.node_alloc	= yaml_dt_node_alloc,
-	.node_free	= yaml_dt_node_free,
-	.debugf		= yaml_dt_tree_debugf,
-};
 
 static void dt_stream_start(struct yaml_dt_state *dt)
 {
@@ -282,7 +267,6 @@ static void dt_stream_start(struct yaml_dt_state *dt)
 		dtb_init(dt);
 	else
 		yaml_init(dt);
-	tree_init(to_tree(dt), &yaml_tree_ops);
 }
 
 static void dt_stream_end(struct yaml_dt_state *dt)
@@ -301,7 +285,6 @@ static void dt_stream_end(struct yaml_dt_state *dt)
 		dtb_cleanup(dt);
 	else
 		yaml_cleanup(dt);
-	tree_term(to_tree(dt));
 }
 
 static void dt_document_start(struct yaml_dt_state *dt)

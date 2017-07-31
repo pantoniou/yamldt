@@ -156,15 +156,10 @@ struct yaml_dt_state {
 
 	bool error_flag;
 
-	/* tree build state */
+	/* tree build state (initialized by the emitter) */
 	struct tree tree;
-
-	union {
-		/* DTB generation state */
-		struct dtb_emit_state dtb;
-		/* YAML generation state */
-		struct yaml_emit_state yamlgen;
-	};
+	void *emitter_config;
+	void *emitter_state;
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)
@@ -191,5 +186,23 @@ void dt_warning_at(struct yaml_dt_state *dt,
 		   const struct dt_yaml_mark *m,
 		   const char *fmt, ...)
 		   __attribute__ ((__format__ (__printf__, 3, 0)));
+
+/* common tree hooks (called by emitters) */
+struct ref *yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
+			      const void *data, int len, const char *xtag);
+void yaml_dt_ref_free(struct tree *t, struct ref *ref);
+
+struct property *yaml_dt_prop_alloc(struct tree *t, const char *name);
+void yaml_dt_prop_free(struct tree *t, struct property *prop);
+
+struct label *yaml_dt_label_alloc(struct tree *t, const char *name);
+void yaml_dt_label_free(struct tree *t, struct label *l);
+
+struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
+				const char *label);
+void yaml_dt_node_free(struct tree *t, struct node *np);
+
+void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 2, 0)));
 
 #endif

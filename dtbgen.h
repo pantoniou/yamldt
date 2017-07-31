@@ -36,35 +36,6 @@
 #ifndef DTBGEN_H
 #define DTBGEN_H
 
-#include <stdint.h>
-#include <sys/time.h>
-#ifdef __linux__
-#include <linux/limits.h>
-#else
-#include <limits.h>
-#endif
-
-#include "list.h"
-
-enum dt_data_area {
-	dt_struct,
-	dt_strings,
-	dt_mem_rsvmap,
-	dt_area_max = dt_mem_rsvmap,
-};
-
-struct dtb_emit_state {
-	/* DTB generation state */
-	unsigned int next_phandle;
-	struct property *memreserve_prop;
-
-	struct {
-		void *data;
-		unsigned int alloc;
-		unsigned int size;
-	} area[dt_area_max + 1];
-};
-
 struct yaml_dt_state;
 
 void dtb_init(struct yaml_dt_state *dt);

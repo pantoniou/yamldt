@@ -50,6 +50,18 @@
 
 #include "yamldt.h"
 
+static const struct tree_ops yaml_tree_ops = {
+	.ref_alloc	= yaml_dt_ref_alloc,
+	.ref_free	= yaml_dt_ref_free,
+	.prop_alloc	= yaml_dt_prop_alloc,
+	.prop_free	= yaml_dt_prop_free,
+	.label_alloc	= yaml_dt_label_alloc,
+	.label_free	= yaml_dt_label_free,
+	.node_alloc	= yaml_dt_node_alloc,
+	.node_free	= yaml_dt_node_free,
+	.debugf		= yaml_dt_tree_debugf,
+};
+
 static int parse_int(const char *str, int len, unsigned long long *valp,
 		     bool *unsignedp, bool *hexp)
 {
@@ -449,12 +461,12 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 
 void yaml_init(struct yaml_dt_state *dt)
 {
-	/* nothing */
+	tree_init(to_tree(dt), &yaml_tree_ops);
 }
 
 void yaml_cleanup(struct yaml_dt_state *dt)
 {
-	/* nothing */
+	tree_cleanup(to_tree(dt));
 }
 
 void yaml_emit(struct yaml_dt_state *dt)

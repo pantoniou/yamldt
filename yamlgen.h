@@ -36,20 +36,6 @@
 #ifndef YAMLGEN_H
 #define YAMLGEN_H
 
-#include <stdint.h>
-#include <sys/time.h>
-#ifdef __linux__
-#include <linux/limits.h>
-#else
-#include <limits.h>
-#endif
-
-#include "list.h"
-
-struct yaml_emit_state {
-	/* nothing */
-};
-
 struct yaml_dt_state;
 
 void yaml_init(struct yaml_dt_state *dt);

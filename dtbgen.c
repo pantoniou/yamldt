@@ -43,13 +43,55 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <alloca.h>
+#include <stdint.h>
+#include <sys/time.h>
+#ifdef __linux__
+#include <linux/limits.h>
+#else
+#include <limits.h>
+#endif
+
+#include "list.h"
 
 #include "utils.h"
 #include "syexpr.h"
 
 #include "yamldt.h"
 
+enum dt_data_area {
+	dt_struct,
+	dt_strings,
+	dt_mem_rsvmap,
+	dt_area_max = dt_mem_rsvmap,
+};
+
+struct dtb_emit_state {
+	/* DTB generation state */
+	unsigned int next_phandle;
+	struct property *memreserve_prop;
+
+	struct {
+		void *data;
+		unsigned int alloc;
+		unsigned int size;
+	} area[dt_area_max + 1];
+};
+
+#define to_dtb(_dt) ((_dt)->emitter_state)
+
 static void dtb_dump(struct yaml_dt_state *dt);
+
+static const struct tree_ops dtb_tree_ops = {
+	.ref_alloc	= yaml_dt_ref_alloc,
+	.ref_free	= yaml_dt_ref_free,
+	.prop_alloc	= yaml_dt_prop_alloc,
+	.prop_free	= yaml_dt_prop_free,
+	.label_alloc	= yaml_dt_label_alloc,
+	.label_free	= yaml_dt_label_free,
+	.node_alloc	= yaml_dt_node_alloc,
+	.node_free	= yaml_dt_node_free,
+	.debugf		= yaml_dt_tree_debugf,
+};
 
 static void prop_set_data(struct property *prop, bool append,
 			    const void *data, int size,
@@ -382,6 +424,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 static void resolve(struct yaml_dt_state *dt, struct node *npt,
 		  unsigned int flags)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *child;
 	struct ref *ref, *refn;
 	struct node *np;
@@ -396,8 +439,8 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 					npt->phandle,
 					dn_fullname(npt, &namebuf[0][0], sizeof(namebuf[0])),
 					l->label);
-		npt->phandle = dt->dtb.next_phandle++;
-		assert(dt->dtb.next_phandle != 0 && dt->dtb.next_phandle != -1);
+		npt->phandle = dtb->next_phandle++;
+		assert(dtb->next_phandle != 0 && dtb->next_phandle != -1);
 	}
 
 	list_for_each_entry(prop, &npt->properties, node) {
@@ -419,8 +462,8 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 			}
 
 			if (!np->phandle) {
-				np->phandle = dt->dtb.next_phandle++;
-				assert(dt->dtb.next_phandle != 0 && dt->dtb.next_phandle != -1);
+				np->phandle = dtb->next_phandle++;
+				assert(dtb->next_phandle != 0 && dtb->next_phandle != -1);
 				list_for_each_entry(l, &np->labels, node)
 					dt_debug(dt, "assigned phandle %u at @%s label %s (@%s prop %s offset=%u)\n",
 						np->phandle,
@@ -448,6 +491,7 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 
 static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct property *prop, *propn;
 	struct ref *ref;
 	struct node *root;
@@ -473,12 +517,12 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 			list_del(&prop->node);
 			prop->np = NULL;
 
-			if (dt->dtb.memreserve_prop) {
-				prop_append(dt->dtb.memreserve_prop, prop->data,
+			if (dtb->memreserve_prop) {
+				prop_append(dtb->memreserve_prop, prop->data,
 					      prop->size, false);
 				prop_free(to_tree(dt), prop);
 			} else
-				dt->dtb.memreserve_prop = prop;
+				dtb->memreserve_prop = prop;
 		}
 	}
 }
@@ -659,6 +703,7 @@ static void dt_emit_data(struct yaml_dt_state *dt,
 		enum dt_data_area area, const void *data,
 		unsigned int size, unsigned int align)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	unsigned int asize = ALIGN(size, align);
 	unsigned int *sizep, *allocp;
 	void **datap;
@@ -666,9 +711,9 @@ static void dt_emit_data(struct yaml_dt_state *dt,
 
 	assert(area <= dt_area_max);
 
-	sizep  = &dt->dtb.area[area].size;
-	allocp = &dt->dtb.area[area].alloc;
-	datap  = &dt->dtb.area[area].data;
+	sizep  = &dtb->area[area].size;
+	allocp = &dtb->area[area].alloc;
+	datap  = &dtb->area[area].data;
 
 	if (align > 0)
 		asize = ALIGN(size, align);
@@ -699,9 +744,10 @@ static void dt_emit_data(struct yaml_dt_state *dt,
 unsigned int dt_emit_get_size(struct yaml_dt_state *dt,
 		enum dt_data_area area)
 {
-	assert(area <= dt_area_max);
+	struct dtb_emit_state *dtb = to_dtb(dt);
 
-	return dt->dtb.area[area].size;
+	assert(area <= dt_area_max);
+	return dtb->area[area].size;
 }
 
 static void dt_emit_32(struct yaml_dt_state *dt,
@@ -839,6 +885,7 @@ static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 static void build_string_table_compatible(struct yaml_dt_state *dt,
 		struct node *np)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *child;
 	struct property *prop;
 	void *s, *e, *data;
@@ -846,9 +893,9 @@ static void build_string_table_compatible(struct yaml_dt_state *dt,
 
 	list_for_each_entry(prop, &np->properties, node) {
 
-		data = dt->dtb.area[dt_strings].data;
+		data = dtb->area[dt_strings].data;
 		s = data;
-		e = s + dt->dtb.area[dt_strings].size;
+		e = s + dtb->area[dt_strings].size;
 
 		l1 = strlen(prop->name);
 		while (s < e) {
@@ -954,28 +1001,40 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 
 void dtb_init(struct yaml_dt_state *dt)
 {
-	memset(&dt->dtb, 0, sizeof(dt->dtb));
-	dt->dtb.next_phandle = 1;
+	struct dtb_emit_state *dtb;
+
+	dtb = malloc(sizeof(*dtb));
+	assert(dtb);
+	memset(dtb, 0, sizeof(*dtb));
+
+	dtb->next_phandle = 1;
+	dt->emitter_state = dtb;
+
+	tree_init(to_tree(dt), &dtb_tree_ops);
 }
 
 void dtb_cleanup(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	enum dt_data_area area;
 
+	tree_cleanup(to_tree(dt));
+
 	for (area = 0; area <= dt_area_max; area++) {
-		if (dt->dtb.area[area].data)
-			free(dt->dtb.area[area].data);
+		if (dtb->area[area].data)
+			free(dtb->area[area].data);
 	}
 
-	if (dt->dtb.memreserve_prop)
-		prop_free(to_tree(dt), dt->dtb.memreserve_prop);
+	if (dtb->memreserve_prop)
+		prop_free(to_tree(dt), dtb->memreserve_prop);
 
-	memset(&dt->dtb, 0, sizeof(dt->dtb));
-	dt->dtb.next_phandle = 1;
+	memset(dtb, 0, sizeof(*dtb));
+	free(dtb);
 }
 
 void dtb_emit(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct fdt_header fdth;
 	struct property *prop;
 	unsigned int totalsize, size_fdt_hdr, size_dt_strings, size_dt_struct,
@@ -998,7 +1057,7 @@ void dtb_emit(struct yaml_dt_state *dt)
 	dtb_flatten_node(dt);
 
 	/* generate reserve entry */
-	if ((prop = dt->dtb.memreserve_prop) && (size = prop->size) > 0)
+	if ((prop = dtb->memreserve_prop) && (size = prop->size) > 0)
 		dt_emit_data(dt, dt_mem_rsvmap, prop->data, size, false);
 
 	/* terminate reserve entry */
@@ -1027,12 +1086,12 @@ void dtb_emit(struct yaml_dt_state *dt)
 	fdth.size_dt_struct = cpu_to_fdt32(size_dt_struct);
 
 	fwrite(&fdth, size_fdt_hdr, 1, dt->output);
-	fwrite(dt->dtb.area[dt_mem_rsvmap].data,
-	       dt->dtb.area[dt_mem_rsvmap].size, 1, dt->output);
-	fwrite(dt->dtb.area[dt_struct].data,
-	       dt->dtb.area[dt_struct].size, 1, dt->output);
-	fwrite(dt->dtb.area[dt_strings].data,
-	       dt->dtb.area[dt_strings].size, 1, dt->output);
+	fwrite(dtb->area[dt_mem_rsvmap].data, dtb->area[dt_mem_rsvmap].size,
+			1, dt->output);
+	fwrite(dtb->area[dt_struct].data, dtb->area[dt_struct].size,
+			1, dt->output);
+	fwrite(dtb->area[dt_strings].data, dtb->area[dt_strings].size,
+			1, dt->output);
 }
 
 static void print_prop(int col, int width, const char *data, int len)
