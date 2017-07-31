@@ -316,7 +316,7 @@ void tree_init(struct tree *t, const struct tree_ops *ops)
 	t->ops = ops;
 }
 
-void tree_term(struct tree *t)
+void tree_cleanup(struct tree *t)
 {
 	struct node *np, *npn;
 	struct property *prop, *propn;

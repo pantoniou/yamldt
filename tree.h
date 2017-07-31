@@ -154,7 +154,7 @@ static inline struct list_head *tree_del_props(struct tree *t)
 }
 
 void tree_init(struct tree *t, const struct tree_ops *ops);
-void tree_term(struct tree *t);
+void tree_cleanup(struct tree *t);
 
 struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len,
