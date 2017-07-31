@@ -92,9 +92,27 @@ yamldt [options] <input-file>
    -d, --debug		Debug messages
    -y, --yaml           Generate YAML output
    -C, --compatible	Bit exact compatibility mode
+   -l, --late-resolve	Late resolution mode
+   -c, --object	Object mode
+   -s, --dts		DTS output instead of DTB
    -h, --help		Help
    -v, --version	Display version
 ```
+
+The `-C/--compatible` option generates a bit exact DTB file.
+
+The `-l/--late-resolve` option enables manipulation of the tree in ways
+that is not possible with DTS (for example unit names are automatically
+generated).
+
+The `-c/--object` option generates an YAML object file that can be
+used in linking similar to the way C sources and object files work.
+
+The `-s/--dts` option selects a DTS output format instead of DTB.
+
+Automatic suffix detection does what you expect (i.e. an output file
+ending in .dtb is selecting the DTB generation option, .yaml the yaml
+one and so on).
 
 Given a source file in YAML `foo.yaml` you generate a dtb file
 with
