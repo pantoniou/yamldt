@@ -58,6 +58,31 @@
 
 #include "yamldt.h"
 
+struct dtb_node {
+	struct dt_node dt;
+	/* DTB generation */
+	unsigned int phandle;
+	bool marker : 1;	/* generic marker */
+};
+#define to_dtb_node(_n) 	\
+	container_of(container_of(_n, struct dt_node, n), struct dtb_node, dt)
+
+struct dtb_property {
+	struct dt_property dt;
+	void *data;
+	int size;
+	unsigned int offset;		/* DTB offset to the string table */
+};
+#define to_dtb_prop(_p) 	\
+	container_of(container_of(_p, struct dt_property, p), struct dtb_property, dt)
+
+struct dtb_ref {
+	struct dt_ref dt;
+	unsigned int offset;
+};
+#define to_dtb_ref(_r) 	\
+	container_of(container_of(_r, struct dt_ref, r), struct dtb_ref, dt)
+
 enum dt_data_area {
 	dt_struct,
 	dt_strings,
@@ -81,15 +106,83 @@ struct dtb_emit_state {
 
 static void dtb_dump(struct yaml_dt_state *dt);
 
+static struct ref *dtb_ref_alloc(struct tree *t, enum ref_type type,
+				 const void *data, int len, const char *xtag)
+{
+	struct ref *ref;
+
+	ref = yaml_dt_ref_alloc(t, type, data, len, xtag,
+			sizeof(struct dtb_ref));
+	to_dtb_ref(ref)->offset = -1;
+
+	return ref;
+}
+
+static void dtb_ref_free(struct tree *t, struct ref *ref)
+{
+	yaml_dt_ref_free(t, ref);
+}
+
+static struct property *dtb_prop_alloc(struct tree *t, const char *name)
+{
+	struct dtb_property *dtbprop;
+	struct property *prop;
+
+	prop = yaml_dt_prop_alloc(t, name, sizeof(*dtbprop));
+
+	dtbprop = to_dtb_prop(prop);
+	dtbprop->offset = -1;
+
+	return prop;
+}
+
+static void dtb_prop_free(struct tree *t, struct property *prop)
+{
+	if (to_dtb_prop(prop)->data)
+		free(to_dtb_prop(prop)->data);
+
+	yaml_dt_prop_free(t, prop);
+}
+
+static struct label *dtb_label_alloc(struct tree *t, const char *name)
+{
+	return yaml_dt_label_alloc(t, name, sizeof(struct dt_label));
+}
+
+static void dtb_label_free(struct tree *t, struct label *l)
+{
+	yaml_dt_label_free(t, l);
+}
+
+static struct node *dtb_node_alloc(struct tree *t, const char *name,
+				   const char *label)
+{
+	struct node *np;
+	struct dtb_node *dtbnp;
+
+	np = yaml_dt_node_alloc(t, name, label, sizeof(*dtbnp));
+
+	dtbnp = to_dtb_node(np);
+	dtbnp->phandle = 0;
+	dtbnp->marker = false;
+
+	return np;
+}
+
+static void dtb_node_free(struct tree *t, struct node *np)
+{
+	yaml_dt_node_free(t, np);
+}
+
 static const struct tree_ops dtb_tree_ops = {
-	.ref_alloc	= yaml_dt_ref_alloc,
-	.ref_free	= yaml_dt_ref_free,
-	.prop_alloc	= yaml_dt_prop_alloc,
-	.prop_free	= yaml_dt_prop_free,
-	.label_alloc	= yaml_dt_label_alloc,
-	.label_free	= yaml_dt_label_free,
-	.node_alloc	= yaml_dt_node_alloc,
-	.node_free	= yaml_dt_node_free,
+	.ref_alloc	= dtb_ref_alloc,
+	.ref_free	= dtb_ref_free,
+	.prop_alloc	= dtb_prop_alloc,
+	.prop_free	= dtb_prop_free,
+	.label_alloc	= dtb_label_alloc,
+	.label_free	= dtb_label_free,
+	.node_alloc	= dtb_node_alloc,
+	.node_free	= dtb_node_free,
 	.debugf		= yaml_dt_tree_debugf,
 };
 
@@ -97,38 +190,39 @@ static void prop_set_data(struct property *prop, bool append,
 			    const void *data, int size,
 			    bool append_zero, int offset)
 {
+	struct dtb_property *dtbprop = to_dtb_prop(prop);
 	void *newdata;
 	int newsize;
 
 	/* direct set data */
 	if (offset >= 0) {
-		assert(offset + size <= prop->size);
-		assert(prop->data);
-		memcpy(prop->data + offset, data, size);
+		assert(offset + size <= dtbprop->size);
+		assert(dtbprop->data);
+		memcpy(dtbprop->data + offset, data, size);
 		return;
 	}
 
-	if (!append && prop->data) {
-		free(prop->data);
-		prop->size = 0;
+	if (!append && dtbprop->data) {
+		free(dtbprop->data);
+		dtbprop->size = 0;
 	}
 
-	newsize = prop->size + size + (append_zero ? 1 : 0);
+	newsize = dtbprop->size + size + (append_zero ? 1 : 0);
 	if (newsize > 0) {
 		newdata = malloc(newsize);
 		assert(newdata);
-		if (prop->data && prop->size)
-			memcpy(newdata, prop->data, prop->size);
-		memcpy(newdata + prop->size, data, size);
+		if (dtbprop->data && dtbprop->size)
+			memcpy(newdata, dtbprop->data, dtbprop->size);
+		memcpy(newdata + dtbprop->size, data, size);
 		if (append_zero)
-			*((char *)newdata + prop->size + size) = '\0';
-		if (prop->data)
-			free(prop->data);
-		prop->data = newdata;
-		prop->size = newsize;
+			*((char *)newdata + dtbprop->size + size) = '\0';
+		if (dtbprop->data)
+			free(dtbprop->data);
+		dtbprop->data = newdata;
+		dtbprop->size = newsize;
 	} else {
-		prop->data = NULL;
-		prop->size = 0;
+		dtbprop->data = NULL;
+		dtbprop->size = 0;
 	}
 }
 
@@ -146,14 +240,15 @@ static void prop_replace(struct property *prop, const void *data,
 
 static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 {
+	struct dtb_node *dtbnp = to_dtb_node(np);
 	struct node *child;
 	struct property *prop;
 	fdt32_t phandle;
 
-	if (np->phandle != 0) {
+	if (dtbnp->phandle != 0) {
 		prop = prop_alloc(to_tree(dt), "phandle");
 
-		phandle = cpu_to_fdt32(np->phandle);
+		phandle = cpu_to_fdt32(dtbnp->phandle);
 
 		prop_append(prop, &phandle, sizeof(fdt32_t), false);
 
@@ -250,6 +345,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 {
 	struct node *np;
 	struct property *prop;
+	struct dtb_property *dtbprop;
 	int ret, len;
 	uint8_t val8;
 	fdt16_t val16;
@@ -269,6 +365,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 
 	prop = ref->prop;
 	assert(prop);
+	dtbprop = to_dtb_prop(prop);
 
 	data = NULL;
 	size = 0;
@@ -291,7 +388,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			return;
 		}
 
-		phandlet = cpu_to_fdt32(np->phandle);
+		phandlet = cpu_to_fdt32(to_dtb_node(np)->phandle);
 
 		data = &phandlet;
 		size = sizeof(phandlet);
@@ -410,12 +507,12 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		break;
 	}
 
-	ref->offset = prop->size;
+	to_dtb_ref(ref)->offset = dtbprop->size;
 	prop_append(prop, data, size, append_0);
 
 	if (is_delete)
 		prop->is_delete = is_delete;
-	else if (prop->size > 0)
+	else if (dtbprop->size > 0)
 		prop->is_delete = false;
 
 	np = prop->np;
@@ -433,13 +530,15 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 	fdt32_t phandlet;
 	char namebuf[2][NODE_FULLNAME_MAX];
 
-	if ((flags & RF_LABELS) && !npt->phandle && !list_empty(&npt->labels)) {
+	if ((flags & RF_LABELS) && !to_dtb_node(npt)->phandle &&
+			!list_empty(&npt->labels)) {
+
 		list_for_each_entry(l, &npt->labels, node)
 			dt_debug(dt, "label: assigned phandle %u at @%s label %s\n",
-					npt->phandle,
+					to_dtb_node(npt)->phandle,
 					dn_fullname(npt, &namebuf[0][0], sizeof(namebuf[0])),
 					l->label);
-		npt->phandle = dtb->next_phandle++;
+		to_dtb_node(npt)->phandle = dtb->next_phandle++;
 		assert(dtb->next_phandle != 0 && dtb->next_phandle != -1);
 	}
 
@@ -461,27 +560,29 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 				dt_fatal(dt, "Can't resolve reference to label %s\n", namebuf);
 			}
 
-			if (!np->phandle) {
-				np->phandle = dtb->next_phandle++;
+			if (!to_dtb_node(np)->phandle) {
+				to_dtb_node(np)->phandle = dtb->next_phandle++;
 				assert(dtb->next_phandle != 0 && dtb->next_phandle != -1);
 				list_for_each_entry(l, &np->labels, node)
 					dt_debug(dt, "assigned phandle %u at @%s label %s (@%s prop %s offset=%u)\n",
-						np->phandle,
+						to_dtb_node(np)->phandle,
 						dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])),
 						l->label,
 						dn_fullname(npt, &namebuf[1][0], sizeof(namebuf[1])),
-						prop->name, prop->offset);
+						prop->name, to_dtb_prop(prop)->offset);
 			}
 
-			assert (prop->size >= ref->offset + sizeof(fdt32_t));
+			assert(to_dtb_prop(prop)->size >=
+					to_dtb_ref(ref)->offset + sizeof(fdt32_t));
 
-			phandlet = cpu_to_fdt32(np->phandle);
-			prop_replace(prop, &phandlet, sizeof(fdt32_t), ref->offset);
+			phandlet = cpu_to_fdt32(to_dtb_node(np)->phandle);
+			prop_replace(prop, &phandlet, sizeof(fdt32_t),
+					to_dtb_ref(ref)->offset);
 
 			dt_debug(dt, "resolved property %s at @%s (%u)\n",
 				prop->name,
 				dn_fullname(prop->np, &namebuf[0][0], sizeof(namebuf[0])),
-				np->phandle);
+				to_dtb_node(np)->phandle);
 		}
 	}
 
@@ -493,6 +594,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct property *prop, *propn;
+	struct dtb_property *dtbprop;
 	struct ref *ref;
 	struct node *root;
 
@@ -510,16 +612,19 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 			list_for_each_entry(ref, &prop->refs, node)
 				ref_resolve(dt, ref);
 
+			dtbprop = to_dtb_prop(prop);
+
 			/* must be aligned */
-			if (prop->size % (2 * sizeof(uint64_t)))
+			if (dtbprop->size % (2 * sizeof(uint64_t)))
 				dt_fatal(dt, "Invalid memreserve size (%d)\n",
-						prop->size);
+						dtbprop->size);
 			list_del(&prop->node);
 			prop->np = NULL;
 
 			if (dtb->memreserve_prop) {
-				prop_append(dtb->memreserve_prop, prop->data,
-					      prop->size, false);
+				prop_append(dtb->memreserve_prop,
+					    dtbprop->data, dtbprop->size,
+					    false);
 				prop_free(to_tree(dt), prop);
 			} else
 				dtb->memreserve_prop = prop;
@@ -635,23 +740,27 @@ static void late_resolve_node(struct yaml_dt_state *dt,
 	list_for_each_entry(child, &np->children, node) {
 
 		list_for_each_entry(childt, &np->children, node)
-			child->marker = false;
+			to_dtb_node(child)->marker = false;
 
 		list_for_each_entry(childt, &np->children, node) {
-			childt->marker = needs_unit_address_rename(dt, child, childt);
-			if (childt->marker)
-				child->marker = true;
+			to_dtb_node(childt)->marker =
+				needs_unit_address_rename(dt, child, childt);
+			if (to_dtb_node(childt)->marker)
+				to_dtb_node(child)->marker = true;
 		}
 
-		if (child->marker) {
+		if (to_dtb_node(child)->marker) {
 			rename_with_unit_address(dt, child);
 			list_for_each_entry(childt, &np->children, node) {
-				if (childt != child && childt->marker) {
+				if (childt == child)
+					continue;
+
+				if (to_dtb_node(childt)->marker) {
 					rename_with_unit_address(dt, childt);
-					childt->marker = false;
+					to_dtb_node(childt)->marker = false;
 				}
 			}
-			child->marker = false;
+			to_dtb_node(child)->marker = false;
 		}
 	}
 
@@ -862,9 +971,10 @@ static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 
 			/* matched? record offset */
 			if (!strcmp(s1, s2 + l2 - l1)) {
-				prop->offset = prop2->offset + l2 - l1;
+				to_dtb_prop(prop)->offset =
+					to_dtb_prop(prop2)->offset + l2 - l1;
 				dt_debug(dt, "%s offset %d (reusing %s)\n",
-					prop->name, prop->offset,
+					prop->name, to_dtb_prop(prop)->offset,
 					prop2->name);
 				break;
 			}
@@ -872,10 +982,11 @@ static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 
 		/* no match */
 		if (j >= i) {
-			prop->offset = dt_emit_get_size(dt, dt_strings);
+			to_dtb_prop(prop)->offset = dt_emit_get_size(dt, dt_strings);
 			dt_emit_str(dt, dt_strings, prop->name, false);
 
-			dt_debug(dt, "%s offset %d\n", prop->name, prop->offset);
+			dt_debug(dt, "%s offset %d\n", prop->name,
+					to_dtb_prop(prop)->offset);
 		}
 	}
 
@@ -910,12 +1021,12 @@ static void build_string_table_compatible(struct yaml_dt_state *dt,
 		if (s >= e)
 			s = e;
 
-		prop->offset = (unsigned int)(s - data);
+		to_dtb_prop(prop)->offset = (unsigned int)(s - data);
 
-		if (prop->offset == dt_emit_get_size(dt, dt_strings))
+		if (to_dtb_prop(prop)->offset == dt_emit_get_size(dt, dt_strings))
 			dt_emit_str(dt, dt_strings, prop->name, false);
 
-		dt_debug(dt, "%s offset %d\n", prop->name, prop->offset);
+		dt_debug(dt, "%s offset %d\n", prop->name, to_dtb_prop(prop)->offset);
 	}
 
 	list_for_each_entry(child, &np->children, node)
@@ -939,18 +1050,22 @@ static void flatten_node(struct yaml_dt_state *dt, struct node *np)
 {
 	struct node *child;
 	struct property *prop;
+	struct dtb_property *dtbprop;
 
 	dt_emit_32(dt, dt_struct, FDT_BEGIN_NODE, false);
 	dt_emit_str(dt, dt_struct, np->name, true);
 
 	list_for_each_entry(prop, &np->properties, node) {
+
+		dtbprop = to_dtb_prop(prop);
+
 		dt_emit_32(dt, dt_struct, FDT_PROP, false);
-		dt_emit_32(dt, dt_struct, prop->size, false);
+		dt_emit_32(dt, dt_struct, dtbprop->size, false);
 
-		assert(prop->offset >= 0);
-		dt_emit_32(dt, dt_struct, prop->offset, false);
+		assert(dtbprop->offset >= 0);
+		dt_emit_32(dt, dt_struct, dtbprop->offset, false);
 
-		dt_emit_data(dt, dt_struct, prop->data, prop->size,
+		dt_emit_data(dt, dt_struct, dtbprop->data, dtbprop->size,
 			     sizeof(fdt32_t));
 	}
 
@@ -970,6 +1085,7 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 {
 	struct node *root, *np, *child;
 	struct property *prop;
+	struct dtb_property *dtbprop;
 	fdt32_t val;
 
 	root = tree_root(to_tree(dt));
@@ -983,9 +1099,10 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 		list_for_each_entry(child, &np->children, node) {
 
 			list_for_each_entry(prop, &child->properties, node) {
+				dtbprop = to_dtb_prop(prop);
 				if (!strcmp(prop->name, "reg") &&
-					prop->size >= sizeof(fdt32_t)) {
-					memcpy(&val, prop->data, sizeof(val));
+					dtbprop->size >= sizeof(fdt32_t)) {
+					memcpy(&val, dtbprop->data, sizeof(val));
 					return fdt32_to_cpu(val);
 				}
 			}
@@ -1057,8 +1174,10 @@ void dtb_emit(struct yaml_dt_state *dt)
 	dtb_flatten_node(dt);
 
 	/* generate reserve entry */
-	if ((prop = dtb->memreserve_prop) && (size = prop->size) > 0)
-		dt_emit_data(dt, dt_mem_rsvmap, prop->data, size, false);
+	prop = dtb->memreserve_prop;
+	if (prop && (size = to_dtb_prop(prop)->size) > 0)
+		dt_emit_data(dt, dt_mem_rsvmap,
+				to_dtb_prop(prop)->data, size, false);
 
 	/* terminate reserve entry */
 	dt_emit_64(dt, dt_mem_rsvmap, 0, false);
@@ -1178,6 +1297,7 @@ static void __dn_dump(struct yaml_dt_state *dt, struct node *np, int depth)
 {
 	struct node *child;
 	struct property *prop;
+	struct dtb_property *dtbprop;
 	struct label *l;
 	const char *name;
 	int count;
@@ -1201,9 +1321,10 @@ static void __dn_dump(struct yaml_dt_state *dt, struct node *np, int depth)
 	printf("%s%s {\n", count > 0 ? " " : "", name);
 
 	list_for_each_entry(prop, &np->properties, node) {
+		dtbprop = to_dtb_prop(prop);
 		printf("%*s%s", (depth + 1) * 4, "", prop->name);
-		p = prop->data;
-		size = prop->size;
+		p = dtbprop->data;
+		size = dtbprop->size;
 		print_prop((depth + 1) * 4 + strlen(prop->name), 80, p, size);
 		printf(";\n");
 	}

@@ -54,8 +54,6 @@
 #include "fdt.h"
 
 #include "tree.h"
-#include "dtbgen.h"
-#include "yamlgen.h"
 
 /* should be enough */
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
@@ -189,17 +187,20 @@ void dt_warning_at(struct yaml_dt_state *dt,
 
 /* common tree hooks (called by emitters) */
 struct ref *yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
-			      const void *data, int len, const char *xtag);
+			      const void *data, int len, const char *xtag,
+			      int size);
 void yaml_dt_ref_free(struct tree *t, struct ref *ref);
 
-struct property *yaml_dt_prop_alloc(struct tree *t, const char *name);
+struct property *yaml_dt_prop_alloc(struct tree *t, const char *name,
+				    int size);
 void yaml_dt_prop_free(struct tree *t, struct property *prop);
 
-struct label *yaml_dt_label_alloc(struct tree *t, const char *name);
+struct label *yaml_dt_label_alloc(struct tree *t, const char *name,
+				  int size);
 void yaml_dt_label_free(struct tree *t, struct label *l);
 
 struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
-				const char *label);
+				const char *label, int size);
 void yaml_dt_node_free(struct tree *t, struct node *np);
 
 void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)

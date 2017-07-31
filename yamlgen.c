@@ -50,15 +50,58 @@
 
 #include "yamldt.h"
 
+static struct ref *yaml_ref_alloc(struct tree *t, enum ref_type type,
+				 const void *data, int len, const char *xtag)
+{
+	return yaml_dt_ref_alloc(t, type, data, len, xtag,
+			sizeof(struct dt_ref));
+}
+
+static void yaml_ref_free(struct tree *t, struct ref *ref)
+{
+	yaml_dt_ref_free(t, ref);
+}
+
+static struct property *yaml_prop_alloc(struct tree *t, const char *name)
+{
+	return yaml_dt_prop_alloc(t, name, sizeof(struct dt_property));
+}
+
+static void yaml_prop_free(struct tree *t, struct property *prop)
+{
+	yaml_dt_prop_free(t, prop);
+}
+
+static struct label *yaml_label_alloc(struct tree *t, const char *name)
+{
+	return yaml_dt_label_alloc(t, name, sizeof(struct dt_label));
+}
+
+static void yaml_label_free(struct tree *t, struct label *l)
+{
+	yaml_dt_label_free(t, l);
+}
+
+static struct node *yaml_node_alloc(struct tree *t, const char *name,
+				   const char *label)
+{
+	return yaml_dt_node_alloc(t, name, label, sizeof(struct dt_node));
+}
+
+static void yaml_node_free(struct tree *t, struct node *np)
+{
+	yaml_dt_node_free(t, np);
+}
+
 static const struct tree_ops yaml_tree_ops = {
-	.ref_alloc	= yaml_dt_ref_alloc,
-	.ref_free	= yaml_dt_ref_free,
-	.prop_alloc	= yaml_dt_prop_alloc,
-	.prop_free	= yaml_dt_prop_free,
-	.label_alloc	= yaml_dt_label_alloc,
-	.label_free	= yaml_dt_label_free,
-	.node_alloc	= yaml_dt_node_alloc,
-	.node_free	= yaml_dt_node_free,
+	.ref_alloc	= yaml_ref_alloc,
+	.ref_free	= yaml_ref_free,
+	.prop_alloc	= yaml_prop_alloc,
+	.prop_free	= yaml_prop_free,
+	.label_alloc	= yaml_label_alloc,
+	.label_free	= yaml_label_free,
+	.node_alloc	= yaml_node_alloc,
+	.node_free	= yaml_node_free,
 	.debugf		= yaml_dt_tree_debugf,
 };
 

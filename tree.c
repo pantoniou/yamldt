@@ -90,7 +90,6 @@ struct property *prop_alloc(struct tree *t, const char *name)
 		return NULL;
 
 	INIT_LIST_HEAD(&prop->refs);
-	prop->offset = -1;
 
 	return prop;
 }

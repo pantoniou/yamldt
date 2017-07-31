@@ -55,11 +55,6 @@ struct property {
 	struct list_head refs;
 	bool is_delete : 1;	/* set to true it is signals deletion */
 	bool deleted : 1;
-	/* ... */
-	void *data;
-	int size;
-	/* DTB generation */
-	unsigned int offset;		/* DTB offset to the string table */
 };
 
 struct node {
@@ -69,9 +64,6 @@ struct node {
 	struct list_head properties;
 	struct list_head labels;
 	char *name;
-	/* DTB generation */
-	unsigned int phandle;
-	bool marker : 1;	/* generic marker */
 };
 
 struct label {
@@ -98,8 +90,6 @@ struct ref {
 	int len;
 	char *xtag;	/* explicit tag */
 	const char *xtag_builtin;
-	/* for DTB */
-	unsigned int offset;
 };
 
 struct tree;

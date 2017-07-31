@@ -57,6 +57,9 @@
 
 #include "yamldt.h"
 
+#include "dtbgen.h"
+#include "yamlgen.h"
+
 static const char *get_builtin_tag(const char *tag)
 {
 	static const char *tags[] = {
@@ -89,16 +92,18 @@ static const char *get_builtin_tag(const char *tag)
 
 struct ref *
 yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
-		const void *data, int len, const char *xtag)
+		const void *data, int len, const char *xtag, int size)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_ref *dt_ref;
 	struct ref *ref;
 	void *p;
 
-	dt_ref = malloc(sizeof(*dt_ref));
+	assert(size >= sizeof(*dt_ref));
+
+	dt_ref = malloc(size);
 	assert(dt_ref);
-	memset(dt_ref, 0, sizeof(*dt_ref));
+	memset(dt_ref, 0, size);
 
 	ref = to_ref(dt_ref);
 
@@ -140,19 +145,19 @@ void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 	if (p < dt->input_content || p >= dt->input_content + dt->input_size)
 		free(p);
 
-	memset(dt_ref, 0, sizeof(*dt_ref));
 	free(dt_ref);
 }
 
-struct property *yaml_dt_prop_alloc(struct tree *t, const char *name)
+struct property *yaml_dt_prop_alloc(struct tree *t, const char *name, int size)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_property *dt_prop;
 	struct property *prop;
 
-	dt_prop = malloc(sizeof(*dt_prop));
+	assert(size >= sizeof(*dt_prop));
+	dt_prop = malloc(size);
 	assert(dt_prop);
-	memset(dt_prop, 0, sizeof(*dt_prop));
+	memset(dt_prop, 0, size);
 
 	prop = to_property(dt_prop);
 
@@ -168,23 +173,20 @@ void yaml_dt_prop_free(struct tree *t, struct property *prop)
 {
 	struct dt_property *dt_prop = to_dt_property(prop);
 
-	if (prop->data)
-		free(prop->data);
 	free(prop->name);
-
-	memset(dt_prop, 0, sizeof(*dt_prop));
 	free(dt_prop);
 }
 
-struct label *yaml_dt_label_alloc(struct tree *t, const char *name)
+struct label *yaml_dt_label_alloc(struct tree *t, const char *name, int size)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_label *dt_l;
 	struct label *l;
 
-	dt_l = malloc(sizeof(*dt_l));
+	assert(size >= sizeof(*dt_l));
+	dt_l = malloc(size);
 	assert(dt_l);
-	memset(dt_l, 0, sizeof(*dt_l));
+	memset(dt_l, 0, size);
 
 	l = to_label(dt_l);
 
@@ -202,20 +204,20 @@ void yaml_dt_label_free(struct tree *t, struct label *l)
 
 	free(l->label);
 
-	memset(dt_l, 0, sizeof(*dt_l));
 	free(dt_l);
 }
 
 struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
-					     const char *label)
+				const char *label, int size)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_node *dt_np;
 	struct node *np;
 
-	dt_np = malloc(sizeof(*dt_np));
+	assert(size >= sizeof(*dt_np));
+	dt_np = malloc(size);
 	assert(dt_np);
-	memset(dt_np, 0, sizeof(*dt_np));
+	memset(dt_np, 0, size);
 
 	np = to_node(dt_np);
 
@@ -232,8 +234,6 @@ void yaml_dt_node_free(struct tree *t, struct node *np)
 	struct dt_node *dt_np = to_dt_node(np);
 
 	free(np->name);
-
-	memset(dt_np, 0, sizeof(*dt_np));
 	free(dt_np);
 }
 
@@ -629,7 +629,6 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 
 		/* add the reference to the list */
 		ref->prop = prop;
-		ref->offset = -1;
 		ref->np = NULL;
 		list_add_tail(&ref->node, &prop->refs);
 	}
