@@ -236,7 +236,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	tag = xtag;
 
 	/* 60 bytes for a display purposes should be enough */
-	refnamelen = ref->len > 60 ? 60 : (ref->len);
+	refnamelen = ref->len > 60 ? 60 : ref->len;
 	refname = alloca(refnamelen + 1);
 	memcpy(refname, ref->data, refnamelen);
 	refname[refnamelen] = '\0';

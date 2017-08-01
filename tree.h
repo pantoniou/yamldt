@@ -1,5 +1,5 @@
 /*
- * tree.h - Generic tree handling 
+ * tree.h - Generic tree handling
  *
  * YAML to DTB generator
  *
@@ -84,7 +84,6 @@ enum ref_type {
 struct ref {
 	struct list_head node;
 	enum ref_type type;
-	struct node *np;
 	struct property *prop;
 	const void *data;
 	int len;

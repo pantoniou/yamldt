@@ -147,7 +147,7 @@ struct yaml_dt_state {
 	struct node *current_np;
 	bool current_np_isref;
 	struct property *current_prop;
-	bool current_prop_existed; 
+	bool current_prop_existed;
 	char *map_key;
 	int depth;
 	int prop_seq_depth;

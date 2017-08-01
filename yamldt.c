@@ -630,7 +630,6 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 
 		/* add the reference to the list */
 		ref->prop = prop;
-		ref->np = NULL;
 		list_add_tail(&ref->node, &prop->refs);
 	}
 }
