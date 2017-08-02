@@ -50,6 +50,17 @@
 
 #include "yamldt.h"
 
+struct yaml_emit_config {
+	bool object;
+};
+#define to_yaml_cfg(_dt) ((struct yaml_emit_config *)((_dt)->emitter_cfg))
+
+struct yaml_emit_state {
+	bool object;
+	/* TODO more? */
+};
+#define to_yaml(_dt) ((struct yaml_emit_state *)(_dt)->emitter_state)
+
 static struct ref *yaml_ref_alloc(struct tree *t, enum ref_type type,
 				 const void *data, int len, const char *xtag)
 {
@@ -211,6 +222,7 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 
 static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int depth)
 {
+	struct yaml_emit_state *yaml = to_yaml(dt);
 	struct node *np;
 	struct property *prop;
 	struct label *l;
@@ -245,7 +257,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	case r_anchor:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
-		if (!np && !dt->object) {
+		if (!np && !yaml->object) {
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    refname);
@@ -253,7 +265,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		}
 
 		/* object mode, just leave references here */
-		if (!np && dt->object) {
+		if (!np && yaml->object) {
 			fputc('*', dt->output);
 			fwrite(ref->data, ref->len, 1, dt->output);
 			break;
@@ -276,7 +288,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	case r_path:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
-		if (!np && !dt->object) {
+		if (!np && !yaml->object) {
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    refname);
@@ -284,7 +296,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		}
 
 		/* object mode, just leave references here */
-		if (!np && dt->object) {
+		if (!np && yaml->object) {
 			fputs("!pathref ", dt->output);
 			fwrite(ref->data, ref->len, 1, dt->output);
 			break;
@@ -468,6 +480,7 @@ static void yaml_flatten_node(struct yaml_dt_state *dt)
 
 static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 {
+	struct yaml_emit_state *yaml = to_yaml(dt);
 	struct node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 
@@ -476,7 +489,7 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
 				strlen(np->name + 1));
 
-		if (!npref && !dt->object)
+		if (!npref && !yaml->object)
 			dt_error_at(dt, &to_dt_node(np)->m,
 				"reference to unknown label %s\n",
 				np->name + 1);
@@ -485,13 +498,13 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 			tree_apply_ref_node(to_tree(dt), npref, np);
 
 		/* free everything now */
-		if (npref || !dt->object) {
+		if (npref || !yaml->object) {
 			list_del(&np->node);
 			node_free(to_tree(dt), np);
 		}
 	}
 
-	if (!dt->object)
+	if (!yaml->object)
 		return;
 
 	/* move all remaining unref nodes to root */
@@ -506,18 +519,127 @@ static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
 	}
 }
 
-void yaml_init(struct yaml_dt_state *dt)
+int yaml_setup(struct yaml_dt_state *dt)
 {
+	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
+	struct yaml_emit_state *yaml;
+
+	yaml = malloc(sizeof(*yaml));
+	assert(yaml);
+	memset(yaml, 0, sizeof(*yaml));
+
+	dt->emitter_state = yaml;
+
+	yaml->object = yaml_cfg->object;
+
 	tree_init(to_tree(dt), &yaml_tree_ops);
+	return 0;
 }
 
 void yaml_cleanup(struct yaml_dt_state *dt)
 {
+	struct yaml_emit_state *yaml = to_yaml(dt);
+	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
+
 	tree_cleanup(to_tree(dt));
+
+	if (yaml_cfg)
+		free(yaml_cfg);
+
+	memset(yaml, 0, sizeof(*yaml));
+	free(yaml);
 }
 
-void yaml_emit(struct yaml_dt_state *dt)
+int yaml_emit(struct yaml_dt_state *dt)
 {
 	yaml_apply_ref_nodes(dt);
 	yaml_flatten_node(dt);
+
+	return 0;
 }
+
+static struct option opts[] = {
+	{ "yaml",	 no_argument, 0, 'y' },
+	{ "object",	 no_argument, 0, 'c' },
+	{0, 0, 0, 0}
+};
+
+static bool yaml_select(int argc, char **argv)
+{
+	int cc, option_index = -1;
+
+	optind = 0;
+	opterr = 0;	/* do not print error for invalid option */
+	while ((cc = getopt_long(argc, argv,
+			"y", opts, &option_index)) != -1) {
+		/* explicit yaml mode select */
+		if (cc == 'y')
+			return true;
+	}
+
+	return false;
+}
+
+static int yaml_parseopts(int *argcp, char **argv, int *optindp,
+			  const struct yaml_dt_config *cfg, void **ecfg)
+{
+	int cc, option_index = -1;
+	struct yaml_emit_config *yaml_cfg;
+
+	yaml_cfg = malloc(sizeof(*yaml_cfg));
+	assert(yaml_cfg);
+	memset(yaml_cfg, 0, sizeof(*yaml_cfg));
+
+	/* get and consume non common options */
+	option_index = -1;
+	*optindp = 0;
+	opterr = 1;	/* do print error for invalid option */
+	while ((cc = getopt_long(*argcp, argv,
+			"yc", opts, &option_index)) != -1) {
+
+		switch (cc) {
+		case 'c':
+			yaml_cfg->object = true;
+			break;
+		case 'y':
+			/* nothing to do for this */
+			break;
+		case '?':
+			/* invalid option */
+			return -1;
+		}
+
+		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
+				 option_index);
+	}
+
+	*ecfg = yaml_cfg;
+
+	return 0;
+}
+
+
+static const struct yaml_dt_emitter_ops yaml_emitter_ops = {
+	.select		= yaml_select,
+	.parseopts	= yaml_parseopts,
+	.setup		= yaml_setup,
+	.cleanup	= yaml_cleanup,
+	.emit		= yaml_emit,
+};
+
+static const char *yaml_suffixes[] = {
+	".yaml",
+	NULL
+};
+
+struct yaml_dt_emitter yaml_emitter = {
+	.name		= "yaml",
+	.tops		= &yaml_tree_ops,
+
+	.usage_banner	= 
+"   -y, --yaml          Generate YAML output\n"
+"   -c, --object        Object mode\n",
+
+	.suffixes	= yaml_suffixes,
+	.eops		= &yaml_emitter_ops,
+};

@@ -68,7 +68,7 @@ struct dt_node {
 	struct dt_yaml_mark m;
 };
 #define to_dt_node(_n) 	container_of(_n, struct dt_node, n)
-#define to_node(_np)		(&(_np)->n)
+#define to_node(_np)	(&(_np)->n)
 
 struct dt_property {
 	struct property p;
@@ -96,11 +96,7 @@ struct yaml_dt_config {
 	int input_file_count;
 	const char *output_file;
 	bool debug;
-	bool compatible;
-	bool yaml;
 	bool late;
-	bool object;
-	bool dts;
 };
 
 struct input {
@@ -112,30 +108,39 @@ struct input {
 	size_t lines;
 };
 
+struct yaml_dt_state;
+struct yaml_dt_config;
+
+struct yaml_dt_emitter_ops {
+	bool (*select)(int argc, char **argv);
+	int (*parseopts)(int *argcp, char **argv, int *optindp,
+			 const struct yaml_dt_config *cfg, void **ecfg);
+	int (*setup)(struct yaml_dt_state *dt);
+	void (*cleanup)(struct yaml_dt_state *dt);
+	int (*emit)(struct yaml_dt_state *dt);
+};
+
+struct yaml_dt_emitter {
+	struct list_head node;
+	const char *name;
+	const char *usage_banner;
+	const char * const *suffixes;
+	const struct tree_ops *tops;
+	const struct yaml_dt_emitter_ops *eops;
+};
+
 struct yaml_dt_state {
-	/* yaml parser state */
-	bool debug;
-	bool compatible;	/* bit exact mode */
-	bool yaml;		/* generate YAML */
-	bool late;		/* late resolution mode */
-	bool object;		/* object mode */
-	bool dts;		/* object DTS instead of DTB */
 	const char *output_file;
 	FILE *output;
+	bool debug;
+	bool late;
 	void *input_content;
 	size_t input_size;	/* including fake document markers */
 	size_t input_alloc;
 	size_t input_lines;
 	struct list_head inputs;
 
-	unsigned char *buffer;
-	size_t buffer_pos;
-	size_t buffer_read;
-	size_t buffer_alloc;
-	char current_file[PATH_MAX + 1];
-	long current_line;
-	long current_col;
-	long global_line;
+	/* yaml parser state */
 	bool last_was_marker;
 
 	yaml_parser_t parser;
@@ -154,12 +159,14 @@ struct yaml_dt_state {
 	char *prop_seq_tag[YAMLDL_PROP_SEQ_TAG_DEPTH_MAX];
 	bool current_np_ref;
 
+	/* emitter data */
 	bool error_flag;
 
 	/* tree build state (initialized by the emitter) */
 	struct tree tree;
-	void *emitter_config;
+	const struct yaml_dt_emitter *emitter;
 	void *emitter_state;
+	void *emitter_cfg;
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)

@@ -36,10 +36,6 @@
 #ifndef DTBGEN_H
 #define DTBGEN_H
 
-struct yaml_dt_state;
-
-void dtb_init(struct yaml_dt_state *dt);
-void dtb_cleanup(struct yaml_dt_state *dt);
-void dtb_emit(struct yaml_dt_state *dt);
+extern struct yaml_dt_emitter dtb_emitter;
 
 #endif

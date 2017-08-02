@@ -36,10 +36,6 @@
 #ifndef YAMLGEN_H
 #define YAMLGEN_H
 
-struct yaml_dt_state;
-
-void yaml_init(struct yaml_dt_state *dt);
-void yaml_cleanup(struct yaml_dt_state *dt);
-void yaml_emit(struct yaml_dt_state *dt);
+extern struct yaml_dt_emitter yaml_emitter;
 
 #endif

@@ -3,6 +3,9 @@
 
 #include <stdbool.h>
 
+#define _GNU_SOURCE
+#include <getopt.h>
+
 /* maximum buffer for c2str */
 #define C2STR_BUF_MAX	5
 
@@ -26,5 +29,9 @@ char get_escape_char(const char *s, int *i);
         const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
         (type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
+
+bool long_opt_consume(int *argcp, char **argv, 
+		      const struct option *opts, int *optindp,
+		      const char *optarg, int val, int option_index);
 
 #endif

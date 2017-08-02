@@ -262,11 +262,6 @@ static void dt_stream_start(struct yaml_dt_state *dt)
 	dt->current_prop = NULL;
 	dt->prop_seq_depth = 0;
 	dt->error_flag = false;
-
-	if (!dt->yaml)
-		dtb_init(dt);
-	else
-		yaml_init(dt);
 }
 
 static void dt_stream_end(struct yaml_dt_state *dt)
@@ -280,11 +275,6 @@ static void dt_stream_end(struct yaml_dt_state *dt)
 		prop_free(to_tree(dt), dt->current_prop);
 		dt->current_prop = NULL;
 	}
-
-	if (!dt->yaml)
-		dtb_cleanup(dt);
-	else
-		yaml_cleanup(dt);
 }
 
 static void dt_document_start(struct yaml_dt_state *dt)
@@ -414,7 +404,23 @@ static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
 	}
 }
 
-int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg)
+int dt_emitter_setup(struct yaml_dt_state *dt)
+{
+	return dt->emitter->eops->setup(dt);
+}
+
+void dt_emitter_cleanup(struct yaml_dt_state *dt)
+{
+	return dt->emitter->eops->cleanup(dt);
+}
+
+int dt_emitter_emit(struct yaml_dt_state *dt)
+{
+	return dt->emitter->eops->emit(dt);
+}
+
+int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
+	     struct yaml_dt_emitter *emitter, void *ecfg)
 {
 	int i, ret;
 
@@ -427,11 +433,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg)
 
 	dt->output_file = cfg->output_file;
 	dt->debug = cfg->debug;
-	dt->compatible = cfg->compatible;
-	dt->yaml = cfg->yaml;
 	dt->late = cfg->late;
-	dt->object = cfg->object;
-	dt->dts = cfg->dts;
 
 	INIT_LIST_HEAD(&dt->inputs);
 
@@ -458,6 +460,15 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg)
 	yaml_parser_set_input_string(&dt->parser, dt->input_content,
 				     dt->input_size);
 
+	dt->emitter = emitter;
+	dt->emitter_cfg = ecfg;
+
+	ret = dt_emitter_setup(dt);
+	if (ret) {
+		fprintf(stderr, "Failed to setup emitter\n");
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -465,6 +476,13 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 {
 	struct input *in, *inn;
 	bool rm_file;
+
+	if (dt->map_key)
+		free(dt->map_key);
+	if (dt->current_prop)
+		prop_free(to_tree(dt), dt->current_prop);
+
+	dt_emitter_cleanup(dt);
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
 		  strcmp(dt->output_file, "-");
@@ -486,9 +504,6 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	if (dt->input_content)
 		free(dt->input_content);
-
-	if (dt->buffer)
-		free(dt->buffer);
 
 	if (rm_file)
 		remove(dt->output_file);
@@ -677,10 +692,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 	case YAML_STREAM_END_EVENT:
 		dt_debug(dt, "SEV\n");
-		if (!dt->yaml)
-			dtb_emit(dt);
-		else
-			yaml_emit(dt);
+		dt_emitter_emit(dt);
 		dt_stream_end(dt);
 		break;
 	case YAML_DOCUMENT_START_EVENT:
@@ -800,8 +812,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		dt->current_np = dt->current_np->parent;
 
 		if (dt->current_np == NULL && dt->current_np_ref) {
-			if (dt->debug)
-				printf("* out of ref context\n");
+			dt_debug(dt, "* out of ref context\n");
 			dt->current_np = tree_root(to_tree(dt));
 			dt->current_np_ref = false;
 		}
@@ -827,19 +838,17 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			prop = property_prepare(dt, event, prop);
 
-			if (dt->debug)
-				printf("%s property %s at %s [SEQ]\n",
-					found_existing ? "existing" : "new",
-					prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+			dt_debug(dt, "%s property %s at %s [SEQ]\n",
+				found_existing ? "existing" : "new",
+				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
 
 			dt->current_prop = prop;
 			dt->current_prop_existed = found_existing;
 		}
-		if (dt->debug)
-			printf("sequence to prop '%s' (depth %d)%s%s\n", prop->name,
-				dt->prop_seq_depth,
-				event->data.sequence_start.tag ? " tag=" : "",
-				event->data.sequence_start.tag ? (char *)event->data.sequence_start.tag : "");
+		dt_debug(dt, "sequence to prop '%s' (depth %d)%s%s\n", prop->name,
+			dt->prop_seq_depth,
+			event->data.sequence_start.tag ? " tag=" : "",
+			event->data.sequence_start.tag ? (char *)event->data.sequence_start.tag : "");
 
 		assert(dt->prop_seq_depth + 1 <= ARRAY_SIZE(dt->prop_seq_tag));
 
@@ -915,10 +924,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 					prop = NULL;
 				prop = property_prepare(dt, event, prop);
 
-				if (dt->debug)
-					printf("%s property %s at %s\n",
-						found_existing ? "existing" : "new",
-						prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+				dt_debug(dt, "%s property %s at %s\n",
+					found_existing ? "existing" : "new",
+					prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
 				dt->current_prop = prop;
 				dt->current_prop_existed = found_existing;
 			}
@@ -946,8 +954,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			dt->last_alias_mark = dt->current_mark;
 
-			if (dt->debug)
-				printf("next up is a ref to %s\n", dt->map_key);
+			dt_debug(dt, "next up is a ref to %s\n", dt->map_key);
 
 			break;
 		}
@@ -966,10 +973,9 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				prop = NULL;
 			prop = property_prepare(dt, event, prop);
 
-			if (dt->debug)
-				printf("%s property %s at %s\n",
-					found_existing ? "existing" : "new",
-					prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+			dt_debug(dt, "%s property %s at %s\n",
+				found_existing ? "existing" : "new",
+				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
 			dt->current_prop = prop;
 			dt->current_prop_existed = found_existing;
 		}
@@ -1244,30 +1250,31 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 static struct option opts[] = {
 	{ "output",	 required_argument, 0, 'o' },
 	{ "debug",	 no_argument, 0, 'd' },
-	{ "yaml",	 no_argument, 0, 'y' },
-	{ "compatible",	 no_argument, 0, 'C' },
 	{ "late-resolve",no_argument, 0, 'l' },
-	{ "object",	 no_argument, 0, 'c' },
-	{ "dts",	 no_argument, 0, 's' },
 	{ "help",	 no_argument, 0, 'h' },
 	{ "version",     no_argument, 0, 'v' },
 	{0, 0, 0, 0}
 };
 
-static void help(void)
+static void help(struct list_head *emitters)
 {
+	struct yaml_dt_emitter *e;
+
 	printf("yamldt [options] <input-file> [<input-file>...]\n"
-		" options are:\n"
-		"   -o, --output	Output DTB or YAML file\n"
+		" common options are:\n"
+		"   -o, --output	Output file\n"
 		"   -d, --debug		Debug messages\n"
-		"   -y, --yaml		Generate YAML output\n"
-		"   -C, --compatible	Bit exact compatibility mode\n"
-		"   -l, --late-resolve	Late resolution mode\n"
-		"   -c, --object	Object mode\n"
-		"   -s, --dts		DTS output instead of DTB\n"
 		"   -h, --help		Help\n"
 		"   -v, --version	Display version\n"
 		);
+
+	list_for_each_entry(e, emitters, node) {
+		if (!e->usage_banner)
+			continue;
+		printf("\n");
+		printf(" options for %s emitter:\n", e->name);
+		printf("%s", e->usage_banner);
+	}
 }
 
 int main(int argc, char *argv[])
@@ -1276,13 +1283,27 @@ int main(int argc, char *argv[])
 	int err;
 	int cc, option_index = 0;
 	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
+	struct list_head emitters;
+	struct yaml_dt_emitter *e, *selected_emitter = NULL;
 	const char *s;
+	const char * const *ss;
+	void *ecfg = NULL;
 
 	memset(dt, 0, sizeof(*dt));
+
+	/* setup emitters list */
+	INIT_LIST_HEAD(&emitters);
+	list_add_tail(&dtb_emitter.node, &emitters);
+	list_add_tail(&yaml_emitter.node, &emitters);
+
 	memset(cfg, 0, sizeof(*cfg));
 
+	/* get and consume common options */
+	option_index = -1;
+	optind = 0;
+	opterr = 0;	/* do not print error for invalid option */
 	while ((cc = getopt_long(argc, argv,
-			"o:Clycsdvh?", opts, &option_index)) != -1) {
+			"o:dlvh?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			cfg->output_file = optarg;
@@ -1290,6 +1311,76 @@ int main(int argc, char *argv[])
 		case 'd':
 			cfg->debug = true;
 			break;
+		case 'l':
+			cfg->late = true;
+			break;
+		case 'v':
+			printf("%s version %s\n", PACKAGE_NAME, VERSION);
+			return 0;
+		case 'h':
+			help(&emitters);
+			return 0;
+		case '?':
+			/* ignore invalid option */
+			break;
+		}
+
+		long_opt_consume(&argc, argv, opts, &optind, optarg, cc,
+				 option_index);
+
+	}
+
+	if (!cfg->output_file) {
+		fprintf(stderr, "Missing output file\n");
+		return EXIT_FAILURE;
+	}
+
+	/* try to select an emitter by asking first */
+	list_for_each_entry(e, &emitters, node) {
+		if (e->eops->select && e->eops->select(argc, argv)) {
+			selected_emitter = e;
+			break;
+		}
+	}
+
+	/* no bites, try to search for suffix match */
+	if (!selected_emitter && (s = strrchr(cfg->output_file, '.'))) {
+		list_for_each_entry(e, &emitters, node) {
+			if (!e->suffixes)
+				continue;
+
+			for (ss = e->suffixes; *ss; ss++)
+				if (!strcmp(*ss, s))
+					break;
+
+			if (*ss) {
+				selected_emitter = e;
+				break;
+			}
+		}
+	}
+
+	/* if all fails, fallback to dtb emitter */
+	if (!selected_emitter)
+		selected_emitter = &dtb_emitter;
+
+	if (selected_emitter->eops->parseopts) {
+		err = selected_emitter->eops->parseopts(&argc, argv, &optind, cfg, &ecfg);
+		if (err) {
+			fprintf(stderr, "Failed to parse opts for emitter: %s\n",
+					selected_emitter->name);
+			return -1;
+		}
+	}
+#if 0
+	/* get and consume non common options */
+	option_index = -1;
+	optind = 0;
+	opterr = 0;	/* do not print error for invalid option */
+	while ((cc = getopt_long(argc, argv,
+			"Clycs", opts, &option_index)) != -1) {
+
+		switch (cc) {
 		case 'C':
 			cfg->compatible = true;
 			break;
@@ -1307,20 +1398,15 @@ int main(int argc, char *argv[])
 			cfg->dts = true;
 			cfg->yaml = false;
 			break;
-		case 'v':
-			printf("%s version %s\n", PACKAGE_NAME, VERSION);
-			return 0;
-		case 'h':
 		case '?':
-			help();
-			return 0;
+			/* ignore invalid option */
+			break;
 		}
-	}
 
-	if (!cfg->output_file) {
-		fprintf(stderr, "Missing output file\n");
-		return EXIT_FAILURE;
+		long_opt_consume(&argc, argv, opts, &optind, optarg, cc,
+				 option_index);
 	}
+#endif
 
 	if (optind >= argc) {
 		fprintf(stderr, "Missing input file arguments\n");
@@ -1330,23 +1416,7 @@ int main(int argc, char *argv[])
 	cfg->input_file = argv + optind;
 	cfg->input_file_count = argc - optind;
 
-	/* automatically set output options */
-	s = strrchr(cfg->output_file, '.');
-	if (s) {
-		if (!strcmp(s, ".yaml"))
-			cfg->yaml = true;
-		else if (!strcmp(s, ".o.yaml")) {
-			cfg->yaml = true;
-			cfg->object = true;
-		} else if (!strcmp(s, ".dtb") && !cfg->yaml)
-			;
-		else if (!strcmp(s, ".dtbo") && !cfg->yaml) {
-			cfg->object = true;
-		} else if (!strcmp(s, ".dts") && !cfg->yaml)
-			cfg->dts = true;
-	}
-
-	err = dt_setup(dt, cfg);
+	err = dt_setup(dt, cfg, selected_emitter, ecfg);
 	if (err)
 		return EXIT_FAILURE;
 

@@ -29,7 +29,7 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
-YAMLDTFLAGS ?= -C
+YAMLDTFLAGS ?=
 FDTDUMPFLAGS ?=
 YDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.o.Yd
 DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
@@ -39,7 +39,7 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 		$(YAMLDT) $(YAMLDTFLAGS) -y -c - -o $@
 
 %.dtb: %.yaml
-	$(YAMLDT) $(YAMLDTFLAGS) $< -o $@
+	$(YAMLDT) $(YAMLDTFLAGS) -C $< -o $@
 
 %.dts: %.yaml
 	$(YAMLDT) $(YAMLDTFLAGS) -s $< -o $@

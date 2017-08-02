@@ -105,6 +105,13 @@ struct fixup {
 	struct list_head refs;
 };
 
+struct dtb_emit_config {
+	bool compatible;
+	bool object;
+	bool dts;
+};
+#define to_dtb_cfg(_dt) ((struct dtb_emit_config *)((_dt)->emitter_cfg))
+
 struct dtb_emit_state {
 	/* DTB generation state */
 	unsigned int next_phandle;
@@ -117,9 +124,14 @@ struct dtb_emit_state {
 	} area[dt_area_max + 1];
 
 	struct list_head fixups;
+
+	/* copy from config */
+	bool compatible;
+	bool object;
+	bool dts;
 };
 
-#define to_dtb(_dt) ((_dt)->emitter_state)
+#define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
 
 static void dtb_dump(struct yaml_dt_state *dt);
 
@@ -285,6 +297,7 @@ static int parse_int(const char *str, int len, unsigned long long *valp, bool *u
 
 static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *np;
 	struct property *prop;
 	struct dtb_property *dtbprop;
@@ -330,7 +343,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	case r_anchor:
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
-		if (!np && !dt->object) {
+		if (!np && !dtb->object) {
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				    "Can't resolve reference to label %s\n",
 				    refname);
@@ -499,6 +512,8 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 	struct label *l;
 	fdt32_t phandlet;
 	char namebuf[2][NODE_FULLNAME_MAX];
+	char refname[60 + 1];
+	int refnamelen;
 
 	if ((flags & RF_LABELS) && !to_dtb_node(npt)->phandle &&
 			!list_empty(&npt->labels)) {
@@ -525,13 +540,14 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 
 			np = node_lookup_by_label(to_tree(dt), ref->data, ref->len);
 
-			if (!np && !dt->object) {
-				strncat(&namebuf[0][0], ref->data, sizeof(namebuf[0]) - 1);
-				namebuf[0][sizeof(namebuf[0]) - 1] = '\0';
+			if (!np && !dtb->object) {
+				refnamelen = ref->len > sizeof(refname) ? sizeof(refname) : ref->len;
+				memcpy(refname, ref->data, refnamelen);
+				refname[refnamelen] = '\0';
 
 				dt_error_at(dt, &to_dt_ref(ref)->m,
 					"can't resolve reference to label %s\n",
-					namebuf);
+					refname);
 
 				continue;
 			}
@@ -1068,13 +1084,14 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 
 static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *root;
 
 	assert(dt);
 
 	root = tree_root(to_tree(dt));
 
-	if (dt->compatible) {
+	if (dtb->compatible) {
 		resolve(dt, root, RF_CONTENT);
 		resolve(dt, root, RF_PHANDLES);
 		resolve(dt, root, RF_LABELS);
@@ -1221,6 +1238,7 @@ static void dtb_late_resolve(struct yaml_dt_state *dt)
 
 static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 
@@ -1229,7 +1247,7 @@ static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 		/* lookup for node (skip *) */
 		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
 				strlen(np->name + 1));
-		if (!npref && !dt->object)
+		if (!npref && !dtb->object)
 			dt_error_at(dt, &to_dt_node(np)->m,
 				    "reference to unknown label %s\n",
 				    np->name + 1);
@@ -1238,7 +1256,7 @@ static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
 			tree_apply_ref_node(to_tree(dt), npref, np);
 
 		/* free everything now */
-		if (npref || !dt->object) {
+		if (npref || !dtb->object) {
 			list_del(&np->node);
 			node_free(to_tree(dt), np);
 		}
@@ -1477,7 +1495,9 @@ static void dtb_build_string_table_compatible(struct yaml_dt_state *dt)
 
 static void dtb_build_string_table(struct yaml_dt_state *dt)
 {
-	if (!dt->compatible)
+	struct dtb_emit_state *dtb = to_dtb(dt);
+
+	if (!dtb->compatible)
 		dtb_build_string_table_minimal(dt);
 	else
 		dtb_build_string_table_compatible(dt);
@@ -1520,6 +1540,7 @@ static void dtb_flatten_node(struct yaml_dt_state *dt)
 
 static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *root, *np, *child;
 	struct property *prop;
 	struct dtb_property *dtbprop;
@@ -1545,7 +1566,7 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 			}
 
 			/* compatible mode is wrong, but whatever */
-			if (dt->compatible)
+			if (dtb->compatible)
 				return 0;
 		}
 	}
@@ -1553,8 +1574,9 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 	return 0;
 }
 
-void dtb_init(struct yaml_dt_state *dt)
+int dtb_setup(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_config *dtb_cfg = to_dtb_cfg(dt);
 	struct dtb_emit_state *dtb;
 
 	dtb = malloc(sizeof(*dtb));
@@ -1564,14 +1586,21 @@ void dtb_init(struct yaml_dt_state *dt)
 	dtb->next_phandle = 1;
 	dt->emitter_state = dtb;
 
+	dtb->compatible = dtb_cfg->compatible;
+	dtb->object = dtb_cfg->object;
+	dtb->dts = dtb_cfg->dts;
+
 	INIT_LIST_HEAD(&dtb->fixups);
 
 	tree_init(to_tree(dt), &dtb_tree_ops);
+
+	return 0;
 }
 
 void dtb_cleanup(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
+	struct dtb_emit_config *dtb_cfg = to_dtb_cfg(dt);
 	enum dt_data_area area;
 	struct fixup *f, *fn;
 
@@ -1590,6 +1619,9 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 
 	if (dtb->memreserve_prop)
 		prop_free(to_tree(dt), dtb->memreserve_prop);
+
+	if (dtb_cfg)
+		free(dtb_cfg);
 
 	memset(dtb, 0, sizeof(*dtb));
 	free(dtb);
@@ -1803,17 +1835,17 @@ static void dts_emit_node(struct yaml_dt_state *dt, struct node *np, int depth)
 	fprintf(fp, "%s};\n", pfx);
 }
 
-static void dts_emit(struct yaml_dt_state *dt)
+static int dts_emit(struct yaml_dt_state *dt)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	FILE *fp = dt->output;
 	struct property *prop;
-	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct ref *ref;
 	unsigned long long start, size;
 
 	fprintf(fp, "/dts-v1/;\n");
 
-	if (dt->object)
+	if (dtb->object)
 		fprintf(fp, "/plugin/;\n");
 
 	prop = dtb->memreserve_prop;
@@ -1840,9 +1872,11 @@ static void dts_emit(struct yaml_dt_state *dt)
 	}
 
 	dts_emit_node(dt, tree_root(to_tree(dt)), 0);
+
+	return !ferror(dt->output) ? 0 : -1;
 }
 
-void dtb_emit(struct yaml_dt_state *dt)
+int dtb_emit(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct fdt_header fdth;
@@ -1855,22 +1889,20 @@ void dtb_emit(struct yaml_dt_state *dt)
 	if (dt->late)
 		dtb_late_resolve(dt);
 
-	if (dt->object)
+	if (dtb->object)
 		dtb_create_overlay_structure(dt);
 
 	dtb_apply_ref_nodes(dt);
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */
-	if (dt->dts) {
-		dts_emit(dt);
-		return;
-	}
+	if (dtb->dts)
+		return dts_emit(dt);
 
 	dtb_append_auto_properties(dt);
 
 	dtb_add_symbols(dt);
-	if (dt->object) {
+	if (dtb->object) {
 		dtb_add_fixups(dt);
 		dtb_add_local_fixups(dt);
 	}
@@ -1919,6 +1951,8 @@ void dtb_emit(struct yaml_dt_state *dt)
 	       dtb->area[dt_struct].size, 1, dt->output);
 	fwrite(dtb->area[dt_strings].data,
 	       dtb->area[dt_strings].size, 1, dt->output);
+
+	return !ferror(dt->output) ? 0 : -1;
 }
 
 static void print_prop(int col, int width, const char *data, int len)
@@ -2063,3 +2097,103 @@ static void dtb_dump(struct yaml_dt_state *dt)
 		__dn_dump(dt, np, 0);
 	}
 }
+
+static struct option opts[] = {
+	{ "compatible",	 no_argument, 0, 'C' },
+	{ "late-resolve",no_argument, 0, 'l' },
+	{ "object",	 no_argument, 0, 'c' },
+	{ "dts",	 no_argument, 0, 's' },
+	{0, 0, 0, 0}
+};
+
+static bool dtb_select(int argc, char **argv)
+{
+	int cc, option_index = -1;
+
+	optind = 0;
+	opterr = 0;	/* do not print error for invalid option */
+	while ((cc = getopt_long(argc, argv,
+			"s", opts, &option_index)) != -1) {
+		/* explicit dts mode select (select dtb too) */
+		if (cc == 's')
+			return true;
+	}
+
+	return false;
+}
+
+static int dtb_parseopts(int *argcp, char **argv, int *optindp,
+			 const struct yaml_dt_config *cfg, void **ecfg)
+{
+	int cc, option_index = -1;
+	struct dtb_emit_config *dtb_cfg;
+	const char *s;
+
+	dtb_cfg = malloc(sizeof(*dtb_cfg));
+	assert(dtb_cfg);
+	memset(dtb_cfg, 0, sizeof(*dtb_cfg));
+
+	/* get and consume non common options */
+	option_index = -1;
+	*optindp = 0;
+	opterr = 1;	/* do print error for invalid option */
+	while ((cc = getopt_long(*argcp, argv,
+			"Clycs", opts, &option_index)) != -1) {
+
+		switch (cc) {
+		case 'C':
+			dtb_cfg->compatible = true;
+			break;
+		case 'c':
+			dtb_cfg->object = true;
+			break;
+		case 's':
+			dtb_cfg->dts = true;
+			break;
+		case '?':
+			/* invalid option */
+			return -1;
+		}
+
+		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
+				 option_index);
+	}
+
+	/* select DTS automatically if not explicitly set */
+	if (!dtb_cfg->dts && (s = strrchr(cfg->output_file, '.')) &&
+	   !strcmp(s, ".dts"))
+		dtb_cfg->dts = true;
+
+	*ecfg = dtb_cfg;
+
+	return 0;
+}
+
+static const struct yaml_dt_emitter_ops dtb_emitter_ops = {
+	.select		= dtb_select,
+	.parseopts	= dtb_parseopts,
+	.setup		= dtb_setup,
+	.cleanup	= dtb_cleanup,
+	.emit		= dtb_emit,
+};
+
+static const char *dtb_suffixes[] = {
+	".dtb",
+	".dts",
+	".dtbo",
+	NULL
+};
+
+struct yaml_dt_emitter dtb_emitter = {
+	.name		= "dtb",
+
+	.usage_banner	= 
+"   -y, --yaml          Generate YAML output\n"
+"   -C, --compatible    Bit exact compatibility mode\n"
+"   -s, --dts           DTS output instead of DTB\n"
+"   -c, --object        Object mode\n",
+
+	.suffixes	= dtb_suffixes,
+	.tops		= &dtb_tree_ops,
+	.eops		= &dtb_emitter_ops,
+};
