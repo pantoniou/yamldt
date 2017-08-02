@@ -1369,44 +1369,9 @@ int main(int argc, char *argv[])
 		if (err) {
 			fprintf(stderr, "Failed to parse opts for emitter: %s\n",
 					selected_emitter->name);
-			return -1;
+			return EXIT_FAILURE;
 		}
 	}
-#if 0
-	/* get and consume non common options */
-	option_index = -1;
-	optind = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(argc, argv,
-			"Clycs", opts, &option_index)) != -1) {
-
-		switch (cc) {
-		case 'C':
-			cfg->compatible = true;
-			break;
-		case 'l':
-			cfg->late = true;
-			break;
-		case 'y':
-			cfg->yaml = true;
-			cfg->dts = false;
-			break;
-		case 'c':
-			cfg->object = true;
-			break;
-		case 's':
-			cfg->dts = true;
-			cfg->yaml = false;
-			break;
-		case '?':
-			/* ignore invalid option */
-			break;
-		}
-
-		long_opt_consume(&argc, argv, opts, &optind, optarg, cc,
-				 option_index);
-	}
-#endif
 
 	if (optind >= argc) {
 		fprintf(stderr, "Missing input file arguments\n");

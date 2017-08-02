@@ -36,17 +36,45 @@ else
 fi
 AM_CONDITIONAL([HAVE_LIBYAML], [test x$have_libyaml = xtrue])
 
-AC_PATH_PROG([DTC], [dtc])
+# AC_PATH_PROG([DTC], [dtc])
 
 # check whether a dtc with yaml support is available
+AC_MSG_CHECKING([for dtc with YAML support])
 AC_PATH_PROGS_FEATURE_CHECK([DTC], [dtc],
-	[[ echo '/dts-v1/; / { };' | $ac_path_DTC -I dts -O yaml - -o - && \
+	[[ echo '/dts-v1/; / { };' | \
+	 	$ac_path_DTC -I dts -O yaml - -o - >/dev/null && \
            ac_cv_path_DTC=$ac_path_DTC ac_path_DTC_found=:]])
 AC_SUBST([DTC], [$ac_cv_path_DTC])
 
 # check if we can run DTC
 AM_CONDITIONAL([RUN_DTC], [test x$ac_cv_path_DTC != x])
 AM_COND_IF([RUN_DTC], [can_RUN_DTC=yes], [can_RUN_DTC=no])
+
+if test $can_RUN_DTC == yes ;  then
+	AC_MSG_RESULT([$ac_cv_path_DTC])
+else
+	AC_MSG_RESULT([not found])
+fi
+
+# AC_PATH_PROGS([BPFCC], [clang-5.0 clang-4.0 clang-3.9 clang])
+
+AC_MSG_CHECKING([for ebpf compiler])
+# eBPF compiler available?
+AC_PATH_PROGS_FEATURE_CHECK([EBPFCC], [clang-5.0 clang-4.0 clang-3.9 clang],
+	[[ echo -e '#include <stdint.h>\nuint64_t entry(void *mem) { return 1; }' | \
+	   $ac_path_EBPFCC -x c -c -O2 -target bpf - -o /dev/null && \
+           ac_cv_path_EBPFCC=$ac_path_EBPFCC ac_path_EBPFCC_found=:]])
+AC_SUBST([EBPFCC], [$ac_cv_path_EBPFCC])
+
+# check if we can run DTC
+AM_CONDITIONAL([RUN_EBPFCC], [test x$ac_cv_path_EBPFCC != x])
+AM_COND_IF([RUN_EBPFCC], [can_RUN_EBPFCC=yes], [can_RUN_EBPFCC=no])
+
+if test $can_RUN_EBPFCC == yes ;  then
+	AC_MSG_RESULT([$ac_cv_path_EBPFCC])
+else
+	AC_MSG_RESULT([not found])
+fi
 
 # copy subdirs to allow foreign builds to work
 cp_subdirs=
