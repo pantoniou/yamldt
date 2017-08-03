@@ -237,6 +237,7 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	char namebuf[NODE_FULLNAME_MAX];
 	char *refname;
 	int refnamelen;
+	const char *s, *e;
 
 	prop = ref->prop;
 	assert(prop);
@@ -366,9 +367,25 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 				fprintf(dt->output, "%lld", (long long)val);
 
 		} else if (!strcmp(tag, "!str")) {
-			fputc('"', dt->output);
-			fwrite(ref->data, ref->len, 1, dt->output);
-			fputc('"', dt->output);
+
+			/* no newlines? easy */
+			if (!memchr(ref->data, '\n', ref->len)) {
+				fputc('"', dt->output);
+				fwrite(ref->data, ref->len, 1, dt->output);
+				fputc('"', dt->output);
+			} else {
+				fputs("|", dt->output);
+				s = ref->data;
+				while (s && s < (char *)ref->data + ref->len) {
+					e = memchr(s, '\n', (char *)ref->data + ref->len - s);
+					if (!e)
+						e = ref->data + ref->len;
+					fprintf(dt->output, "\n%*s", (depth + 1) * 2, "");
+					fwrite(s, e - s, 1, dt->output);
+					s = e < ((char *)ref->data + ref->len) ? e + 1 : NULL;
+				}
+			}
+
 		} else if (!strcmp(tag, "!bool")) {
 			fwrite(ref->data, ref->len, 1, dt->output);
 		} else if (!strcmp(tag, "!null")) {
