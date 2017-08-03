@@ -31,7 +31,8 @@ AM_MAKEFLAGS = DTC=@DTC@ \
 bin_PROGRAMS += ebpfrun
 
 ebpfrun_SOURCES = ebpfrun.c \
-		  ebpf.c ebpf.h
+		  ebpf.c ebpf.h \
+		  utils.c utils.h
 
 SUBDIRS = . port
 
@@ -40,5 +41,12 @@ SUBDIRS += test-suite
 endif
 
 if RUN_EBPFCC
+
+bin_PROGRAMS += ebpfcompile
+
+ebpfcompile_SOURCES = ebpfcompile.c \
+		      ebpf.c ebpf.h \
+		      utils.c utils.h
+
 SUBDIRS += ebpf
 endif

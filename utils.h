@@ -34,4 +34,9 @@ bool long_opt_consume(int *argcp, char **argv,
 		      const struct option *opts, int *optindp,
 		      const char *optarg, int val, int option_index);
 
+char **str_to_argv(const char *binary, const char *str);
+int compile(const char *text, size_t size,
+	    const char *compiler, const char *flags,
+	    void **output, size_t *output_size);
+
 #endif

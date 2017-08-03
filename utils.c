@@ -38,6 +38,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "utils.h"
 
@@ -276,5 +281,250 @@ bool long_opt_consume(int *argcp, char **argv,
 	*optindp = optind;
 
 	return true;
+}
+
+char **str_to_argv(const char *binary, const char *str)
+{
+	const char *s, *start;
+	char c;
+	int pass, count, total, len;
+	enum tokenizer_state {
+		normal,
+		spaces,
+		single_quotes,
+		double_quotes,
+	} state;
+	char **argv = NULL;
+	char *copy = NULL;
+
+	for (pass = 1; pass <= 2; pass++) {
+		state = normal;
+		s = str;
+		start = str;
+		count = 1;
+		total = strlen(binary) + 1;
+		while ((c = *s++) != '\0') {
+
+			switch (state) {
+			case normal:
+				if (!isspace(c))
+					break;
+
+				if (start) {
+					len = s - 1 - start;
+					if (argv) {
+						argv[count] = copy;
+						memcpy(copy, start, len);
+						copy[len] = '\0';
+						copy += len + 1;
+					}
+					total += len + 1;
+					count++;
+				}
+
+				state = spaces;
+				start = NULL;
+				break;
+
+			case spaces:
+				if (isspace(c))
+					break;
+				if (c == '\'') {
+					state = single_quotes;
+					start = s;
+				} else if (c == '"') {
+					state = double_quotes;
+					start = s;
+				} else {
+					state = normal;
+					start = s - 1;
+				}
+				break;
+			case single_quotes:
+			case double_quotes:
+				if ((state == single_quotes && c != '\'') ||
+				    (state == double_quotes && c != '"') )
+					break;
+
+				len = s - 1 - start;
+
+				if (argv) {
+					argv[count] = copy;
+					memcpy(copy, start, len);
+					copy[len] = '\0';
+					copy += len + 1;
+				}
+				total += len + 1;
+				count++;
+
+				start = NULL;
+				state = normal;
+				break;
+			}
+		}
+
+		if (pass == 1) {
+			if (start) {
+				len = s - start;
+				total += len + 1;
+				count++;
+			}
+			argv = malloc((count + 1) * sizeof(*argv) + total);
+			if (!argv)
+				return NULL;
+			copy = (char *)(argv + count + 1);
+
+			argv[0] = copy;
+			strcpy(copy, binary);
+			copy += strlen(binary) + 1;
+		}
+	}
+
+	/* final */
+	if (start) {
+		len = s - start;
+		argv[count] = copy;
+		memcpy(copy, start, len);
+		copy[len] = '\0';
+		count++;
+	}
+
+	argv[count] = NULL;
+
+	return argv;
+}
+
+int compile(const char *text, size_t size,
+	    const char *compiler, const char *flags,
+	    void **output, size_t *output_size)
+{
+	char intemplate[11] = "tmp-XXXXXX";
+	char outtemplate[11] = "tmp-XXXXXX";
+	int infd, outfd, ret, status;
+	struct stat st;
+	ssize_t nwrite, nread;
+	size_t filesz;
+	pid_t pid;
+	off_t off;
+	char *buf;
+	char **argv;
+
+	infd = -1;
+	outfd = -1;
+
+	infd = mkstemp(intemplate);
+	if (infd == -1) {
+		fprintf(stderr, "Failed to mkstemp()\n");
+		goto out_close;
+	}
+
+	outfd = mkstemp(outtemplate);
+	if (outfd == -1) {
+		fprintf(stderr, "Failed to mkstemp()\n");
+		goto out_close;
+	}
+
+	if (size == 0)
+		size = strlen(text);
+	nwrite = write(infd, text, size);
+	if (nwrite != size) {
+		fprintf(stderr, "Failed to write to temporary file\n");
+		goto out_close;
+	}
+	off = lseek(infd, 0, SEEK_SET);
+	if (off != 0) {
+		fprintf(stderr, "Failed to rewind temporary file\n");
+		goto out_close;
+	}
+
+	pid = fork();
+	if (pid == -1) {
+		fprintf(stderr, "Failed to fork()\n");
+		goto out_close;
+	}
+
+	if (!pid) {
+		/* child */
+		dup2(infd, STDIN_FILENO);
+		off = lseek(STDIN_FILENO, 0, SEEK_SET);
+
+		dup2(outfd, STDOUT_FILENO);
+		off = lseek(STDOUT_FILENO, 0, SEEK_SET);
+
+		argv = str_to_argv(compiler, flags);
+		if (!argv) {
+			fprintf(stderr, "Failed to parse command line args\n");
+			exit(1);
+		}
+
+		execvp(compiler, argv);
+		/* error always if here */
+		exit(1);
+	}
+
+	/* parent */
+	ret = wait(&status);
+	if (ret == -1) {
+		fprintf(stderr, "Failed to waitpid()\n");
+		goto out_close;
+	}
+	if (!WIFEXITED(status)) {
+		fprintf(stderr, "abnormal child termination\n");
+		goto out_close;
+	}
+
+	if (WEXITSTATUS(status) != 0) {
+		fprintf(stderr, "child process exited with status %d\n",
+			WEXITSTATUS(status));
+		goto out_close;
+	}
+
+	/* get the file size if we can */
+	filesz = 0;
+	if (fstat(outfd, &st) != -1 && S_ISREG(st.st_mode))
+		filesz = st.st_size;
+
+	if (filesz == 0) {
+		fprintf(stderr, "Not a regular file!\n");
+		goto out_close;
+	}
+
+	buf = malloc(filesz);
+	if (!buf) {
+		fprintf(stderr, "Failed to allocate temporary buffer!\n");
+		goto out_close;
+	}
+
+	do {
+		off = lseek(outfd, 0, SEEK_SET);
+		nread = read(outfd, buf, filesz);
+	} while (nread == -1 && errno == -EAGAIN);
+
+	*output = buf;
+	*output_size = filesz;
+
+	close(infd);
+	unlink(intemplate);
+
+	close(outfd);
+	unlink(outtemplate);
+
+	free(argv);
+
+	return 0;
+out_close:
+	if (infd != -1) {
+		close(infd);
+		unlink(intemplate);
+	}
+	if (outfd != -1) {
+		close(outfd);
+		unlink(outtemplate);
+	}
+
+	if (argv)
+		free(argv);
+
+	return -1;
 }
 
