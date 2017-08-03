@@ -23,7 +23,10 @@ intexpr_SOURCES = intexpr.c \
 		  syexpr.c syexpr.h \
 		  utils.c utils.h 
 
-AM_MAKEFLAGS = DTC=@DTC@ YAMLDT=@abs_top_builddir@/yamldt TOPDIR=@abs_top_srcdir@
+AM_MAKEFLAGS = DTC=@DTC@ \
+	       YAMLDT=@abs_top_builddir@/yamldt \
+	       EBPFRUN=@abs_top_builddir@/ebpfrun \
+	       TOPDIR=@abs_top_srcdir@
 
 bin_PROGRAMS += ebpfrun
 
@@ -34,4 +37,8 @@ SUBDIRS = . port
 
 if RUN_DTC
 SUBDIRS += test-suite
+endif
+
+if RUN_EBPFCC
+SUBDIRS += ebpf
 endif
