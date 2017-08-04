@@ -204,15 +204,18 @@ static void dtb_node_free(struct tree *t, struct node *np)
 }
 
 static const struct tree_ops dtb_tree_ops = {
-	.ref_alloc	= dtb_ref_alloc,
-	.ref_free	= dtb_ref_free,
-	.prop_alloc	= dtb_prop_alloc,
-	.prop_free	= dtb_prop_free,
-	.label_alloc	= dtb_label_alloc,
-	.label_free	= dtb_label_free,
-	.node_alloc	= dtb_node_alloc,
-	.node_free	= dtb_node_free,
-	.debugf		= yaml_dt_tree_debugf,
+	.ref_alloc		= dtb_ref_alloc,
+	.ref_free		= dtb_ref_free,
+	.prop_alloc		= dtb_prop_alloc,
+	.prop_free		= dtb_prop_free,
+	.label_alloc		= dtb_label_alloc,
+	.label_free		= dtb_label_free,
+	.node_alloc		= dtb_node_alloc,
+	.node_free		= dtb_node_free,
+	.debugf			= yaml_dt_tree_debugf,
+	.error_at_node		= yaml_dt_tree_error_at_node,
+	.error_at_property	= yaml_dt_tree_error_at_property,
+	.error_at_ref		= yaml_dt_tree_error_at_ref,
 };
 
 static void prop_set_data(struct property *prop, bool append,
@@ -346,9 +349,9 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np && !dtb->object) {
-			dt_error_at(dt, &to_dt_ref(ref)->m,
-				    "Can't resolve reference to label %s\n",
-				    refname);
+			tree_error_at_ref(to_tree(dt), ref,
+				"Can't resolve reference to label %s\n",
+				refname);
 			return;
 		}
 
@@ -367,7 +370,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		np = node_lookup_by_label(to_tree(dt),
 				ref->data, ref->len);
 		if (!np) {
-			dt_error_at(dt, &to_dt_ref(ref)->m,
+			tree_error_at_ref(to_tree(dt), ref,
 				    "Can't resolve reference to label %s\n",
 				    refname);
 			return;
@@ -412,7 +415,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32") ||
 		    !strcmp(tag, "!uint") || !strcmp(tag, "!uint32")) {
 			if (!is_int) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					    "Tagged int is invalid: %s\n",
 					    refname);
 				return;
@@ -422,7 +425,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val32);
 		} else if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8")) {
 			if (!is_int) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					    "Tagged int is invalid: %s\n",
 					    refname);
 				return;
@@ -432,7 +435,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val8);
 		} else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16")) {
 			if (!is_int) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					    "Tagged int is invalid: %s\n",
 					    refname);
 				return;
@@ -442,7 +445,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = sizeof(val16);
 		} else if (!strcmp(tag, "!int64") || !strcmp(tag, "!uint64")) {
 			if (!is_int) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					    "Tagged int is invalid: %s\n",
 					    refname);
 				return;
@@ -479,7 +482,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 					dtb->compiler, dtb->cflags,
 					&output_data, &output_size);
 			if (ret) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					"Failed to compile %s:\n%s %s\n%s\n",
 					tag, dtb->compiler, dtb->cflags, refname);
 				break;
@@ -487,7 +490,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			data = output_data;
 			size = output_size;
 		} else {
-			dt_error_at(dt, &to_dt_ref(ref)->m,
+			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,
 				refname);
 			return;
@@ -564,7 +567,7 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 				memcpy(refname, ref->data, refnamelen);
 				refname[refnamelen] = '\0';
 
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(to_tree(dt), ref,
 					"can't resolve reference to label %s\n",
 					refname);
 
@@ -1084,7 +1087,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 
 			if (resolve_error ||
 			    dtbprop->size % (2 * sizeof(uint64_t))) {
-				dt_error_at(dt, &to_dt_property(prop)->m,
+				tree_error_at_property(to_tree(dt), prop,
 						"Invalid memreserve property\n");
 				prop_free(to_tree(dt), prop);
 				continue;
@@ -1253,33 +1256,6 @@ resolve_again:
 static void dtb_late_resolve(struct yaml_dt_state *dt)
 {
 	late_resolve_node(dt, tree_root(to_tree(dt)));
-}
-
-static void dtb_apply_ref_nodes(struct yaml_dt_state *dt)
-{
-	struct dtb_emit_state *dtb = to_dtb(dt);
-	struct node *np, *npn, *npref;
-	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
-
-	list_for_each_entry_safe(np, npn, ref_nodes, node) {
-
-		/* lookup for node (skip *) */
-		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
-				strlen(np->name + 1));
-		if (!npref && !dtb->object)
-			dt_error_at(dt, &to_dt_node(np)->m,
-				    "reference to unknown label %s\n",
-				    np->name + 1);
-
-		if (npref)
-			tree_apply_ref_node(to_tree(dt), npref, np);
-
-		/* free everything now */
-		if (npref || !dtb->object) {
-			list_del(&np->node);
-			node_free(to_tree(dt), np);
-		}
-	}
 }
 
 static void dt_emit_data(struct yaml_dt_state *dt,
@@ -1915,7 +1891,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 	if (dtb->object)
 		dtb_create_overlay_structure(dt);
 
-	dtb_apply_ref_nodes(dt);
+	tree_apply_ref_nodes(to_tree(dt), dtb->object);
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */

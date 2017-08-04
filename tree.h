@@ -113,6 +113,15 @@ struct tree_ops {
 
 	void (*debugf)(struct tree *t, const char *fmt, ...)
 			__attribute__ ((__format__ (__printf__, 2, 0)));
+	void (*error_at_node)(struct tree *t, struct node *np,
+			const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 3, 0)));
+	void (*error_at_property)(struct tree *t, struct property *prop,
+			const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 3, 0)));
+	void (*error_at_ref)(struct tree *t, struct ref *ref,
+			const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 3, 0)));
 };
 
 struct tree {
@@ -166,10 +175,33 @@ struct node *node_lookup_by_label(struct tree *t,
 
 void tree_apply_ref_node(struct tree *t, struct node *npref,
 			 struct node *np);
+void tree_apply_ref_nodes(struct tree *t, bool object);
 
 /* this should be enough */
 #define NODE_FULLNAME_MAX	4096
 const char *dn_fullname_multi(struct node *np, char **buf, int *size);
 const char *dn_fullname(struct node *np, char *buf, int bufsize);
+
+#define tree_debug(_t, _fmt, ...) \
+	do { \
+		if (_t->ops->debugf) \
+			_t->ops->debugf(_t, _fmt, ##__VA_ARGS__); \
+	} while(0)
+
+#define tree_error_at_node(_t, _np, _fmt, ...) \
+	do { \
+		if (_t->ops->error_at_node) \
+			_t->ops->error_at_node(_t, _np, _fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_error_at_property(_t, _prop, _fmt, ...) \
+	do { \
+		if (_t->ops->error_at_property) \
+			_t->ops->error_at_property(_t, _prop, _fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_error_at_ref(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->error_at_ref) \
+			_t->ops->error_at_ref(_t, _ref, _fmt, ##__VA_ARGS__); \
+	} while(0)
 
 #endif

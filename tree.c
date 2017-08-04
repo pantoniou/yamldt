@@ -47,12 +47,6 @@
 
 #include "yamldt.h"
 
-#define tree_debug(_t, _fmt, ...) \
-	do { \
-		if (_t->ops->debugf) \
-			_t->ops->debugf(_t, _fmt, ##__VA_ARGS__); \
-	} while(0)
-
 struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len,
 		const char *xtag)
@@ -445,5 +439,45 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 		} else
 			tree_apply_ref_node(t, childref, child);
 
+	}
+}
+
+void tree_apply_ref_nodes(struct tree *t, bool object)
+{
+	struct node *np, *npn, *npref;
+	struct list_head *ref_nodes = tree_ref_nodes(t);
+
+	list_for_each_entry_safe(np, npn, ref_nodes, node) {
+
+		npref = node_lookup_by_label(t, np->name + 1,
+					     strlen(np->name + 1));
+
+		if (!npref && !object)
+			tree_error_at_node(t, np,
+				"reference to unknown label %s\n",
+				np->name + 1);
+
+		if (npref)
+			tree_apply_ref_node(t, npref, np);
+
+		/* free everything now */
+		if (npref || !object) {
+			list_del(&np->node);
+			node_free(t, np);
+		}
+	}
+
+	if (!object)
+		return;
+
+	/* move all remaining unref nodes to root */
+	list_for_each_entry_safe(np, npn, ref_nodes, node) {
+
+		if (tree_root(t)) {
+			list_del(&np->node);
+			np->parent = tree_root(t);
+			list_add_tail(&np->node, &np->parent->children);
+		} else
+			node_free(t, np);
 	}
 }

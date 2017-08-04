@@ -94,6 +94,10 @@ static const char *get_builtin_tag(const char *tag)
 	return NULL;
 }
 
+static void dt_print_at_msg(struct yaml_dt_state *dt,
+			    const struct dt_yaml_mark *m,
+			    const char *type, const char *msg);
+
 struct ref *
 yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len, const char *xtag, int size)
@@ -252,6 +256,66 @@ void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 	if (dt->debug)
 		vfprintf(stderr, fmt, ap);
 	va_end(ap);
+}
+
+void yaml_dt_tree_error_at_node(struct tree *t, struct node *np,
+				const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
+
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
+
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	dt_print_at_msg(to_dt(t), &to_dt_node(np)->m, "error", str);
+	to_dt(t)->error_flag = true;
+}
+
+void yaml_dt_tree_error_at_property(struct tree *t,
+				    struct property *prop, const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
+
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
+
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	dt_print_at_msg(to_dt(t), &to_dt_property(prop)->m, "error", str);
+	to_dt(t)->error_flag = true;
+}
+
+void yaml_dt_tree_error_at_ref(struct tree *t,
+			       struct ref *ref, const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
+
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
+
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	dt_print_at_msg(to_dt(t), &to_dt_ref(ref)->m, "error", str);
+	to_dt(t)->error_flag = true;
 }
 
 static void dt_stream_start(struct yaml_dt_state *dt)
@@ -757,6 +821,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 	case YAML_STREAM_END_EVENT:
 		dt_debug(dt, "SEV\n");
+		dt_checker_check(dt);
 		dt_emitter_emit(dt);
 		dt_stream_end(dt);
 		break;

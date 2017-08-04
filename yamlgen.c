@@ -111,15 +111,18 @@ static void yaml_node_free(struct tree *t, struct node *np)
 }
 
 static const struct tree_ops yaml_tree_ops = {
-	.ref_alloc	= yaml_ref_alloc,
-	.ref_free	= yaml_ref_free,
-	.prop_alloc	= yaml_prop_alloc,
-	.prop_free	= yaml_prop_free,
-	.label_alloc	= yaml_label_alloc,
-	.label_free	= yaml_label_free,
-	.node_alloc	= yaml_node_alloc,
-	.node_free	= yaml_node_free,
-	.debugf		= yaml_dt_tree_debugf,
+	.ref_alloc		= yaml_ref_alloc,
+	.ref_free		= yaml_ref_free,
+	.prop_alloc		= yaml_prop_alloc,
+	.prop_free		= yaml_prop_free,
+	.label_alloc		= yaml_label_alloc,
+	.label_free		= yaml_label_free,
+	.node_alloc		= yaml_node_alloc,
+	.node_free		= yaml_node_free,
+	.debugf			= yaml_dt_tree_debugf,
+	.error_at_node		= yaml_dt_tree_error_at_node,
+	.error_at_property	= yaml_dt_tree_error_at_property,
+	.error_at_ref		= yaml_dt_tree_error_at_ref,
 };
 
 static int parse_int(const char *str, int len, unsigned long long *valp,
@@ -226,9 +229,13 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 	return false;
 }
 
-static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int depth)
+static void ref_output_single(struct tree *t, FILE *fp,
+			      struct ref *ref, bool object,
+			      const char *compiler, const char *cflags,
+			      const char *input_compiler_tag,
+			      const char *output_compiler_tag,
+			      int depth)
 {
-	struct yaml_emit_state *yaml = to_yaml(dt);
 	struct node *np;
 	struct property *prop;
 	struct label *l;
@@ -266,19 +273,18 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 	switch (ref->type) {
 	case r_anchor:
-		np = node_lookup_by_label(to_tree(dt),
-				ref->data, ref->len);
-		if (!np && !yaml->object) {
-			dt_error_at(dt, &to_dt_ref(ref)->m,
+		np = node_lookup_by_label(t, ref->data, ref->len);
+		if (!np && !object) {
+			tree_error_at_ref(t, ref,
 				    "Can't resolve reference to label %s\n",
 				    refname);
 			return;
 		}
 
 		/* object mode, just leave references here */
-		if (!np && yaml->object) {
-			fputc('*', dt->output);
-			fwrite(ref->data, ref->len, 1, dt->output);
+		if (!np && object) {
+			fputc('*', fp);
+			fwrite(ref->data, ref->len, 1, fp);
 			break;
 		}
 
@@ -288,28 +294,26 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		    memcmp(l->label, ref->data, ref->len)) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_warning_at(dt, &to_dt_ref(ref)->m,
-				    "Switching label %s to label %s\n",
+			tree_debug(t, "Switching label %s to label %s\n",
 				    namebuf, l->label);
 		}
 
-		fprintf(dt->output, "*%s", l->label);
+		fprintf(fp, "*%s", l->label);
 		break;
 
 	case r_path:
-		np = node_lookup_by_label(to_tree(dt),
-				ref->data, ref->len);
-		if (!np && !yaml->object) {
-			dt_error_at(dt, &to_dt_ref(ref)->m,
+		np = node_lookup_by_label(t, ref->data, ref->len);
+		if (!np && !object) {
+			tree_error_at_ref(t, ref,
 				    "Can't resolve reference to label %s\n",
 				    refname);
 			return;
 		}
 
 		/* object mode, just leave references here */
-		if (!np && yaml->object) {
-			fputs("!pathref ", dt->output);
-			fwrite(ref->data, ref->len, 1, dt->output);
+		if (!np && object) {
+			fputs("!pathref ", fp);
+			fwrite(ref->data, ref->len, 1, fp);
 			break;
 		}
 
@@ -319,12 +323,11 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		    memcmp(l->label, ref->data, ref->len)) {
 			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
 			namebuf[sizeof(namebuf) - 1] = '\0';
-			dt_warning_at(dt, &to_dt_ref(ref)->m,
-				    "Switching label %s to label %s\n",
+			tree_debug(t, "Switching label %s to label %s\n",
 				    namebuf, l->label);
 		}
 
-		fprintf(dt->output, "!pathref %s", l->label);
+		fprintf(fp, "!pathref %s", l->label);
 		break;
 
 	case r_scalar:
@@ -340,8 +343,8 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 		/* output explicit tag (which is not a string) */
 		if (xtag && strcmp(xtag, "!str") &&
-			    strcmp(xtag, yaml->input_compiler_tag))
-			fprintf(dt->output, "%s ", xtag);
+			(input_compiler_tag && strcmp(xtag, input_compiler_tag)))
+			fprintf(fp, "%s ", xtag);
 
 		/* TODO type checking/conversion here */
 		if (!tag && is_int) {
@@ -358,59 +361,59 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 
 		if (is_int_tag(tag)) {
 			if (!is_int) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(t, ref,
 					    "Invalid integer syntax; %s\n",
 					    refname);
 				return;
 			}
 			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(t, ref,
 					    "Integer out of range: %s\n",
 					    refname);
 				return;
 			}
 
 			if (is_hex)
-				fprintf(dt->output, "0x%llx", val);
+				fprintf(fp, "0x%llx", val);
 			else if (is_unsigned)
-				fprintf(dt->output, "%llu", val);
+				fprintf(fp, "%llu", val);
 			else
-				fprintf(dt->output, "%lld", (long long)val);
+				fprintf(fp, "%lld", (long long)val);
 
 		} else if (!strcmp(tag, "!str")) {
 
 			/* no newlines? easy */
 			if (!memchr(ref->data, '\n', ref->len)) {
-				fputc('"', dt->output);
-				fwrite(ref->data, ref->len, 1, dt->output);
-				fputc('"', dt->output);
+				fputc('"', fp);
+				fwrite(ref->data, ref->len, 1, fp);
+				fputc('"', fp);
 			} else {
-				fputs("|", dt->output);
+				fputs("|", fp);
 				s = ref->data;
 				while (s && s < (char *)ref->data + ref->len) {
 					e = memchr(s, '\n', (char *)ref->data + ref->len - s);
 					if (!e)
 						e = ref->data + ref->len;
-					fprintf(dt->output, "\n%*s", (depth + 1) * 2, "");
-					fwrite(s, e - s, 1, dt->output);
+					fprintf(fp, "\n%*s", (depth + 1) * 2, "");
+					fwrite(s, e - s, 1, fp);
 					s = e < ((char *)ref->data + ref->len) ? e + 1 : NULL;
 				}
 			}
 
 		} else if (!strcmp(tag, "!bool")) {
-			fwrite(ref->data, ref->len, 1, dt->output);
+			fwrite(ref->data, ref->len, 1, fp);
 		} else if (!strcmp(tag, "!null")) {
-			fwrite(ref->data, ref->len, 1, dt->output);
-		} else if (!strcmp(tag, yaml->input_compiler_tag)) {
-			dt_debug(dt, "Compiling...\n");
+			fwrite(ref->data, ref->len, 1, fp);
+		} else if (input_compiler_tag && !strcmp(tag, input_compiler_tag)) {
+			tree_debug(t, "Compiling...\n");
 
 			ret = compile(ref->data, ref->len,
-					yaml->compiler, yaml->cflags,
+					compiler,cflags,
 					&output, &output_size);
 			if (ret) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(t, ref,
 					"Failed to compile %s:\n%s %s\n%s\n",
-					tag, yaml->compiler, yaml->cflags, refname);
+					tag, compiler, cflags, refname);
 				break;
 			}
 
@@ -418,29 +421,28 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 			free(output);
 
 			if (!b64_output) {
-				dt_error_at(dt, &to_dt_ref(ref)->m,
+				tree_error_at_ref(t, ref,
 					"Failed to encode to base64 %s: %s\n", tag, refname);
 				break;
 			}
 
 			/* base64 output */
-			fprintf(dt->output, "%s |", yaml->output_compiler_tag);
+			fprintf(fp, "%s |", output_compiler_tag);
 			s = b64_output;
 			while (s && s < (char *)b64_output + b64_output_size) {
 				e = memchr(s, '\n', (char *)b64_output + b64_output_size - s);
 				if (!e)
 					e = b64_output + b64_output_size;
-				fprintf(dt->output, "\n%*s", (depth + 1) * 2, "");
-				fwrite(s, e - s, 1, dt->output);
+				fprintf(fp, "\n%*s", (depth + 1) * 2, "");
+				fwrite(s, e - s, 1, fp);
 				s = e < ((char *)b64_output + b64_output_size) ? e + 1 : NULL;
 			}
 
 			free(b64_output);
 
 		} else {
-			fwrite(ref->data, ref->len, 1, dt->output);
-			dt_warning_at(dt, &to_dt_ref(ref)->m,
-				"Unknown tag %s: %s\n", tag, refname);
+			fwrite(ref->data, ref->len, 1, fp);
+			tree_debug(t, "Unknown tag %s: %s\n", tag, refname);
 		}
 
 		break;
@@ -451,8 +453,12 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	}
 }
 
-void __yaml_flatten_node(struct yaml_dt_state *dt,
-			 struct node *np, int depth)
+void __yaml_flatten_node(struct tree *t, FILE *fp,
+			 struct node *np, bool object,
+			 const char *compiler, const char *cflags,
+			 const char *input_compiler_tag,
+			 const char *output_compiler_tag,
+			 int depth)
 {
 	struct node *child;
 	struct property *prop;
@@ -461,26 +467,26 @@ void __yaml_flatten_node(struct yaml_dt_state *dt,
 	int outcount, count, i;
 
 	if (depth > 0) {
-		fprintf(dt->output, "%*s%s:", (depth - 1) * 2, "",
+		fprintf(fp, "%*s%s:", (depth - 1) * 2, "",
 				np->name);
 
 		/* output only first label */
 		list_for_each_entry(l, &np->labels, node) {
-			fprintf(dt->output, " &%s", l->label);
+			fprintf(fp, " &%s", l->label);
 			break;
 		}
-		fputc('\n', dt->output);
+		fputc('\n', fp);
 	}
 
 	outcount = 0;
 	list_for_each_entry(prop, &np->properties, node) {
 		outcount++;
 
-		fprintf(dt->output, "%*s", depth * 2, "");
+		fprintf(fp, "%*s", depth * 2, "");
 		if (prop->name[0] != '#')
-			fprintf(dt->output, "%s:", prop->name);
+			fprintf(fp, "%s:", prop->name);
 		else
-			fprintf(dt->output, "\"%s\":", prop->name);
+			fprintf(fp, "\"%s\":", prop->name);
 
 		count = 0;
 		list_for_each_entry(ref, &prop->refs, node) {
@@ -491,7 +497,7 @@ void __yaml_flatten_node(struct yaml_dt_state *dt,
 		}
 
 		if (count > 1)
-			fputs(" [", dt->output);
+			fputs(" [", fp);
 
 		i = 0;
 		list_for_each_entry(ref, &prop->refs, node) {
@@ -501,20 +507,24 @@ void __yaml_flatten_node(struct yaml_dt_state *dt,
 				continue;
 
 			if (i > 0)
-				fputc(',', dt->output);
-			fputc(' ', dt->output);
+				fputc(',', fp);
+			fputc(' ', fp);
 
 			if (ref->type == r_null)
-				fputc('~', dt->output);
+				fputc('~', fp);
 			else
-				ref_output_single(dt, ref, depth);
+				ref_output_single(t, fp, ref, object,
+						compiler, cflags,
+						input_compiler_tag,
+						output_compiler_tag,
+						depth);
 			i++;
 		}
 
 		if (count > 1)
-			fputs(" ]", dt->output);
+			fputs(" ]", fp);
 
-		fputc('\n', dt->output);
+		fputc('\n', fp);
 	}
 
 	list_for_each_entry(child, &np->children, node)
@@ -522,64 +532,30 @@ void __yaml_flatten_node(struct yaml_dt_state *dt,
 
 	/* "~: ~" for an empty tree without props or children */
 	if (outcount == 0)
-		fprintf(dt->output, "%*s~: ~\n", depth * 2, "");
+		fprintf(fp, "%*s~: ~\n", depth * 2, "");
 
 	list_for_each_entry(child, &np->children, node)
-		__yaml_flatten_node(dt, child, depth + 1);
+		__yaml_flatten_node(t, fp, child, object,
+				    compiler, cflags,
+				    input_compiler_tag, output_compiler_tag,
+				    depth + 1);
 
 	/* multiple labels to same node; spit out only the labels */
 	if (l && depth > 0) {
 		list_for_each_entry_continue(l, &np->labels, node) {
-			fprintf(dt->output, "%*s# %s: &%s { }\n", (depth - 1) * 2, "",
+			fprintf(fp, "%*s# %s: &%s { }\n", (depth - 1) * 2, "",
 					np->name, l->label);
 		}
 	}
 }
 
-static void yaml_flatten_node(struct yaml_dt_state *dt)
+void yaml_flatten_node(struct tree *t, FILE *fp, bool object,
+		       const char *compiler, const char *cflags,
+		       const char *input_compiler_tag,
+		       const char *output_compiler_tag)
 {
-	__yaml_flatten_node(dt, tree_root(to_tree(dt)), 0);
-}
-
-static void yaml_apply_ref_nodes(struct yaml_dt_state *dt)
-{
-	struct yaml_emit_state *yaml = to_yaml(dt);
-	struct node *np, *npn, *npref;
-	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
-
-	list_for_each_entry_safe(np, npn, ref_nodes, node) {
-
-		npref = node_lookup_by_label(to_tree(dt), np->name + 1,
-				strlen(np->name + 1));
-
-		if (!npref && !yaml->object)
-			dt_error_at(dt, &to_dt_node(np)->m,
-				"reference to unknown label %s\n",
-				np->name + 1);
-
-		if (npref)
-			tree_apply_ref_node(to_tree(dt), npref, np);
-
-		/* free everything now */
-		if (npref || !yaml->object) {
-			list_del(&np->node);
-			node_free(to_tree(dt), np);
-		}
-	}
-
-	if (!yaml->object)
-		return;
-
-	/* move all remaining unref nodes to root */
-	list_for_each_entry_safe(np, npn, ref_nodes, node) {
-
-		if (tree_root(to_tree(dt))) {
-			list_del(&np->node);
-			np->parent = tree_root(to_tree(dt));
-			list_add_tail(&np->node, &np->parent->children);
-		} else
-			node_free(to_tree(dt), np);
-	}
+	__yaml_flatten_node(t, fp, tree_root(t), object, compiler, cflags,
+			input_compiler_tag, output_compiler_tag, 0);
 }
 
 int yaml_setup(struct yaml_dt_state *dt)
@@ -643,8 +619,14 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 
 int yaml_emit(struct yaml_dt_state *dt)
 {
-	yaml_apply_ref_nodes(dt);
-	yaml_flatten_node(dt);
+	struct yaml_emit_state *yaml = to_yaml(dt);
+
+	tree_apply_ref_nodes(to_tree(dt), yaml->object);
+	yaml_flatten_node(to_tree(dt), dt->output,
+			  yaml->object,
+			  yaml->compiler, yaml->cflags,
+			  yaml->input_compiler_tag,
+			  yaml->output_compiler_tag);
 
 	return 0;
 }

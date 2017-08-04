@@ -97,15 +97,18 @@ static void null_node_free(struct tree *t, struct node *np)
 }
 
 static const struct tree_ops null_tree_ops = {
-	.ref_alloc	= null_ref_alloc,
-	.ref_free	= null_ref_free,
-	.prop_alloc	= null_prop_alloc,
-	.prop_free	= null_prop_free,
-	.label_alloc	= null_label_alloc,
-	.label_free	= null_label_free,
-	.node_alloc	= null_node_alloc,
-	.node_free	= null_node_free,
-	.debugf		= yaml_dt_tree_debugf,
+	.ref_alloc		= null_ref_alloc,
+	.ref_free		= null_ref_free,
+	.prop_alloc		= null_prop_alloc,
+	.prop_free		= null_prop_free,
+	.label_alloc		= null_label_alloc,
+	.label_free		= null_label_free,
+	.node_alloc		= null_node_alloc,
+	.node_free		= null_node_free,
+	.debugf			= yaml_dt_tree_debugf,
+	.error_at_node		= yaml_dt_tree_error_at_node,
+	.error_at_property	= yaml_dt_tree_error_at_property,
+	.error_at_ref		= yaml_dt_tree_error_at_ref,
 };
 
 int null_setup(struct yaml_dt_state *dt)
