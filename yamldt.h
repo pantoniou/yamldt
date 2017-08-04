@@ -97,6 +97,23 @@ struct yaml_dt_config {
 	const char *output_file;
 	bool debug;
 	bool late;
+	const char *compiler;
+	const char *cflags;
+	const char *compiler_tags;
+
+	/* for dtb & yaml */
+	bool object;
+
+	/* for dtb */
+	bool compatible;
+	bool dts;
+
+	/* for YAML */
+	bool yaml;
+
+	/* for checkers */
+	const char *schema;
+	const char *schema_save;
 };
 
 struct input {
@@ -113,8 +130,6 @@ struct yaml_dt_config;
 
 struct yaml_dt_emitter_ops {
 	bool (*select)(int argc, char **argv);
-	int (*parseopts)(int *argcp, char **argv, int *optindp,
-			 const struct yaml_dt_config *cfg, void **ecfg);
 	int (*setup)(struct yaml_dt_state *dt);
 	void (*cleanup)(struct yaml_dt_state *dt);
 	int (*emit)(struct yaml_dt_state *dt);
@@ -123,7 +138,6 @@ struct yaml_dt_emitter_ops {
 struct yaml_dt_emitter {
 	struct list_head node;
 	const char *name;
-	const char *usage_banner;
 	const char * const *suffixes;
 	const struct tree_ops *tops;
 	const struct yaml_dt_emitter_ops *eops;
@@ -141,15 +155,15 @@ struct yaml_dt_checker_ops {
 struct yaml_dt_checker {
 	struct list_head node;
 	const char *name;
-	const char *usage_banner;
 	const struct yaml_dt_checker_ops *cops;
 };
 
 struct yaml_dt_state {
-	const char *output_file;
+	struct yaml_dt_config cfg;
+	char *input_compiler_tag;
+	char *output_compiler_tag;
+
 	FILE *output;
-	bool debug;
-	bool late;
 	void *input_content;
 	size_t input_size;	/* including fake document markers */
 	size_t input_alloc;
@@ -245,8 +259,7 @@ void yaml_dt_tree_error_at_ref(struct tree *t, struct ref *ref,
 		__attribute__ ((__format__ (__printf__, 3, 0)));
 
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
-	     struct yaml_dt_emitter *emitter, void *ecfg,
-	     struct yaml_dt_checker *checker, void *ccfg);
+	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker);
 void dt_parse(struct yaml_dt_state *dt);
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal);
 

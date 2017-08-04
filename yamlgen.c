@@ -53,15 +53,8 @@
 
 #include "yamlgen.h"
 
-#define DEFAULT_COMPILER "clang-5.0"
-#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
-#define DEFAULT_TAGS "!filter,!ebpf"
-
 struct yaml_emit_state {
 	bool object;
-	const char *compiler;
-	const char *cflags;
-	const char *compiler_tags;
 	char *input_compiler_tag;
 	char *output_compiler_tag;
 };
@@ -560,10 +553,7 @@ void yaml_flatten_node(struct tree *t, FILE *fp, bool object,
 
 int yaml_setup(struct yaml_dt_state *dt)
 {
-	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
 	struct yaml_emit_state *yaml;
-	int len;
-	char *s;
 
 	yaml = malloc(sizeof(*yaml));
 	assert(yaml);
@@ -571,32 +561,10 @@ int yaml_setup(struct yaml_dt_state *dt)
 
 	dt->emitter_state = yaml;
 
-	yaml->object = yaml_cfg->object;
-	yaml->compiler = yaml_cfg->compiler;
-	yaml->cflags = yaml_cfg->cflags;
-	yaml->compiler_tags = yaml_cfg->compiler_tags;
-
-	s = strchr(yaml->compiler_tags, ',');
-	assert(s);	/* should be already handled by parseopts */
-
-	len = s - yaml->compiler_tags;
-	yaml->input_compiler_tag = malloc(len + 1);
-	assert(yaml->input_compiler_tag);
-	memcpy(yaml->input_compiler_tag, yaml->compiler_tags, len);
-	yaml->input_compiler_tag[len] = '\0';
-
-	len = strlen(++s);
-	yaml->output_compiler_tag = malloc(len + 1);
-	assert(yaml->output_compiler_tag);
-	memcpy(yaml->output_compiler_tag, s, len);
-	yaml->output_compiler_tag[len] = '\0';
+	yaml->object = dt->cfg.object;
 
 	dt_debug(dt, "YAML configuration:\n");
 	dt_debug(dt, " object     = %s\n", yaml->object ? "true" : "false");
-	dt_debug(dt, " compiler   = %s\n", yaml->compiler);
-	dt_debug(dt, " cflags     = %s\n", yaml->cflags);
-	dt_debug(dt, " in-tag     = %s\n", yaml->input_compiler_tag);
-	dt_debug(dt, " out-tag    = %s\n", yaml->output_compiler_tag);
 
 	return 0;
 }
@@ -604,11 +572,6 @@ int yaml_setup(struct yaml_dt_state *dt)
 void yaml_cleanup(struct yaml_dt_state *dt)
 {
 	struct yaml_emit_state *yaml = to_yaml(dt);
-	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
-
-	if (yaml_cfg)
-		free(yaml_cfg);
-
 
 	free(yaml->input_compiler_tag);
 	free(yaml->output_compiler_tag);
@@ -624,98 +587,27 @@ int yaml_emit(struct yaml_dt_state *dt)
 	tree_apply_ref_nodes(to_tree(dt), yaml->object);
 	yaml_flatten_node(to_tree(dt), dt->output,
 			  yaml->object,
-			  yaml->compiler, yaml->cflags,
-			  yaml->input_compiler_tag,
-			  yaml->output_compiler_tag);
+			  dt->cfg.compiler, dt->cfg.cflags,
+			  dt->input_compiler_tag,
+			  dt->output_compiler_tag);
 
 	return 0;
 }
-
-static struct option opts[] = {
-	{ "yaml",	 no_argument, 0, 'y' },
-	{ "object",	 no_argument, 0, 'c' },
-	{0, 0, 0, 0}
-};
 
 static bool yaml_select(int argc, char **argv)
 {
-	int cc, option_index = -1;
+	int i;
 
-	optind = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(argc, argv,
-			"y", opts, &option_index)) != -1) {
-		/* explicit yaml mode select */
-		if (cc == 'y')
+	/* explicit yaml mode select */
+	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '-' && argv[i][1] == 'y')
 			return true;
 	}
-
 	return false;
-}
-
-static int yaml_parseopts(int *argcp, char **argv, int *optindp,
-			  const struct yaml_dt_config *cfg, void **ecfg)
-{
-	int cc, option_index = -1;
-	struct yaml_emit_config *yaml_cfg;
-	bool do_not_consume;
-
-	yaml_cfg = malloc(sizeof(*yaml_cfg));
-	assert(yaml_cfg);
-	memset(yaml_cfg, 0, sizeof(*yaml_cfg));
-
-	/* get and consume non common options */
-	option_index = -1;
-	*optindp = 0;
-	opterr = 0;	/* do print error for invalid option */
-	while ((cc = getopt_long(*argcp, argv,
-			"ycO:f:t:", opts, &option_index)) != -1) {
-
-		do_not_consume = false;
-		switch (cc) {
-		case 'c':
-			yaml_cfg->object = true;
-			break;
-		case 'y':
-			/* nothing to do for this */
-			break;
-		case 'O':
-			yaml_cfg->compiler = optarg;
-			break;
-		case 'f':
-			yaml_cfg->cflags = optarg;
-			break;
-		case 't':
-			/* must be seperated by comma */
-			if (!strchr(optarg, ','))
-				return -1;
-			yaml_cfg->compiler_tags = optarg;
-			break;
-		case '?':
-			do_not_consume = true;
-			break;
-		}
-
-		if (!do_not_consume)
-			long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
-				 option_index);
-	}
-
-	if (!yaml_cfg->compiler)
-		yaml_cfg->compiler = DEFAULT_COMPILER;
-	if (!yaml_cfg->cflags)
-		yaml_cfg->cflags = DEFAULT_CFLAGS;
-	if (!yaml_cfg->compiler_tags)
-		yaml_cfg->compiler_tags = DEFAULT_TAGS;
-
-	*ecfg = yaml_cfg;
-
-	return 0;
 }
 
 static const struct yaml_dt_emitter_ops yaml_emitter_ops = {
 	.select		= yaml_select,
-	.parseopts	= yaml_parseopts,
 	.setup		= yaml_setup,
 	.cleanup	= yaml_cleanup,
 	.emit		= yaml_emit,
@@ -729,17 +621,6 @@ static const char *yaml_suffixes[] = {
 struct yaml_dt_emitter yaml_emitter = {
 	.name		= "yaml",
 	.tops		= &yaml_tree_ops,
-
-	.usage_banner	= 
-"   -y, --yaml          Generate YAML output\n"
-"   -c, --object        Object mode\n"
-"   -O, --compiler      Compiler to use for !filter tag\n"
-"                       (default: " DEFAULT_COMPILER ")\n"
-"   -f, --cflags        CFLAGS when compiling\n"
-"                       (default: " DEFAULT_CFLAGS ")\n"
-"   -t, --cflags        Tags to use for compiler input/output markers\n"
-"                       (default: " DEFAULT_TAGS ")\n",
-
 	.suffixes	= yaml_suffixes,
 	.eops		= &yaml_emitter_ops,
 };

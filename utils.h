@@ -30,10 +30,6 @@ char get_escape_char(const char *s, int *i);
         (type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
 
-bool long_opt_consume(int *argcp, char **argv, 
-		      const struct option *opts, int *optindp,
-		      const char *optarg, int val, int option_index);
-
 char **str_to_argv(const char *binary, const char *str);
 int compile(const char *text, size_t size,
 	    const char *compiler, const char *flags,

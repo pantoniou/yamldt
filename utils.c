@@ -243,46 +243,6 @@ char get_escape_char(const char *s, int *i)
 
 #include <stdio.h>
 
-bool long_opt_consume(int *argcp, char **argv, 
-		      const struct option *opts, int *optindp,
-		      const char *optarg, int val, int option_index)
-{
-	int argc = *argcp;
-	int optind = *optindp;
-	const struct option *opt;
-	int consume;
-
-	/* find out whether to consume one or two args */
-	if (option_index < 0) {
-		/* short option, find long option */
-		for (opt = opts; opt->name; opt++)
-			if (opt->val == val) {
-				option_index = opt - opts;
-				break;
-			}
-	}
-
-	/* don't consume unrecognized option */
-	if (option_index < 0)
-		return false;
-
-	consume = 1;
-	if (opts[option_index].has_arg == required_argument &&
-		optind > 0 && optarg && !strcmp(optarg, argv[optind-1]))
-		consume++;
-
-	memmove(&argv[optind - consume], &argv[optind],
-			(argc - optind + 1) * sizeof(*argv));
-
-	argc -= consume;
-	optind -= consume;
-
-	*argcp = argc;
-	*optindp = optind;
-
-	return true;
-}
-
 char **str_to_argv(const char *binary, const char *str)
 {
 	const char *s, *start;

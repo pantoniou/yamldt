@@ -125,59 +125,20 @@ int null_emit(struct yaml_dt_state *dt)
 	return 0;
 }
 
-static struct option opts[] = {
-	{ "null",	 no_argument, 0, 'n' },
-	{0, 0, 0, 0}
-};
-
 static bool null_select(int argc, char **argv)
 {
-	int cc, option_index = -1;
+	int i;
 
-	optind = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(argc, argv,
-			"n", opts, &option_index)) != -1) {
-		/* explicit null mode select */
-		if (cc == 'n')
+	/* explicit null mode select */
+	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '-' && argv[i][1] == 'n')
 			return true;
 	}
-
 	return false;
-}
-
-static int null_parseopts(int *argcp, char **argv, int *optindp,
-			  const struct yaml_dt_config *cfg, void **ecfg)
-{
-	int cc, option_index = -1;
-	bool do_not_consume;
-
-	/* get and consume non common options */
-	option_index = -1;
-	*optindp = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(*argcp, argv,
-			"n", opts, &option_index)) != -1) {
-
-		do_not_consume = false;
-		switch (cc) {
-		case 'n':
-			break;
-		case '?':
-			do_not_consume = true;
-			break;
-		}
-		if (!do_not_consume)
-			long_opt_consume(argcp, argv, opts, optindp,
-					 optarg, cc, option_index);
-	}
-
-	return 0;
 }
 
 static const struct yaml_dt_emitter_ops null_emitter_ops = {
 	.select		= null_select,
-	.parseopts	= null_parseopts,
 	.setup		= null_setup,
 	.cleanup	= null_cleanup,
 	.emit		= null_emit,
@@ -190,10 +151,6 @@ static const char *null_suffixes[] = {
 struct yaml_dt_emitter null_emitter = {
 	.name		= "null",
 	.tops		= &null_tree_ops,
-
-	.usage_banner	= 
-"   -n, --null          Generate no output\n",
-
 	.suffixes	= null_suffixes,
 	.eops		= &null_emitter_ops,
 };

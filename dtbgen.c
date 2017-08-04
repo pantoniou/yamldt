@@ -64,9 +64,6 @@
 
 #include "dtbgen.h"
 
-#define DEFAULT_COMPILER "clang-5.0"
-#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
-
 struct dtb_node {
 	struct dt_node dt;
 	/* DTB generation */
@@ -127,8 +124,6 @@ struct dtb_emit_state {
 	bool compatible;
 	bool object;
 	bool dts;
-	const char *compiler;
-	const char *cflags;
 };
 
 #define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
@@ -479,12 +474,12 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			dt_debug(dt, "Compiling...\n");
 
 			ret = compile(ref->data, ref->len,
-					dtb->compiler, dtb->cflags,
+					dt->cfg.compiler, dt->cfg.cflags,
 					&output_data, &output_size);
 			if (ret) {
 				tree_error_at_ref(to_tree(dt), ref,
 					"Failed to compile %s:\n%s %s\n%s\n",
-					tag, dtb->compiler, dtb->cflags, refname);
+					tag, dt->cfg.compiler, dt->cfg.cflags, refname);
 				break;
 			}
 			data = output_data;
@@ -1571,7 +1566,6 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 
 int dtb_setup(struct yaml_dt_state *dt)
 {
-	struct dtb_emit_config *dtb_cfg = to_dtb_cfg(dt);
 	struct dtb_emit_state *dtb;
 
 	dtb = malloc(sizeof(*dtb));
@@ -1581,11 +1575,9 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dtb->next_phandle = 1;
 	dt->emitter_state = dtb;
 
-	dtb->compatible = dtb_cfg->compatible;
-	dtb->object = dtb_cfg->object;
-	dtb->dts = dtb_cfg->dts;
-	dtb->compiler = dtb_cfg->compiler;
-	dtb->cflags = dtb_cfg->cflags;
+	dtb->compatible = dt->cfg.compatible;
+	dtb->object = dt->cfg.object;
+	dtb->dts = dt->cfg.dts;
 
 	INIT_LIST_HEAD(&dtb->fixups);
 
@@ -1593,15 +1585,12 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
 	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
 	dt_debug(dt, " dts        = %s\n", dtb->dts ? "true" : "false");
-	dt_debug(dt, " compiler   = %s\n", dtb->compiler);
-	dt_debug(dt, " cflags     = %s\n", dtb->cflags);
 	return 0;
 }
 
 void dtb_cleanup(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
-	struct dtb_emit_config *dtb_cfg = to_dtb_cfg(dt);
 	enum dt_data_area area;
 	struct fixup *f, *fn;
 
@@ -1618,9 +1607,6 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 
 	if (dtb->memreserve_prop)
 		prop_free(to_tree(dt), dtb->memreserve_prop);
-
-	if (dtb_cfg)
-		free(dtb_cfg);
 
 	memset(dtb, 0, sizeof(*dtb));
 	free(dtb);
@@ -1885,7 +1871,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 	int size;
 
 	dtb_handle_special_properties(dt);
-	if (dt->late)
+	if (dt->cfg.late)
 		dtb_late_resolve(dt);
 
 	if (dtb->object)
@@ -1906,7 +1892,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 		dtb_add_local_fixups(dt);
 	}
 
-	if (dt->debug)
+	if (dt->cfg.debug)
 		dtb_dump(dt);
 
 	dtb_build_string_table(dt);
@@ -2081,7 +2067,7 @@ static void dtb_dump(struct yaml_dt_state *dt)
 	struct node *np;
 	struct list_head *ref_nodes;
 
-	if (!dt->debug)
+	if (!dt->cfg.debug)
 		return;
 
 	np = tree_root(to_tree(dt));
@@ -2097,98 +2083,20 @@ static void dtb_dump(struct yaml_dt_state *dt)
 	}
 }
 
-static struct option opts[] = {
-	{ "compatible",	 	no_argument, 0, 'C' },
-	{ "late-resolve",	no_argument, 0, 'l' },
-	{ "object",		no_argument, 0, 'c' },
-	{ "dts",		no_argument, 0, 's' },
-	{ "compiler",		required_argument, 0, 'O' },
-	{ "cflags",		required_argument, 0, 'f' },
-	{ "compiled-tag",	required_argument, 0, 't' },
-	{0, 0, 0, 0}
-};
-
 static bool dtb_select(int argc, char **argv)
 {
-	int cc, option_index = -1;
+	int i;
 
-	optind = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(argc, argv,
-			"s", opts, &option_index)) != -1) {
-		/* explicit dts mode select (select dtb too) */
-		if (cc == 's')
+	/* explicit dtbs mode select */
+	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '-' && argv[i][1] == 's')
 			return true;
 	}
-
 	return false;
-}
-
-static int dtb_parseopts(int *argcp, char **argv, int *optindp,
-			 const struct yaml_dt_config *cfg, void **ecfg)
-{
-	int cc, option_index = -1;
-	struct dtb_emit_config *dtb_cfg;
-	const char *s;
-	bool do_not_consume;
-
-	dtb_cfg = malloc(sizeof(*dtb_cfg));
-	assert(dtb_cfg);
-	memset(dtb_cfg, 0, sizeof(*dtb_cfg));
-
-	/* get and consume non common options */
-	option_index = -1;
-	*optindp = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(*argcp, argv,
-			"ClycsO:f:", opts, &option_index)) != -1) {
-
-		do_not_consume = false;
-		switch (cc) {
-		case 'C':
-			dtb_cfg->compatible = true;
-			break;
-		case 'c':
-			dtb_cfg->object = true;
-			break;
-		case 's':
-			dtb_cfg->dts = true;
-			break;
-		case 'O':
-			dtb_cfg->compiler = optarg;
-			break;
-		case 'f':
-			dtb_cfg->cflags = optarg;
-			break;
-		case '?':
-			/* invalid option (might be for others) */
-			do_not_consume = true;
-			break;
-		}
-
-		if (!do_not_consume)
-			long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
-				 option_index);
-	}
-
-	/* select DTS automatically if not explicitly set */
-	if (!dtb_cfg->dts && (s = strrchr(cfg->output_file, '.')) &&
-	   !strcmp(s, ".dts"))
-		dtb_cfg->dts = true;
-
-	if (!dtb_cfg->compiler)
-		dtb_cfg->compiler = DEFAULT_COMPILER;
-	if (!dtb_cfg->cflags)
-		dtb_cfg->cflags = DEFAULT_CFLAGS;
-
-	*ecfg = dtb_cfg;
-
-	return 0;
 }
 
 static const struct yaml_dt_emitter_ops dtb_emitter_ops = {
 	.select		= dtb_select,
-	.parseopts	= dtb_parseopts,
 	.setup		= dtb_setup,
 	.cleanup	= dtb_cleanup,
 	.emit		= dtb_emit,
@@ -2203,17 +2111,6 @@ static const char *dtb_suffixes[] = {
 
 struct yaml_dt_emitter dtb_emitter = {
 	.name		= "dtb",
-
-	.usage_banner	= 
-"   -y, --yaml          Generate YAML output\n"
-"   -C, --compatible    Bit exact compatibility mode\n"
-"   -s, --dts           DTS output instead of DTB\n"
-"   -c, --object        Object mode\n"
-"   -O, --compiler      Compiler to use for !filter tag\n"
-"                       (default " DEFAULT_COMPILER ")\n"
-"   -f, --cflags        CFLAGS when compiling\n"
-"                       (default " DEFAULT_CFLAGS ")\n",
-
 	.suffixes	= dtb_suffixes,
 	.tops		= &dtb_tree_ops,
 	.eops		= &dtb_emitter_ops,

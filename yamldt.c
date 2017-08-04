@@ -64,6 +64,10 @@
 #include "nullcheck.h"
 #include "dtbcheck.h"
 
+#define DEFAULT_COMPILER "clang-5.0"
+#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
+#define DEFAULT_TAGS "!filter,!ebpf"
+
 static const char *get_builtin_tag(const char *tag)
 {
 	static const char *tags[] = {
@@ -253,7 +257,7 @@ void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 	dt = to_dt(t);
 
 	va_start(ap, fmt);
-	if (dt->debug)
+	if (dt->cfg.debug)
 		vfprintf(stderr, fmt, ap);
 	va_end(ap);
 }
@@ -521,10 +525,10 @@ int dt_checker_check(struct yaml_dt_state *dt)
 }
 
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
-	     struct yaml_dt_emitter *emitter, void *ecfg,
-	     struct yaml_dt_checker *checker, void *ccfg)
+	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker)
 {
-	int i, ret;
+	int i, ret, len;
+	char *s;
 
 	memset(dt, 0, sizeof(*dt));
 
@@ -533,21 +537,40 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 		return -1;
 	}
 
-	dt->output_file = cfg->output_file;
-	dt->debug = cfg->debug;
-	dt->late = cfg->late;
+	memcpy(&dt->cfg, cfg, sizeof(*cfg));
+
+	if (dt->cfg.compiler && dt->cfg.cflags && dt->cfg.compiler_tags) {
+		s = strchr(cfg->compiler_tags, ',');
+		if (!s) {
+			fprintf(stderr, "compiler tags are bogus: %s\n",
+					cfg->compiler_tags);
+			return -1;
+		}
+
+		len = s - cfg->compiler_tags;
+		dt->input_compiler_tag = malloc(len + 1);
+		assert(dt->input_compiler_tag);
+		memcpy(dt->input_compiler_tag, cfg->compiler_tags, len);
+		dt->input_compiler_tag[len] = '\0';
+
+		len = strlen(++s);
+		dt->output_compiler_tag = malloc(len + 1);
+		assert(dt->output_compiler_tag);
+		memcpy(dt->output_compiler_tag, s, len);
+		dt->output_compiler_tag[len] = '\0';
+	}
 
 	INIT_LIST_HEAD(&dt->inputs);
 
 	/* no output file? if the emitter doesn't need it /dev/null */
-	if (!dt->output_file) 
-		dt->output_file = "/dev/null";
+	if (!dt->cfg.output_file) 
+		dt->cfg.output_file = "/dev/null";
 
-	if (strcmp(dt->output_file, "-")) {
-		dt->output = fopen(dt->output_file, "wb");
+	if (strcmp(dt->cfg.output_file, "-")) {
+		dt->output = fopen(dt->cfg.output_file, "wb");
 		if (!dt->output) {
 			fprintf(stderr, "Failed to open %s for output\n",
-					dt->output_file);
+					dt->cfg.output_file);
 			return -1;
 		}
 	} else
@@ -566,8 +589,9 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	yaml_parser_set_input_string(&dt->parser, dt->input_content,
 				     dt->input_size);
 
+	tree_init(to_tree(dt), emitter->tops);
+
 	dt->emitter = emitter;
-	dt->emitter_cfg = ecfg;
 
 	ret = dt_emitter_setup(dt);
 	if (ret) {
@@ -576,7 +600,6 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	}
 
 	dt->checker = checker;
-	dt->checker_cfg = ccfg;
 
 	ret = dt_checker_setup(dt);
 	if (ret) {
@@ -584,9 +607,6 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 		fprintf(stderr, "Failed to setup checker\n");
 		return -1;
 	}
-
-	/* emitter gets to select the tree ops */
-	tree_init(to_tree(dt), emitter->tops);
 
 	dt_debug(dt, "Selected emitter: %s\n", emitter->name);
 	dt_debug(dt, "Selected checker: %s\n", checker->name);
@@ -610,8 +630,8 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	dt_emitter_cleanup(dt);
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
-		  strcmp(dt->output_file, "-") &&
-		  strcmp(dt->output_file, "/dev/null");
+		  strcmp(dt->cfg.output_file, "-") &&
+		  strcmp(dt->cfg.output_file, "/dev/null");
 
 	if (dt->current_event)
 		yaml_event_delete(dt->current_event);
@@ -628,11 +648,17 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	yaml_parser_delete(&dt->parser);
 	fflush(stdout);
 
+	if (dt->input_compiler_tag)
+		free(dt->input_compiler_tag);
+
+	if (dt->output_compiler_tag)
+		free(dt->output_compiler_tag);
+
 	if (dt->input_content)
 		free(dt->input_content);
 
 	if (rm_file)
-		remove(dt->output_file);
+		remove(dt->cfg.output_file);
 
 	memset(dt, 0, sizeof(*dt));
 }
@@ -854,7 +880,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		} else if (dt->map_key) {
 
 			found_existing = false;
-			if (dt->current_np && !dt->late) {
+			if (dt->current_np && !dt->cfg.late) {
 				list_for_each_entry(np, &dt->current_np->children, node) {
 					/* match on same name or root */
 					if (!strcmp(dt->map_key, np->name) ||
@@ -1369,7 +1395,7 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
 
-	if (!dt->debug)
+	if (!dt->cfg.debug)
 		return;
 
 	va_start(ap, fmt);
@@ -1378,57 +1404,56 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 }
 
 static struct option opts[] = {
-	{ "output",	 required_argument, 0, 'o' },
-	{ "debug",	 no_argument, 0, 'd' },
-	{ "late-resolve",no_argument, 0, 'l' },
-	{ "help",	 no_argument, 0, 'h' },
-	{ "version",     no_argument, 0, 'v' },
+	{ "output",	 	required_argument, 0, 'o' },
+	{ "debug",	 	no_argument,	   0, 'd' },
+	{ "late-resolve",	no_argument,       0, 'l' },
+	{ "compile-only",	no_argument,	   0, 'c' },
+	{ "compiler",		required_argument, 0, 'O' },
+	{ "cflags",		required_argument, 0, 'f' },
+	{ "compile-tags",	required_argument, 0, 't' },
+	{ "compatible",		no_argument,	   0, 'C' },
+	{ "yaml",		no_argument,	   0, 'y' },
+	{ "dts",		no_argument,	   0, 's' },
+	{ "help",	 	no_argument, 	   0, 'h' },
+	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
 };
 
 static void help(struct list_head *emitters, struct list_head *checkers)
 {
-	struct yaml_dt_emitter *e;
-	struct yaml_dt_checker *c;
-
-	printf("yamldt [options] <input-file> [<input-file>...]\n"
-		" common options are:\n"
-		"   -o, --output	Output file\n"
-		"   -d, --debug		Debug messages\n"
-		"   -h, --help		Help\n"
-		"   -v, --version	Display version\n"
+	printf(
+"yamldt [options] <input-file> [<input-file>...]\n"
+" common options are:\n"
+"   -o, --output	Output file\n"
+"   -d, --debug		Debug messages\n"
+"   -h, --help		Help\n"
+"   -v, --version	Display version\n"
+"   -O, --compiler      Compiler to use for !filter tag\n"
+"                       (default: " DEFAULT_COMPILER ")\n"
+"   -f, --cflags        CFLAGS when compiling\n"
+"                       (default: " DEFAULT_CFLAGS ")\n"
+"   -t, --compile-tags  Tags to use for compiler input/output markers\n"
+"                       (default: " DEFAULT_TAGS ")\n"
+"   -c                  Don't resolve references (object mode)\n"
+"   -C, --compatible    Compatible mode\n"
+"   -s, --dts           DTS mode\n"
+"   -y, --yaml          YAML mode\n"
+"   -S, --schema        Use schema file\n"
+"   -i, --schema-save   Save intermediate schema\n"
 		);
-
-	list_for_each_entry(e, emitters, node) {
-		if (!e->usage_banner)
-			continue;
-		printf("\n");
-		printf(" options for %s emitter:\n", e->name);
-		printf("%s", e->usage_banner);
-	}
-
-	list_for_each_entry(c, checkers, node) {
-		if (!c->usage_banner)
-			continue;
-		printf("\n");
-		printf(" options for %s checker:\n", c->name);
-		printf("%s", c->usage_banner);
-	}
 }
 
 int main(int argc, char *argv[])
 {
 	struct yaml_dt_state dt_state, *dt = &dt_state;
 	int err;
-	int cc, option_index = 0;
+	int i, cc, option_index = 0;
 	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
 	struct list_head emitters;
 	struct yaml_dt_emitter *e, *selected_emitter = NULL;
-	void *ecfg = NULL;
 	struct list_head checkers;
 	struct yaml_dt_checker *c, *selected_checker = NULL;
-	void *ccfg = NULL;
-	const char *s;
+	const char *s, *t;
 	const char * const *ss;
 
 	memset(dt, 0, sizeof(*dt));
@@ -1449,32 +1474,25 @@ int main(int argc, char *argv[])
 	option_index = -1;
 	optind = 0;
 	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(argc, argv,
-			"o:dlvh?", opts, &option_index)) != -1) {
-		switch (cc) {
-		case 'o':
-			cfg->output_file = optarg;
-			break;
-		case 'd':
-			cfg->debug = true;
-			break;
-		case 'l':
-			cfg->late = true;
-			break;
-		case 'v':
-			printf("%s version %s\n", PACKAGE_NAME, VERSION);
-			return 0;
-		case 'h':
-			help(&emitters, &checkers);
-			return 0;
-		case '?':
-			/* ignore invalid option */
-			break;
+	cfg->compiler = DEFAULT_COMPILER;
+	cfg->cflags = DEFAULT_CFLAGS;
+	cfg->compiler_tags = DEFAULT_TAGS;
+
+	/* try to find output file argument */
+	for (i = 1; i < argc; i++) {
+		s = &argv[i][0];
+		if ((cc = *s++) != '-')
+			continue;
+		/* no other options from o */
+		if ((cc = *s) == 'o') {
+			t = strchr(s, '=');
+			if (t)
+				cfg->output_file = t + 1;
+			else if (i + 1 < argc)
+				cfg->output_file = argv[i + 1];
 		}
-
-		long_opt_consume(&argc, argv, opts, &optind, optarg, cc,
-				 option_index);
-
+		if (cfg->output_file)
+			break;
 	}
 
 	/* try to select an emitter by asking first */
@@ -1486,7 +1504,8 @@ int main(int argc, char *argv[])
 	}
 
 	/* no bites, try to search for suffix match */
-	if (!selected_emitter && (s = strrchr(cfg->output_file, '.'))) {
+	if (!selected_emitter && cfg->output_file &&
+			(s = strrchr(cfg->output_file, '.'))) {
 		list_for_each_entry(e, &emitters, node) {
 			if (!e->suffixes)
 				continue;
@@ -1506,15 +1525,6 @@ int main(int argc, char *argv[])
 	if (!selected_emitter)
 		selected_emitter = &dtb_emitter;
 
-	if (selected_emitter->eops && selected_emitter->eops->parseopts) {
-		err = selected_emitter->eops->parseopts(&argc, argv, &optind, cfg, &ecfg);
-		if (err) {
-			fprintf(stderr, "Failed to parse opts for emitter: %s\n",
-					selected_emitter->name);
-			return EXIT_FAILURE;
-		}
-	}
-
 	/* try to select an checker by asking first */
 	list_for_each_entry(c, &checkers, node) {
 		if (c->cops && c->cops->select && c->cops->select(argc, argv)) {
@@ -1527,27 +1537,65 @@ int main(int argc, char *argv[])
 	if (!selected_checker)
 		selected_checker = &null_checker;
 
-	if (selected_checker->cops && selected_checker->cops->parseopts) {
-		err = selected_checker->cops->parseopts(&argc, argv, &optind, cfg, &ccfg);
-		if (err) {
-			fprintf(stderr, "Failed to parse opts for checker: %s\n",
-					selected_checker->name);
-			return EXIT_FAILURE;
+	opterr = 1;
+	while ((cc = getopt_long(argc, argv,
+			"o:dlvCcysS:i:h?", opts, &option_index)) != -1) {
+		switch (cc) {
+		case 'o':
+			cfg->output_file = optarg;
+			break;
+		case 'd':
+			cfg->debug = true;
+			break;
+		case 'l':
+			cfg->late = true;
+			break;
+		case 'O':
+			cfg->compiler = optarg;
+			break;
+		case 'f':
+			cfg->cflags = optarg;
+			break;
+		case 't':
+			/* must be seperated by comma */
+			if (!strchr(optarg, ',')) {
+				fprintf(stderr, "compiler tags must be seperated by ,\n");
+				return EXIT_FAILURE;
+			}
+			cfg->compiler_tags = optarg;
+			break;
+
+		case 'c':
+			cfg->object = true;
+			break;
+
+		case 'C':
+			cfg->compatible = true;
+			break;
+		case 'y':
+			cfg->yaml = true;
+			break;
+		case 's':
+			cfg->dts = true;
+			break;
+		case 'S':
+			cfg->schema = optarg;
+			break;
+		case 'i':
+			cfg->schema_save = optarg;
+			break;
+		case 'v':
+			printf("%s version %s\n", PACKAGE_NAME, VERSION);
+			return 0;
+		case 'h':
+		case '?':
+			help(&emitters, &checkers);
+			return cc == 'h' ? 0 : EXIT_FAILURE;
 		}
 	}
 
-	/* anything left here is an error */
-	option_index = -1;
-	optind = 0;
-	opterr = 1;	/* do print error for invalid option */
-	if ((cc = getopt_long(argc, argv,
-			"?", opts, &option_index)) != -1) {
-		fprintf(stderr, "Invalid option %c\n", cc);
-		return EXIT_FAILURE;
-	}
-
 	if (optind >= argc) {
-		fprintf(stderr, "Missing input file arguments\n");
+		fprintf(stderr, "Missing input file arguments optind/argc %d/%d\n", optind, argc);
 		return EXIT_FAILURE;
 	}
 
@@ -1559,7 +1607,7 @@ int main(int argc, char *argv[])
 	cfg->input_file = argv + optind;
 	cfg->input_file_count = argc - optind;
 
-	err = dt_setup(dt, cfg, selected_emitter, ecfg, selected_checker, ccfg);
+	err = dt_setup(dt, cfg, selected_emitter, selected_checker);
 	if (err)
 		return EXIT_FAILURE;
 

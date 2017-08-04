@@ -42,14 +42,6 @@
 
 extern struct yaml_dt_emitter yaml_emitter;
 
-struct yaml_emit_config {
-	bool object;
-	const char *compiler;
-	const char *cflags;
-	const char *compiler_tags;
-};
-#define to_yaml_cfg(_dt) ((struct yaml_emit_config *)((_dt)->emitter_cfg))
-
 void yaml_flatten_node(struct tree *t, FILE *fp, bool object,
 		       const char *compiler, const char *cflags,
 		       const char *input_compiler_tag,

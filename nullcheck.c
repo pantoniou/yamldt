@@ -67,50 +67,13 @@ int nullchk_check(struct yaml_dt_state *dt)
 	return 0;
 }
 
-static struct option opts[] = {
-	{ "nullchk",	 no_argument, 0, 0 },
-	{0, 0, 0, 0}
-};
-
 static bool nullchk_select(int argc, char **argv)
 {
 	return false;
 }
 
-static int nullchk_parseopts(int *argcp, char **argv, int *optindp,
-			  const struct yaml_dt_config *cfg, void **ccfg)
-{
-	int cc, option_index = -1;
-	bool do_not_consume;
-
-	/* get and consume non common options */
-	option_index = -1;
-	*optindp = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	while ((cc = getopt_long(*argcp, argv,
-			"", opts, &option_index)) != -1) {
-
-		do_not_consume = false;
-		if (option_index >= 0) {
-			if (!strcmp(opts[option_index].name, "nullchk"))
-				;	/* do nothing */
-			else
-				do_not_consume = true;
-		} else {
-			do_not_consume = true;
-		}
-
-		if (!do_not_consume)
-			long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
-				 option_index);
-	}
-
-	return 0;
-}
-
 static const struct yaml_dt_checker_ops null_checker_ops = {
 	.select		= nullchk_select,
-	.parseopts	= nullchk_parseopts,
 	.setup		= nullchk_setup,
 	.cleanup	= nullchk_cleanup,
 	.check		= nullchk_check,
@@ -118,9 +81,5 @@ static const struct yaml_dt_checker_ops null_checker_ops = {
 
 struct yaml_dt_checker null_checker = {
 	.name		= "nullchk",
-
-	.usage_banner	= 
-"       --nullchk       No checking performed\n",
-
 	.cops		= &null_checker_ops,
 };
