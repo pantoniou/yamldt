@@ -240,13 +240,24 @@ const char *dn_fullname_multi(struct node *np, char **buf, int *size)
 	char *p;
 	int len, tlen;
 	const char *ret;
+	const char *name;
 
 	/* special case for root */
 	if (np->parent == NULL) {
 		/* either / or ref node (which shouldn't have / at start) */
 		if (!np->name || !strcmp(np->name, "/") || strlen(np->name) == 0)
-			return "/";
-		return np->name;
+			name = "/";
+		else
+			name = np->name;
+		ret = *buf;
+		len = strlen(name) + 1;
+		/* truncated */
+		if (len > *size)
+			return "<>";
+		strcpy(*buf, name);
+		*size -= len;
+		*buf += len;
+		return ret;
 	}
 
 	npt = np;

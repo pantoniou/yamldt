@@ -372,10 +372,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		}
 
 		if (np) {
-			dn_fullname(np, namebuf, sizeof(namebuf));
-
-			data = namebuf;
-			size = strlen(namebuf) + 1;
+			data = dn_fullname(np, namebuf, sizeof(namebuf));
+			size = strlen(data) + 1;
 			was_resolved = true;
 		}
 		break;
@@ -643,6 +641,7 @@ static void add_symbols(struct yaml_dt_state *dt, struct node *np,
 	struct property *prop;
 	struct label *l;
 	char namebuf[NODE_FULLNAME_MAX];
+	const char *name;
 
 	list_for_each_entry(l, &np->labels, node) {
 
@@ -653,10 +652,9 @@ static void add_symbols(struct yaml_dt_state *dt, struct node *np,
 
 		prop = prop_alloc(to_tree(dt), l->label);
 
-		dn_fullname(np, namebuf, sizeof(namebuf));
-		assert(strlen(namebuf) > 0);
+		name = dn_fullname(np, namebuf, sizeof(namebuf));
 
-		prop_append(prop, namebuf, strlen(namebuf), true);
+		prop_append(prop, name, strlen(name), true);
 
 		/* if it doesn't exist add __symbols__ */
 		if (!*symbols_np) {
