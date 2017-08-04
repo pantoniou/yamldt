@@ -738,7 +738,6 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 	return 0;
 }
 
-
 static const struct yaml_dt_emitter_ops yaml_emitter_ops = {
 	.select		= yaml_select,
 	.parseopts	= yaml_parseopts,

@@ -59,6 +59,7 @@
 
 #include "dtbgen.h"
 #include "yamlgen.h"
+#include "nullgen.h"
 
 static const char *get_builtin_tag(const char *tag)
 {
@@ -1298,6 +1299,7 @@ int main(int argc, char *argv[])
 	INIT_LIST_HEAD(&emitters);
 	list_add_tail(&dtb_emitter.node, &emitters);
 	list_add_tail(&yaml_emitter.node, &emitters);
+	list_add_tail(&null_emitter.node, &emitters);
 
 	memset(cfg, 0, sizeof(*cfg));
 
