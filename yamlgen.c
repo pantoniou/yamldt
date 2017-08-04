@@ -685,7 +685,7 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 	/* get and consume non common options */
 	option_index = -1;
 	*optindp = 0;
-	opterr = 1;	/* do print error for invalid option */
+	opterr = 0;	/* do print error for invalid option */
 	while ((cc = getopt_long(*argcp, argv,
 			"ycO:f:t:", opts, &option_index)) != -1) {
 
