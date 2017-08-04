@@ -1613,7 +1613,7 @@ int dtb_setup(struct yaml_dt_state *dt)
 
 	INIT_LIST_HEAD(&dtb->fixups);
 
-	dt_debug(dt, "DTB configuration:\n");
+	dt_debug(dt, "DTB emitter configuration:\n");
 	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
 	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
 	dt_debug(dt, " dts        = %s\n", dtb->dts ? "true" : "false");

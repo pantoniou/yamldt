@@ -51,6 +51,8 @@
 
 #include "yamldt.h"
 
+#include "nullgen.h"
+
 static struct ref *null_ref_alloc(struct tree *t, enum ref_type type,
 				 const void *data, int len, const char *xtag)
 {

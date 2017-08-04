@@ -14,6 +14,7 @@ yamldt_SOURCES = yamldt.c yamldt.h list.h fdt.h libfdt_env.h \
 		 yamlgen.c yamlgen.h \
 		 nullgen.c nullgen.h \
 		 nullcheck.c nullcheck.h \
+		 dtbcheck.c dtbcheck.h \
 		 utils.c utils.h \
 		 syexpr.c syexpr.h \
 		 base64.c base64.h

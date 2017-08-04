@@ -62,6 +62,7 @@
 #include "nullgen.h"
 
 #include "nullcheck.h"
+#include "dtbcheck.h"
 
 static const char *get_builtin_tag(const char *tag)
 {
@@ -474,6 +475,10 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 
 	INIT_LIST_HEAD(&dt->inputs);
 
+	/* no output file? if the emitter doesn't need it /dev/null */
+	if (!dt->output_file) 
+		dt->output_file = "/dev/null";
+
 	if (strcmp(dt->output_file, "-")) {
 		dt->output = fopen(dt->output_file, "wb");
 		if (!dt->output) {
@@ -541,7 +546,8 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	dt_emitter_cleanup(dt);
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
-		  strcmp(dt->output_file, "-");
+		  strcmp(dt->output_file, "-") &&
+		  strcmp(dt->output_file, "/dev/null");
 
 	if (dt->current_event)
 		yaml_event_delete(dt->current_event);
@@ -1340,7 +1346,7 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 		if (!c->usage_banner)
 			continue;
 		printf("\n");
-		printf(" options for %s emitter:\n", c->name);
+		printf(" options for %s checker:\n", c->name);
 		printf("%s", c->usage_banner);
 	}
 }
@@ -1370,6 +1376,7 @@ int main(int argc, char *argv[])
 
 	INIT_LIST_HEAD(&checkers);
 	list_add_tail(&null_checker.node, &checkers);
+	list_add_tail(&dtb_checker.node, &checkers);
 
 	memset(cfg, 0, sizeof(*cfg));
 
@@ -1403,11 +1410,6 @@ int main(int argc, char *argv[])
 		long_opt_consume(&argc, argv, opts, &optind, optarg, cc,
 				 option_index);
 
-	}
-
-	if (!cfg->output_file) {
-		fprintf(stderr, "Missing output file\n");
-		return EXIT_FAILURE;
 	}
 
 	/* try to select an emitter by asking first */
@@ -1475,11 +1477,17 @@ int main(int argc, char *argv[])
 	opterr = 1;	/* do print error for invalid option */
 	if ((cc = getopt_long(argc, argv,
 			"?", opts, &option_index)) != -1) {
+		fprintf(stderr, "Invalid option %c\n", cc);
 		return EXIT_FAILURE;
 	}
 
 	if (optind >= argc) {
 		fprintf(stderr, "Missing input file arguments\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!cfg->output_file) {
+		fprintf(stderr, "Missing output file\n");
 		return EXIT_FAILURE;
 	}
 
