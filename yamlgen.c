@@ -47,17 +47,29 @@
 
 #include "utils.h"
 #include "syexpr.h"
+#include "base64.h"
 
 #include "yamldt.h"
 
+#define DEFAULT_COMPILER "clang-5.0"
+#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
+#define DEFAULT_TAGS "!filter,!ebpf"
+
 struct yaml_emit_config {
 	bool object;
+	const char *compiler;
+	const char *cflags;
+	const char *compiler_tags;
 };
 #define to_yaml_cfg(_dt) ((struct yaml_emit_config *)((_dt)->emitter_cfg))
 
 struct yaml_emit_state {
 	bool object;
-	/* TODO more? */
+	const char *compiler;
+	const char *cflags;
+	const char *compiler_tags;
+	char *input_compiler_tag;
+	char *output_compiler_tag;
 };
 #define to_yaml(_dt) ((struct yaml_emit_state *)(_dt)->emitter_state)
 
@@ -238,6 +250,10 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 	char *refname;
 	int refnamelen;
 	const char *s, *e;
+	void *output;
+	size_t output_size;
+	void *b64_output;
+	size_t b64_output_size;
 
 	prop = ref->prop;
 	assert(prop);
@@ -329,7 +345,8 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		is_int = ret == 0;
 
 		/* output explicit tag (which is not a string) */
-		if (xtag && strcmp(xtag, "!str"))
+		if (xtag && strcmp(xtag, "!str") &&
+			    strcmp(xtag, yaml->input_compiler_tag))
 			fprintf(dt->output, "%s ", xtag);
 
 		/* TODO type checking/conversion here */
@@ -390,6 +407,42 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 			fwrite(ref->data, ref->len, 1, dt->output);
 		} else if (!strcmp(tag, "!null")) {
 			fwrite(ref->data, ref->len, 1, dt->output);
+		} else if (!strcmp(tag, yaml->input_compiler_tag)) {
+			dt_debug(dt, "Compiling...\n");
+
+			ret = compile(ref->data, ref->len,
+					yaml->compiler, yaml->cflags,
+					&output, &output_size);
+			if (ret) {
+				dt_error_at(dt, &to_dt_ref(ref)->m,
+					"Failed to compile %s:\n%s %s\n%s\n",
+					tag, yaml->compiler, yaml->cflags, refname);
+				break;
+			}
+
+			b64_output = base64_encode(output, output_size, &b64_output_size);
+			free(output);
+
+			if (!b64_output) {
+				dt_error_at(dt, &to_dt_ref(ref)->m,
+					"Failed to encode to base64 %s: %s\n", tag, refname);
+				break;
+			}
+
+			/* base64 output */
+			fprintf(dt->output, "%s |", yaml->output_compiler_tag);
+			s = b64_output;
+			while (s && s < (char *)b64_output + b64_output_size) {
+				e = memchr(s, '\n', (char *)b64_output + b64_output_size - s);
+				if (!e)
+					e = b64_output + b64_output_size;
+				fprintf(dt->output, "\n%*s", (depth + 1) * 2, "");
+				fwrite(s, e - s, 1, dt->output);
+				s = e < ((char *)b64_output + b64_output_size) ? e + 1 : NULL;
+			}
+
+			free(b64_output);
+
 		} else {
 			fwrite(ref->data, ref->len, 1, dt->output);
 			dt_warning_at(dt, &to_dt_ref(ref)->m,
@@ -403,7 +456,6 @@ static void ref_output_single(struct yaml_dt_state *dt, struct ref *ref, int dep
 		break;
 	}
 }
-
 
 void __yaml_flatten_node(struct yaml_dt_state *dt,
 			 struct node *np, int depth)
@@ -540,6 +592,8 @@ int yaml_setup(struct yaml_dt_state *dt)
 {
 	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
 	struct yaml_emit_state *yaml;
+	int len;
+	char *s;
 
 	yaml = malloc(sizeof(*yaml));
 	assert(yaml);
@@ -548,8 +602,34 @@ int yaml_setup(struct yaml_dt_state *dt)
 	dt->emitter_state = yaml;
 
 	yaml->object = yaml_cfg->object;
+	yaml->compiler = yaml_cfg->compiler;
+	yaml->cflags = yaml_cfg->cflags;
+	yaml->compiler_tags = yaml_cfg->compiler_tags;
+
+	s = strchr(yaml->compiler_tags, ',');
+	assert(s);	/* should be already handled by parseopts */
+
+	len = s - yaml->compiler_tags;
+	yaml->input_compiler_tag = malloc(len + 1);
+	assert(yaml->input_compiler_tag);
+	memcpy(yaml->input_compiler_tag, yaml->compiler_tags, len);
+	yaml->input_compiler_tag[len] = '\0';
+
+	len = strlen(++s);
+	yaml->output_compiler_tag = malloc(len + 1);
+	assert(yaml->output_compiler_tag);
+	memcpy(yaml->output_compiler_tag, s, len);
+	yaml->output_compiler_tag[len] = '\0';
 
 	tree_init(to_tree(dt), &yaml_tree_ops);
+
+	dt_debug(dt, "YAML configuration:\n");
+	dt_debug(dt, " object     = %s\n", yaml->object ? "true" : "false");
+	dt_debug(dt, " compiler   = %s\n", yaml->compiler);
+	dt_debug(dt, " cflags     = %s\n", yaml->cflags);
+	dt_debug(dt, " in-tag     = %s\n", yaml->input_compiler_tag);
+	dt_debug(dt, " out-tag    = %s\n", yaml->output_compiler_tag);
+
 	return 0;
 }
 
@@ -562,6 +642,10 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 
 	if (yaml_cfg)
 		free(yaml_cfg);
+
+
+	free(yaml->input_compiler_tag);
+	free(yaml->output_compiler_tag);
 
 	memset(yaml, 0, sizeof(*yaml));
 	free(yaml);
@@ -612,7 +696,7 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 	*optindp = 0;
 	opterr = 1;	/* do print error for invalid option */
 	while ((cc = getopt_long(*argcp, argv,
-			"yc", opts, &option_index)) != -1) {
+			"ycO:f:t:", opts, &option_index)) != -1) {
 
 		switch (cc) {
 		case 'c':
@@ -620,6 +704,18 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 			break;
 		case 'y':
 			/* nothing to do for this */
+			break;
+		case 'O':
+			yaml_cfg->compiler = optarg;
+			break;
+		case 'f':
+			yaml_cfg->cflags = optarg;
+			break;
+		case 't':
+			/* must be seperated by comma */
+			if (!strchr(optarg, ','))
+				return -1;
+			yaml_cfg->compiler_tags = optarg;
 			break;
 		case '?':
 			/* invalid option */
@@ -629,6 +725,13 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
 				 option_index);
 	}
+
+	if (!yaml_cfg->compiler)
+		yaml_cfg->compiler = DEFAULT_COMPILER;
+	if (!yaml_cfg->cflags)
+		yaml_cfg->cflags = DEFAULT_CFLAGS;
+	if (!yaml_cfg->compiler_tags)
+		yaml_cfg->compiler_tags = DEFAULT_TAGS;
 
 	*ecfg = yaml_cfg;
 
@@ -655,7 +758,13 @@ struct yaml_dt_emitter yaml_emitter = {
 
 	.usage_banner	= 
 "   -y, --yaml          Generate YAML output\n"
-"   -c, --object        Object mode\n",
+"   -c, --object        Object mode\n"
+"   -O, --compiler      Compiler to use for !filter tag\n"
+"                       (default: " DEFAULT_COMPILER ")\n"
+"   -f, --cflags        CFLAGS when compiling\n"
+"                       (default: " DEFAULT_CFLAGS ")\n"
+"   -t, --cflags        Tags to use for compiler input/output markers\n"
+"                       (default: " DEFAULT_TAGS ")\n",
 
 	.suffixes	= yaml_suffixes,
 	.eops		= &yaml_emitter_ops,

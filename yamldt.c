@@ -623,7 +623,10 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 			ref_label = (char *)event->data.scalar.value;
 			ref_label_len = event->data.scalar.length;
 
-			xtag = "!str";
+			/* try to find implicitly a type */
+			tag = (char *)event->data.scalar.tag;
+
+			xtag = tag ? tag : "!str";
 			rt = r_scalar;
 
 			break;

@@ -235,6 +235,8 @@ int ebpf_setup(struct ebpf_vm *vm,
 	vm->lazy_func = lazy_func;
 	vm->debugf = debugf;
 	vm->debugarg = debugarg;
+	INIT_LIST_HEAD(&vm->unres);
+	vm->initialized = true;
 
 	return 0;
 }
@@ -243,7 +245,7 @@ void ebpf_cleanup(struct ebpf_vm *vm)
 {
 	struct ebpf_unresolved_entry *ue, *uen;
 
-	if (!vm)
+	if (!vm || !vm->initialized)
 		return;
 
 	list_for_each_entry_safe(ue, uen, &vm->unres, node) {
@@ -275,6 +277,8 @@ int ebpf_load_elf(struct ebpf_vm *vm, const void *elf, size_t elf_size)
 	const struct ebpf_callback *cb;
 	struct ebpf_unresolved_entry *ue;
 
+	if (!vm || !vm->initialized)
+		return -1;
 	ehdr = elf;
 	elf_end = elf + elf_size;
 
@@ -311,7 +315,6 @@ int ebpf_load_elf(struct ebpf_vm *vm, const void *elf, size_t elf_size)
 	}
 	vm->elf = elf;
 	vm->elf_size = elf_size;
-	INIT_LIST_HEAD(&vm->unres);
 
 	for (i = 0; i < ehdr->e_shnum; i++) {
 		shdr = elf + ehdr->e_shoff + i * ehdr->e_shentsize;

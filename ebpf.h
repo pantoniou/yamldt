@@ -108,6 +108,7 @@ typedef void (*ebpf_debugf_t)(void *arg, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
 
 struct ebpf_vm {
+	bool initialized;
 	const void *elf;		/* original ELF file */
 	size_t elf_size;	
 	size_t total_size;

@@ -62,6 +62,9 @@
 
 #include "yamldt.h"
 
+#define DEFAULT_COMPILER "clang-5.0"
+#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
+
 struct dtb_node {
 	struct dt_node dt;
 	/* DTB generation */
@@ -109,6 +112,8 @@ struct dtb_emit_config {
 	bool compatible;
 	bool object;
 	bool dts;
+	const char *compiler;
+	const char *cflags;
 };
 #define to_dtb_cfg(_dt) ((struct dtb_emit_config *)((_dt)->emitter_cfg))
 
@@ -129,6 +134,8 @@ struct dtb_emit_state {
 	bool compatible;
 	bool object;
 	bool dts;
+	const char *compiler;
+	const char *cflags;
 };
 
 #define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
@@ -320,6 +327,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	const char *p;
 	char *refname;
 	int refnamelen;
+	void *output_data = NULL;
+	size_t output_size = 0;
 
 	prop = ref->prop;
 	assert(prop);
@@ -470,6 +479,20 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			data = NULL;
 			size = 0;
 			is_delete = true;
+		} else if (!strcmp(tag, "!filter")) {
+			dt_debug(dt, "Compiling...\n");
+
+			ret = compile(ref->data, ref->len,
+					dtb->compiler, dtb->cflags,
+					&output_data, &output_size);
+			if (ret) {
+				dt_error_at(dt, &to_dt_ref(ref)->m,
+					"Failed to compile %s:\n%s %s\n%s\n",
+					tag, dtb->compiler, dtb->cflags, refname);
+				break;
+			}
+			data = output_data;
+			size = output_size;
 		} else {
 			dt_error_at(dt, &to_dt_ref(ref)->m,
 				"Unsupported tag %s: %s\n", tag,
@@ -497,6 +520,9 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		prop->is_delete = is_delete;
 	else if (dtbprop->size > 0)
 		prop->is_delete = false;
+
+	if (output_data)
+		free(output_data);
 
 	np = prop->np;
 }
@@ -1589,11 +1615,19 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dtb->compatible = dtb_cfg->compatible;
 	dtb->object = dtb_cfg->object;
 	dtb->dts = dtb_cfg->dts;
+	dtb->compiler = dtb_cfg->compiler;
+	dtb->cflags = dtb_cfg->cflags;
 
 	INIT_LIST_HEAD(&dtb->fixups);
 
 	tree_init(to_tree(dt), &dtb_tree_ops);
 
+	dt_debug(dt, "DTB configuration:\n");
+	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
+	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
+	dt_debug(dt, " dts        = %s\n", dtb->dts ? "true" : "false");
+	dt_debug(dt, " compiler   = %s\n", dtb->compiler);
+	dt_debug(dt, " cflags     = %s\n", dtb->cflags);
 	return 0;
 }
 
@@ -2099,10 +2133,13 @@ static void dtb_dump(struct yaml_dt_state *dt)
 }
 
 static struct option opts[] = {
-	{ "compatible",	 no_argument, 0, 'C' },
-	{ "late-resolve",no_argument, 0, 'l' },
-	{ "object",	 no_argument, 0, 'c' },
-	{ "dts",	 no_argument, 0, 's' },
+	{ "compatible",	 	no_argument, 0, 'C' },
+	{ "late-resolve",	no_argument, 0, 'l' },
+	{ "object",		no_argument, 0, 'c' },
+	{ "dts",		no_argument, 0, 's' },
+	{ "compiler",		required_argument, 0, 'O' },
+	{ "cflags",		required_argument, 0, 'f' },
+	{ "compiled-tag",	required_argument, 0, 't' },
 	{0, 0, 0, 0}
 };
 
@@ -2138,7 +2175,7 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 	*optindp = 0;
 	opterr = 1;	/* do print error for invalid option */
 	while ((cc = getopt_long(*argcp, argv,
-			"Clycs", opts, &option_index)) != -1) {
+			"ClycsO:f:", opts, &option_index)) != -1) {
 
 		switch (cc) {
 		case 'C':
@@ -2149,6 +2186,12 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 			break;
 		case 's':
 			dtb_cfg->dts = true;
+			break;
+		case 'O':
+			dtb_cfg->compiler = optarg;
+			break;
+		case 'f':
+			dtb_cfg->cflags = optarg;
 			break;
 		case '?':
 			/* invalid option */
@@ -2163,6 +2206,11 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 	if (!dtb_cfg->dts && (s = strrchr(cfg->output_file, '.')) &&
 	   !strcmp(s, ".dts"))
 		dtb_cfg->dts = true;
+
+	if (!dtb_cfg->compiler)
+		dtb_cfg->compiler = DEFAULT_COMPILER;
+	if (!dtb_cfg->cflags)
+		dtb_cfg->cflags = DEFAULT_CFLAGS;
 
 	*ecfg = dtb_cfg;
 
@@ -2191,7 +2239,11 @@ struct yaml_dt_emitter dtb_emitter = {
 "   -y, --yaml          Generate YAML output\n"
 "   -C, --compatible    Bit exact compatibility mode\n"
 "   -s, --dts           DTS output instead of DTB\n"
-"   -c, --object        Object mode\n",
+"   -c, --object        Object mode\n"
+"   -O, --compiler      Compiler to use for !filter tag\n"
+"                       (default " DEFAULT_COMPILER ")\n"
+"   -f, --cflags        CFLAGS when compiling\n"
+"                       (default " DEFAULT_CFLAGS ")\n",
 
 	.suffixes	= dtb_suffixes,
 	.tops		= &dtb_tree_ops,
