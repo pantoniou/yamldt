@@ -51,17 +51,11 @@
 
 #include "yamldt.h"
 
+#include "yamlgen.h"
+
 #define DEFAULT_COMPILER "clang-5.0"
 #define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
 #define DEFAULT_TAGS "!filter,!ebpf"
-
-struct yaml_emit_config {
-	bool object;
-	const char *compiler;
-	const char *cflags;
-	const char *compiler_tags;
-};
-#define to_yaml_cfg(_dt) ((struct yaml_emit_config *)((_dt)->emitter_cfg))
 
 struct yaml_emit_state {
 	bool object;
@@ -621,8 +615,6 @@ int yaml_setup(struct yaml_dt_state *dt)
 	memcpy(yaml->output_compiler_tag, s, len);
 	yaml->output_compiler_tag[len] = '\0';
 
-	tree_init(to_tree(dt), &yaml_tree_ops);
-
 	dt_debug(dt, "YAML configuration:\n");
 	dt_debug(dt, " object     = %s\n", yaml->object ? "true" : "false");
 	dt_debug(dt, " compiler   = %s\n", yaml->compiler);
@@ -637,8 +629,6 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 {
 	struct yaml_emit_state *yaml = to_yaml(dt);
 	struct yaml_emit_config *yaml_cfg = to_yaml_cfg(dt);
-
-	tree_cleanup(to_tree(dt));
 
 	if (yaml_cfg)
 		free(yaml_cfg);
@@ -686,6 +676,7 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 {
 	int cc, option_index = -1;
 	struct yaml_emit_config *yaml_cfg;
+	bool do_not_consume;
 
 	yaml_cfg = malloc(sizeof(*yaml_cfg));
 	assert(yaml_cfg);
@@ -698,6 +689,7 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 	while ((cc = getopt_long(*argcp, argv,
 			"ycO:f:t:", opts, &option_index)) != -1) {
 
+		do_not_consume = false;
 		switch (cc) {
 		case 'c':
 			yaml_cfg->object = true;
@@ -718,11 +710,12 @@ static int yaml_parseopts(int *argcp, char **argv, int *optindp,
 			yaml_cfg->compiler_tags = optarg;
 			break;
 		case '?':
-			/* invalid option */
-			return -1;
+			do_not_consume = true;
+			break;
 		}
 
-		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
+		if (!do_not_consume)
+			long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
 				 option_index);
 	}
 

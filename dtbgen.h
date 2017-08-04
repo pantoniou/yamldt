@@ -38,4 +38,13 @@
 
 extern struct yaml_dt_emitter dtb_emitter;
 
+struct dtb_emit_config {
+	bool compatible;
+	bool object;
+	bool dts;
+	const char *compiler;
+	const char *cflags;
+};
+#define to_dtb_cfg(_dt) ((struct dtb_emit_config *)((_dt)->emitter_cfg))
+
 #endif

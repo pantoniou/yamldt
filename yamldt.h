@@ -129,6 +129,22 @@ struct yaml_dt_emitter {
 	const struct yaml_dt_emitter_ops *eops;
 };
 
+struct yaml_dt_checker_ops {
+	bool (*select)(int argc, char **argv);
+	int (*parseopts)(int *argcp, char **argv, int *optindp,
+			 const struct yaml_dt_config *cfg, void **ccfg);
+	int (*setup)(struct yaml_dt_state *dt);
+	void (*cleanup)(struct yaml_dt_state *dt);
+	int (*check)(struct yaml_dt_state *dt);
+};
+
+struct yaml_dt_checker {
+	struct list_head node;
+	const char *name;
+	const char *usage_banner;
+	const struct yaml_dt_checker_ops *cops;
+};
+
 struct yaml_dt_state {
 	const char *output_file;
 	FILE *output;
@@ -167,6 +183,10 @@ struct yaml_dt_state {
 	const struct yaml_dt_emitter *emitter;
 	void *emitter_state;
 	void *emitter_cfg;
+
+	const struct yaml_dt_checker *checker;
+	void *checker_state;
+	void *checker_cfg;
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)
@@ -214,5 +234,11 @@ void yaml_dt_node_free(struct tree *t, struct node *np);
 
 void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
+
+int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
+	     struct yaml_dt_emitter *emitter, void *ecfg,
+	     struct yaml_dt_checker *checker, void *ccfg);
+void dt_parse(struct yaml_dt_state *dt);
+void dt_cleanup(struct yaml_dt_state *dt, bool abnormal);
 
 #endif

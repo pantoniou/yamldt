@@ -62,6 +62,8 @@
 
 #include "yamldt.h"
 
+#include "dtbgen.h"
+
 #define DEFAULT_COMPILER "clang-5.0"
 #define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
 
@@ -107,15 +109,6 @@ struct fixup {
 	struct list_head node;
 	struct list_head refs;
 };
-
-struct dtb_emit_config {
-	bool compatible;
-	bool object;
-	bool dts;
-	const char *compiler;
-	const char *cflags;
-};
-#define to_dtb_cfg(_dt) ((struct dtb_emit_config *)((_dt)->emitter_cfg))
 
 struct dtb_emit_state {
 	/* DTB generation state */
@@ -1620,8 +1613,6 @@ int dtb_setup(struct yaml_dt_state *dt)
 
 	INIT_LIST_HEAD(&dtb->fixups);
 
-	tree_init(to_tree(dt), &dtb_tree_ops);
-
 	dt_debug(dt, "DTB configuration:\n");
 	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
 	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
@@ -1637,8 +1628,6 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 	struct dtb_emit_config *dtb_cfg = to_dtb_cfg(dt);
 	enum dt_data_area area;
 	struct fixup *f, *fn;
-
-	tree_cleanup(to_tree(dt));
 
 	/* cleanup local fixups */
 	list_for_each_entry_safe(f, fn, &dtb->fixups, node) {
@@ -2165,6 +2154,7 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 	int cc, option_index = -1;
 	struct dtb_emit_config *dtb_cfg;
 	const char *s;
+	bool do_not_consume;
 
 	dtb_cfg = malloc(sizeof(*dtb_cfg));
 	assert(dtb_cfg);
@@ -2173,10 +2163,11 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 	/* get and consume non common options */
 	option_index = -1;
 	*optindp = 0;
-	opterr = 1;	/* do print error for invalid option */
+	opterr = 0;	/* do not print error for invalid option */
 	while ((cc = getopt_long(*argcp, argv,
 			"ClycsO:f:", opts, &option_index)) != -1) {
 
+		do_not_consume = false;
 		switch (cc) {
 		case 'C':
 			dtb_cfg->compatible = true;
@@ -2194,11 +2185,13 @@ static int dtb_parseopts(int *argcp, char **argv, int *optindp,
 			dtb_cfg->cflags = optarg;
 			break;
 		case '?':
-			/* invalid option */
-			return -1;
+			/* invalid option (might be for others) */
+			do_not_consume = true;
+			break;
 		}
 
-		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
+		if (!do_not_consume)
+			long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
 				 option_index);
 	}
 

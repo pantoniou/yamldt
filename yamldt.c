@@ -61,6 +61,8 @@
 #include "yamlgen.h"
 #include "nullgen.h"
 
+#include "nullcheck.h"
+
 static const char *get_builtin_tag(const char *tag)
 {
 	static const char *tags[] = {
@@ -407,21 +409,55 @@ static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
 
 int dt_emitter_setup(struct yaml_dt_state *dt)
 {
+	if (!dt->emitter || !dt->emitter->eops || !dt->emitter->eops->setup)
+		return 0;
+
 	return dt->emitter->eops->setup(dt);
 }
 
 void dt_emitter_cleanup(struct yaml_dt_state *dt)
 {
-	return dt->emitter->eops->cleanup(dt);
+	if (!dt->emitter || !dt->emitter->eops || !dt->emitter->eops->cleanup)
+		return;
+
+	dt->emitter->eops->cleanup(dt);
 }
 
 int dt_emitter_emit(struct yaml_dt_state *dt)
 {
+	if (!dt->emitter || !dt->emitter->eops || !dt->emitter->eops->emit)
+		return 0;
+
 	return dt->emitter->eops->emit(dt);
 }
 
+int dt_checker_setup(struct yaml_dt_state *dt)
+{
+	if (!dt->checker || !dt->checker->cops || !dt->checker->cops->setup)
+		return 0;
+
+	return dt->checker->cops->setup(dt);
+}
+
+void dt_checker_cleanup(struct yaml_dt_state *dt)
+{
+	if (!dt->checker || !dt->checker->cops || !dt->checker->cops->cleanup)
+		return;
+
+	dt->checker->cops->cleanup(dt);
+}
+
+int dt_checker_check(struct yaml_dt_state *dt)
+{
+	if (!dt->checker || !dt->checker->cops || !dt->checker->cops->check)
+		return 0;
+
+	return dt->checker->cops->check(dt);
+}
+
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
-	     struct yaml_dt_emitter *emitter, void *ecfg)
+	     struct yaml_dt_emitter *emitter, void *ecfg,
+	     struct yaml_dt_checker *checker, void *ccfg)
 {
 	int i, ret;
 
@@ -470,6 +506,22 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 		return -1;
 	}
 
+	dt->checker = checker;
+	dt->checker_cfg = ccfg;
+
+	ret = dt_checker_setup(dt);
+	if (ret) {
+		dt_emitter_cleanup(dt);
+		fprintf(stderr, "Failed to setup checker\n");
+		return -1;
+	}
+
+	/* emitter gets to select the tree ops */
+	tree_init(to_tree(dt), emitter->tops);
+
+	dt_debug(dt, "Selected emitter: %s\n", emitter->name);
+	dt_debug(dt, "Selected checker: %s\n", checker->name);
+
 	return 0;
 }
 
@@ -483,6 +535,9 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	if (dt->current_prop)
 		prop_free(to_tree(dt), dt->current_prop);
 
+	tree_cleanup(to_tree(dt));
+
+	dt_checker_cleanup(dt);
 	dt_emitter_cleanup(dt);
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
@@ -1260,9 +1315,10 @@ static struct option opts[] = {
 	{0, 0, 0, 0}
 };
 
-static void help(struct list_head *emitters)
+static void help(struct list_head *emitters, struct list_head *checkers)
 {
 	struct yaml_dt_emitter *e;
+	struct yaml_dt_checker *c;
 
 	printf("yamldt [options] <input-file> [<input-file>...]\n"
 		" common options are:\n"
@@ -1279,6 +1335,14 @@ static void help(struct list_head *emitters)
 		printf(" options for %s emitter:\n", e->name);
 		printf("%s", e->usage_banner);
 	}
+
+	list_for_each_entry(c, checkers, node) {
+		if (!c->usage_banner)
+			continue;
+		printf("\n");
+		printf(" options for %s emitter:\n", c->name);
+		printf("%s", c->usage_banner);
+	}
 }
 
 int main(int argc, char *argv[])
@@ -1289,9 +1353,12 @@ int main(int argc, char *argv[])
 	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
 	struct list_head emitters;
 	struct yaml_dt_emitter *e, *selected_emitter = NULL;
+	void *ecfg = NULL;
+	struct list_head checkers;
+	struct yaml_dt_checker *c, *selected_checker = NULL;
+	void *ccfg = NULL;
 	const char *s;
 	const char * const *ss;
-	void *ecfg = NULL;
 
 	memset(dt, 0, sizeof(*dt));
 
@@ -1300,6 +1367,9 @@ int main(int argc, char *argv[])
 	list_add_tail(&dtb_emitter.node, &emitters);
 	list_add_tail(&yaml_emitter.node, &emitters);
 	list_add_tail(&null_emitter.node, &emitters);
+
+	INIT_LIST_HEAD(&checkers);
+	list_add_tail(&null_checker.node, &checkers);
 
 	memset(cfg, 0, sizeof(*cfg));
 
@@ -1323,7 +1393,7 @@ int main(int argc, char *argv[])
 			printf("%s version %s\n", PACKAGE_NAME, VERSION);
 			return 0;
 		case 'h':
-			help(&emitters);
+			help(&emitters, &checkers);
 			return 0;
 		case '?':
 			/* ignore invalid option */
@@ -1342,7 +1412,7 @@ int main(int argc, char *argv[])
 
 	/* try to select an emitter by asking first */
 	list_for_each_entry(e, &emitters, node) {
-		if (e->eops->select && e->eops->select(argc, argv)) {
+		if (e->eops && e->eops->select && e->eops->select(argc, argv)) {
 			selected_emitter = e;
 			break;
 		}
@@ -1369,13 +1439,43 @@ int main(int argc, char *argv[])
 	if (!selected_emitter)
 		selected_emitter = &dtb_emitter;
 
-	if (selected_emitter->eops->parseopts) {
+	if (selected_emitter->eops && selected_emitter->eops->parseopts) {
 		err = selected_emitter->eops->parseopts(&argc, argv, &optind, cfg, &ecfg);
 		if (err) {
 			fprintf(stderr, "Failed to parse opts for emitter: %s\n",
 					selected_emitter->name);
 			return EXIT_FAILURE;
 		}
+	}
+
+	/* try to select an checker by asking first */
+	list_for_each_entry(c, &checkers, node) {
+		if (c->cops && c->cops->select && c->cops->select(argc, argv)) {
+			selected_checker = c;
+			break;
+		}
+	}
+
+	/* if all fails, fallback to null checker */
+	if (!selected_checker)
+		selected_checker = &null_checker;
+
+	if (selected_checker->cops && selected_checker->cops->parseopts) {
+		err = selected_checker->cops->parseopts(&argc, argv, &optind, cfg, &ccfg);
+		if (err) {
+			fprintf(stderr, "Failed to parse opts for checker: %s\n",
+					selected_checker->name);
+			return EXIT_FAILURE;
+		}
+	}
+
+	/* anything left here is an error */
+	option_index = -1;
+	optind = 0;
+	opterr = 1;	/* do print error for invalid option */
+	if ((cc = getopt_long(argc, argv,
+			"?", opts, &option_index)) != -1) {
+		return EXIT_FAILURE;
 	}
 
 	if (optind >= argc) {
@@ -1386,7 +1486,7 @@ int main(int argc, char *argv[])
 	cfg->input_file = argv + optind;
 	cfg->input_file_count = argc - optind;
 
-	err = dt_setup(dt, cfg, selected_emitter, ecfg);
+	err = dt_setup(dt, cfg, selected_emitter, ecfg, selected_checker, ccfg);
 	if (err)
 		return EXIT_FAILURE;
 

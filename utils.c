@@ -407,7 +407,7 @@ int compile(const char *text, size_t size,
 	pid_t pid;
 	off_t off;
 	char *buf;
-	char **argv;
+	char **argv = NULL;
 
 	infd = -1;
 	outfd = -1;
@@ -509,7 +509,8 @@ int compile(const char *text, size_t size,
 	close(outfd);
 	unlink(outtemplate);
 
-	free(argv);
+	if (argv)
+		free(argv);
 
 	return 0;
 out_close:

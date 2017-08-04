@@ -19,6 +19,7 @@ config.sub
 configure
 depcomp
 ebpfrun
+ebpfcompile
 install-sh
 intexpr
 intexpr-lexer.c

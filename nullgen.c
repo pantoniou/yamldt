@@ -108,13 +108,11 @@ static const struct tree_ops null_tree_ops = {
 
 int null_setup(struct yaml_dt_state *dt)
 {
-	tree_init(to_tree(dt), &null_tree_ops);
 	return 0;
 }
 
 void null_cleanup(struct yaml_dt_state *dt)
 {
-	tree_cleanup(to_tree(dt));
 }
 
 int null_emit(struct yaml_dt_state *dt)
@@ -147,25 +145,26 @@ static int null_parseopts(int *argcp, char **argv, int *optindp,
 			  const struct yaml_dt_config *cfg, void **ecfg)
 {
 	int cc, option_index = -1;
+	bool do_not_consume;
 
 	/* get and consume non common options */
 	option_index = -1;
 	*optindp = 0;
-	opterr = 1;	/* do print error for invalid option */
+	opterr = 0;	/* do not print error for invalid option */
 	while ((cc = getopt_long(*argcp, argv,
 			"n", opts, &option_index)) != -1) {
 
+		do_not_consume = false;
 		switch (cc) {
 		case 'n':
-			/* nothing to do for this */
 			break;
 		case '?':
-			/* invalid option */
-			return -1;
+			do_not_consume = true;
+			break;
 		}
-
-		long_opt_consume(argcp, argv, opts, optindp, optarg, cc,
-				 option_index);
+		if (!do_not_consume)
+			long_opt_consume(argcp, argv, opts, optindp,
+					 optarg, cc, option_index);
 	}
 
 	return 0;
