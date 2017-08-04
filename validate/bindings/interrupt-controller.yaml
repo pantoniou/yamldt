@@ -1,0 +1,24 @@
+%YAML 1.1
+---
+version: 1
+
+id: interrupt-controller
+match: |
+  return node_has_property("interrupt-controller");
+     ff
+  testing
+
+properties:
+    "#interrupt-cells":
+        category: required
+        type: int
+        constraint: |
+           property_int(this) > 0;
+
+    interrupt-controller:
+        category: required
+        type: bool
+        constraint: |
+          property_bool(this) == true;
+...
+
