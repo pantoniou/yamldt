@@ -13,7 +13,8 @@ yamldt_SOURCES = yamldt.c yamldt.h list.h fdt.h libfdt_env.h \
 		 dtbgen.c dtbgen.h \
 		 yamlgen.c yamlgen.h \
 		 utils.c utils.h \
-		 syexpr.c syexpr.h
+		 syexpr.c syexpr.h \
+		 base64.c base64.h
 yamldt_LDADD = -lm
 if HAVE_LIBYAML
 yamldt_LDADD += -lyaml
