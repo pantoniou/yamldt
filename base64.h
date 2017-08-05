@@ -11,7 +11,7 @@
  */
 
 #ifndef BASE64_H
-#define BASE64_h
+#define BASE64_H
 
 #include <sys/types.h>
 
