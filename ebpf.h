@@ -137,6 +137,13 @@ struct ebpf_vm {
 	void *debugarg;
 };
 
+#define ebpf_debug(_vm, _fmt, ...) \
+	do { \
+		const struct ebpf_vm *__vm = (_vm); \
+		if (__vm->debugf) \
+			__vm->debugf(__vm->debugarg, _fmt, ##__VA_ARGS__); \
+	} while (0)
+
 int ebpf_setup(struct ebpf_vm *vm, const struct ebpf_callback *callbacks,
 	       ebpf_lazy_func_t lazy_func,
 	       ebpf_debugf_t debugf, void *debugarg);
@@ -165,41 +172,57 @@ ebpf_store_check(const struct ebpf_ctx *ctx, const void *addr, int size)
 static inline uint64_t
 ebpf_load64(struct ebpf_ctx *ctx, const void *addr)
 {
+	uint64_t val;
+
 	if (!ebpf_load_check(ctx, addr, sizeof(uint64_t))) {
 		ctx->errcode = -EFAULT;
 		return 0xdeadbeefdeadbeef;
 	}
-	return *(const uint64_t *)addr;
+	val = *(const uint64_t *)addr;
+	ebpf_debug(ctx->vm, "%s %p -> 0x%016lx\n", __func__, addr, val);
+	return val;
 }
 
 static inline uint32_t
 ebpf_load32(struct ebpf_ctx *ctx, const void *addr)
 {
+	uint32_t val;
+
 	if (!ebpf_load_check(ctx, addr, sizeof(uint32_t))) {
 		ctx->errcode = -EFAULT;
 		return 0xdeadbeef;
 	}
-	return *(const uint32_t *)addr;
+	val = *(const uint32_t *)addr;
+	ebpf_debug(ctx->vm, "%s %p -> 0x%08x\n", __func__, addr, val);
+	return val;
 }
 
 static inline uint16_t
 ebpf_load16(struct ebpf_ctx *ctx, const void *addr)
 {
+	uint16_t val;
+
 	if (!ebpf_load_check(ctx, addr, sizeof(uint16_t))) {
 		ctx->errcode = -EFAULT;
 		return 0xdead;
 	}
-	return *(const uint16_t *)addr;
+	val = *(const uint16_t *)addr;
+	ebpf_debug(ctx->vm, "%s %p -> 0x%04x\n", __func__, addr, val);
+	return val;
 }
 
 static inline uint8_t
 ebpf_load8(struct ebpf_ctx *ctx, const void *addr)
 {
+	uint8_t val;
+
 	if (!ebpf_load_check(ctx, addr, sizeof(uint8_t))) {
 		ctx->errcode = -EFAULT;
 		return 0xde;
 	}
-	return *(const uint8_t *)addr;
+	val = *(const uint8_t *)addr;
+	ebpf_debug(ctx->vm, "%s %p -> 0x%02x\n", __func__, addr, val);
+	return val;
 }
 
 static inline int

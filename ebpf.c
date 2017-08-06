@@ -68,6 +68,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include <libelf.h>
 
@@ -235,13 +236,6 @@ struct ebpf_inst {
 #ifndef R_BPF_64_32
 #define R_BPF_64_32	10
 #endif
-
-#define ebpf_debug(_vm, _fmt, ...) \
-	do { \
-		const struct ebpf_vm *__vm = (_vm); \
-		if (__vm->debugf) \
-			__vm->debugf(__vm->debugarg, _fmt, ##__VA_ARGS__); \
-	} while (0)
 
 int ebpf_setup(struct ebpf_vm *vm,
 	       const struct ebpf_callback *callbacks,
@@ -551,7 +545,9 @@ int ebpf_load_elf(struct ebpf_vm *vm, const void *elf, size_t elf_size)
 							64, (unsigned long long)imm,
 							(unsigned long long)r_offset);
 
-					*(uint64_t *)(vm->workspace + r_offset + 4) = imm;
+					/* LE fixup */
+					*(uint32_t *)(vm->workspace + r_offset + 4) = (uint32_t)imm;
+					*(uint32_t *)(vm->workspace + r_offset + 4 + 8) = (uint32_t)((uint64_t)imm >> 32);
 				} else {
 					ebpf_debug(vm, "fixup%d 0x%llx @0x%08llx\n",
 							32, (unsigned long long)imm,
@@ -649,6 +645,11 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 		cur_pc = pc;
 		inst = insts[pc++];	/* TODO verify */
 		ctx.pc = cur_pc;
+
+		ebpf_debug(vm, "[%d] opcode=%02x dst=%1x src=%1x offset=%04x imm=%08x\n",
+				cur_pc, (unsigned int)inst.opcode,
+				(unsigned int)inst.dst, (unsigned int)inst.src,
+				(unsigned int)inst.offset, (unsigned int)inst.imm);
 
 		switch (inst.opcode) {
 		case EBPF_OP_ADD_IMM:
@@ -906,7 +907,7 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 			break;
 
 		case EBPF_OP_LDDW:
-			reg[inst.dst] = (uint32_t)inst.imm | ((uint64_t)insts[pc++].imm << 32);
+			reg[inst.dst] = (uint64_t)(uint32_t)inst.imm | ((uint64_t)insts[pc++].imm << 32);
 			break;
 
 		case EBPF_OP_JA:
@@ -976,6 +977,8 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 			lazy_name = NULL;
 			/* standard immediate call */
 			if ((uint32_t)inst.imm < vm->num_callbacks) {
+				ebpf_debug(vm, "call #%u 0x%016lx 0x%016lx 0x%016lx 0x%016lx 0x%016lx\n",
+						inst.imm, reg[1], reg[2], reg[3], reg[4], reg[5]);
 				reg[0] = vm->callbacks[inst.imm].func(reg[1], reg[2], reg[3], reg[4], reg[5], &ctx);
 				break;
 			}
