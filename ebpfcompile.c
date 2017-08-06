@@ -51,12 +51,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <elf.h>
-#include <endian.h>
 #include <assert.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
+
+#include <libelf.h>
 
 #include "list.h"
 #include "utils.h"

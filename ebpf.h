@@ -55,10 +55,10 @@
 #define EBPF_H
 
 #include <inttypes.h>
-#include <elf.h>
-#include <endian.h>
 #include <stdint.h>
 #include <errno.h>
+
+#include <libelf.h>
 
 struct ebpf_vm;
 

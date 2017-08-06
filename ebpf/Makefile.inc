@@ -3,7 +3,7 @@
 #
 
 EBPFCC ?= clang-5.0
-EBPFCCFLAGS ?= -I ./ -I $(TOPDIR)/ebpf/include -O2 -target bpf
+EBPFCCFLAGS ?= -ffreestanding -I ./ -I $(TOPDIR)/ebpf/include -O2 -target bpf
 
 EBPFDEPFLAGS = -MT $@ -MMD -MP -MF $*.Bd
 
