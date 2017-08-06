@@ -8,7 +8,7 @@ AM_YFLAGS = -d
 
 bin_PROGRAMS = yamldt intexpr
 
-yamldt_CFLAGS = $(LIBYAML_CFLAGS) $(LIBELF_LIBS)
+yamldt_CFLAGS = $(LIBYAML_CFLAGS)
 yamldt_SOURCES = yamldt.c yamldt.h list.h fdt.h libfdt_env.h \
 		 tree.c tree.h \
 		 dtbgen.c dtbgen.h \
@@ -20,8 +20,6 @@ yamldt_SOURCES = yamldt.c yamldt.h list.h fdt.h libfdt_env.h \
 		 syexpr.c syexpr.h \
 		 base64.c base64.h
 yamldt_LDADD = -lm $(LIBYAML_LIBS)
-# we don't use libelf at all, but we need the Elf definitions
-# yamldt_LDADD += $(LIBELF_LIBS)
 
 intexpr_SOURCES = intexpr.c \
 		  syexpr.c syexpr.h \
@@ -47,15 +45,11 @@ ebpfrun_CFLAGS = $(LIBELF_CFLAGS)
 ebpfrun_SOURCES = ebpfrun.c \
 		  ebpf.c ebpf.h \
 		  utils.c utils.h
-# we don't use libelf at all, but we need the Elf definitions
-# ebpfrun_LDADD = $(LIBELF_LIBS)
 
 ebpfcompile_CFLAGS = $(LIBELF_CFLAGS)
 ebpfcompile_SOURCES = ebpfcompile.c \
 		      ebpf.c ebpf.h \
 		      utils.c utils.h
-# we don't use libelf at all, but we need the Elf definitions
-# ebpfcompile_LDADD = $(LIBELF_LIBS)
 
 endif
 

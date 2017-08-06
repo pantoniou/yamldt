@@ -28,7 +28,7 @@ PKG_CHECK_MODULES(LIBYAML, yaml-0.1 >= $LIBYAML_REQUIRED_VERSION,[])
 if $PKG_CONFIG --atleast-version "0.1" yaml-0.1 ; then
 	AC_DEFINE([HAVE_LIBYAML_H], [], [Have libyaml])
 	have_libyaml=true
-else  
+else
 	have_libyaml=false
 fi
 AM_CONDITIONAL([HAVE_LIBYAML], [test x$have_libyaml = xtrue])
@@ -51,19 +51,25 @@ else
 	AC_MSG_RESULT([not found])
 fi
 
-# libelf
-LIBELF_REQUIRED_VERSION=0.8
-PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
+AC_CHECK_HEADERS([elf.h], [has_ELF_H=yes], [has_ELF_H=no])
 
-if $PKG_CONFIG --atleast-version "0.8" libelf ; then
-	AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
-	have_libelf=true
-else  
-	have_libelf=false
+if test x$has_ELF_H = xyes; then
+	AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
+	AC_ARG_VAR([LIBELF_CFLAGS], "")
+	AC_ARG_VAR([LIBELF_LIBS], "")
+else
+	# libelf
+	LIBELF_REQUIRED_VERSION=0.8
+	PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
+
+	if $PKG_CONFIG --atleast-version "0.8" libelf ; then
+		AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
+		have_libelf=true
+	else
+		have_libelf=false
+	fi
+	AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
 fi
-AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
-
-# AC_CHECK_HEADERS([elf.h], [has_ELF_H=yes], [has_ELF_H=no])
 
 AC_MSG_CHECKING([for ebpf compiler])
 # eBPF compiler available?
