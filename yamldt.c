@@ -524,7 +524,7 @@ int dt_checker_check(struct yaml_dt_state *dt)
 	return dt->checker->cops->check(dt);
 }
 
-int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
+int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker)
 {
 	int i, ret, len;
@@ -563,7 +563,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	INIT_LIST_HEAD(&dt->inputs);
 
 	/* no output file? if the emitter doesn't need it /dev/null */
-	if (!dt->cfg.output_file) 
+	if (!dt->cfg.output_file)
 		dt->cfg.output_file = "/dev/null";
 
 	if (strcmp(dt->cfg.output_file, "-")) {
@@ -680,23 +680,28 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 		return;
 
 	dt->current_prop = NULL;
-	dt_debug(dt, "finalizing property %s at %s\n", prop->name,
+	dt_debug(dt, "finalizing property %s at %s\n",
+			prop->name[0] ? prop->name : "-",
 			dn_fullname(np, namebuf, sizeof(namebuf)));
 
 	/* special case for completely empty tree marker */
 	if (!strcmp(prop->name, "~")) {
-		dt_debug(dt, "Deleting empty tree marker %s at %s\n", prop->name,
+		dt_debug(dt, "Deleting empty tree marker %s at %s\n",
+				prop->name[0] ? prop->name : "-",
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 		prop_del(to_tree(dt), prop);
 	} else if (!dt->current_prop_existed) {
 
-		dt_debug(dt, "appending property %s at %s\n", prop->name,
+		dt_debug(dt, "appending property %s at %s\n",
+				prop->name[0] ? prop->name : "-",
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 
 		prop->np = np;
 		list_add_tail(&prop->node, &np->properties);
+
 	} else
-		dt_debug(dt, "dangling property %s at %s\n", prop->name,
+		dt_debug(dt, "dangling property %s at %s\n",
+				prop->name[0] ? prop->name : "-",
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 
 	dt->current_prop_existed = false;
@@ -720,6 +725,8 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 	const char *ref_label;
 	int ref_label_len;
 	char namebuf[NODE_FULLNAME_MAX];
+	char *refname;
+	int refnamelen;
 
 	if (!dt || !event)
 		return;
@@ -793,10 +800,17 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 		ref = ref_alloc(to_tree(dt), rt, ref_label,
 				ref_label_len, xtag);
 
-		dt_debug(dt, "new ref @%s%s%s\n",
+		/* 60 bytes for a display purposes should be enough */
+		refnamelen = ref->len > 60 ? 60 : ref->len;
+		refname = alloca(refnamelen + 1);
+		memcpy(refname, ref->data, refnamelen);
+		refname[refnamelen] = '\0';
+
+		dt_debug(dt, "new ref \"%s%s\" @%s%s%s\n",
+			refname, ref->len > refnamelen ? "..." : "",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
 			np != tree_root(to_tree(dt)) ? "/" : "",
-			prop->name);
+			prop->name[0] ? prop->name : "-");
 
 		/* add the reference to the list */
 		ref->prop = prop;
@@ -809,12 +823,20 @@ property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 		 struct property *prop)
 {
 	struct dt_property *dt_prop;
+	const char *name;
 
-	if (!prop)
-		prop = prop_alloc(to_tree(dt), dt->map_key);
-	else
+	if (!prop) {
+		name = dt->map_key;
+		if (!name)
+			name = "";
+		prop = prop_alloc(to_tree(dt), name);
+	} else
 		prop_ref_clear(to_tree(dt), prop);
 	assert(prop);
+
+	dt_debug(dt, "property prepared with name %s\n",
+			prop->name[0] ? prop->name : "-");
+
 	dt_prop = to_dt_property(prop);
 
 	dt_prop->m = dt->current_mark;
@@ -842,11 +864,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	case YAML_NO_EVENT:
 		break;
 	case YAML_STREAM_START_EVENT:
-		dt_debug(dt, "SSE\n");
+		dt_debug(dt, "StSE\n");
 		dt_stream_start(dt);
 		break;
 	case YAML_STREAM_END_EVENT:
-		dt_debug(dt, "SEV\n");
+		dt_debug(dt, "StEV\n");
 		dt_checker_check(dt);
 		dt_emitter_emit(dt);
 		dt_stream_end(dt);
@@ -861,6 +883,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 
 	case YAML_MAPPING_START_EVENT:
+		dt_debug(dt, "MSE\n");
+
 		/* if we have a current property finalize it */
 		finalize_current_property(dt);
 
@@ -877,69 +901,79 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				tree_set_root(to_tree(dt), np);
 			}
 
-		} else if (dt->map_key) {
-
-			found_existing = false;
-			if (dt->current_np && !dt->cfg.late) {
-				list_for_each_entry(np, &dt->current_np->children, node) {
-					/* match on same name or root */
-					if (!strcmp(dt->map_key, np->name) ||
-					    (dt->map_key == '\0' && np->name[0] == '\0')) {
-						found_existing = true;
-						break;
-					}
-				}
-			}
-
-			if (found_existing) {
-				if (label)
-					label_add(to_tree(dt), np, label);
-
-				dt_debug(dt, "using existing node @%s%s%s\n",
-						dn_fullname(np, namebuf, sizeof(namebuf)),
-						label ? " label=" : "",
-						label ? label : "");
-			} else {
-				if (label) {
-					np = node_lookup_by_label(to_tree(dt), label,
-							strlen(label));
-					if (np)
-						dt_fatal(dt, "Node %s with duplicate label %s\n",
-								dt->map_key, label);
-				}
-
-				np = node_alloc(to_tree(dt), dt->map_key, label);
-
-				/* mark as the last map */
-				to_dt_node(np)->m = dt->last_map_mark;
-
-				dt_debug(dt, "creating node @%s%s%s\n",
-						dn_fullname(np, namebuf, sizeof(namebuf)),
-						label ? " label=" : "",
-						label ? label : "");
-
-			}
-
-			free(dt->map_key);
-			dt->map_key = NULL;
-
-			if (dt->depth > 1 || !dt->current_np_ref) {
-				dt_debug(dt, "normal node\n");
-				if (!found_existing) {
-					np->parent = dt->current_np;
-					list_add_tail(&np->node, &np->parent->children);
-				}
-			} else {
-				dt_debug(dt, "ref node\n");
-
-				/* mark as the last map */
-				to_dt_node(np)->m = dt->last_alias_mark;
-
-				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
-			}
 			dt->current_np = np;
-		} else
+
+			dt_debug(dt, "* creating root at depth %d\n",
+				dt->depth);
+
+			dt->depth++;
+			break;
+		}
+
+		if (!dt->map_key) {
 			dt_fatal(dt, "MAPPING start event, but without a previous VAL\n");
+			break;
+		}
+
+		found_existing = false;
+		if (dt->current_np && !dt->cfg.late) {
+			list_for_each_entry(np, &dt->current_np->children, node) {
+				/* match on same name or root */
+				if (!strcmp(dt->map_key, np->name) ||
+					(dt->map_key == '\0' && np->name[0] == '\0')) {
+					found_existing = true;
+					break;
+				}
+			}
+		}
+
+		if (found_existing) {
+			if (label)
+				label_add(to_tree(dt), np, label);
+
+			dt_debug(dt, "using existing node @%s%s%s\n",
+					dn_fullname(np, namebuf, sizeof(namebuf)),
+					label ? " label=" : "",
+					label ? label : "");
+		} else {
+			if (label) {
+				np = node_lookup_by_label(to_tree(dt), label,
+						strlen(label));
+				if (np)
+					dt_fatal(dt, "Node %s with duplicate label %s\n",
+							dt->map_key, label);
+			}
+
+			np = node_alloc(to_tree(dt), dt->map_key, label);
+
+			/* mark as the last map */
+			to_dt_node(np)->m = dt->last_map_mark;
+
+			dt_debug(dt, "creating node @%s%s%s\n",
+					dn_fullname(np, namebuf, sizeof(namebuf)),
+					label ? " label=" : "",
+					label ? label : "");
+
+		}
+
+		free(dt->map_key);
+		dt->map_key = NULL;
+
+		if (dt->depth > 1 || !dt->current_np_ref) {
+			dt_debug(dt, "normal node\n");
+			if (!found_existing) {
+				np->parent = dt->current_np;
+				list_add_tail(&np->node, &np->parent->children);
+			}
+		} else {
+			dt_debug(dt, "ref node\n");
+
+			/* mark as the last map */
+			to_dt_node(np)->m = dt->last_alias_mark;
+
+			list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
+		}
+		dt->current_np = np;
 
 		dt_debug(dt, "* creating %s at depth %d\n",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
@@ -950,6 +984,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 
 	case YAML_MAPPING_END_EVENT:
+		dt_debug(dt, "MEE\n");
+
 		if (dt->depth == 0)
 			dt_fatal(dt, "illegal MAPPING end event at depth 0\n");
 		assert(dt->current_np);
@@ -976,13 +1012,28 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 
 	case YAML_SEQUENCE_START_EVENT:
+		dt_debug(dt, "SSE\n");
 
 		np = dt->current_np;
-		assert(np);
 
 		prop = dt->current_prop;
+		if (!prop && !dt->map_key) {
+			dt->bare_seq++;
+			dt_debug(dt, "No prop, no map key, bare_seq=%d\n",
+					dt->bare_seq);
+
+			if (!np) {
+				np = node_alloc(to_tree(dt), "", NULL);
+				dt->current_np = np;
+				tree_set_root(to_tree(dt), np);
+			}
+
+			break;
+		}
+
 		if (!prop) {
 			found_existing = false;
+			assert(np);
 			list_for_each_entry(prop, &np->properties, node) {
 				if (!strcmp(prop->name, dt->map_key)) {
 					found_existing = true;
@@ -996,15 +1047,17 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			dt_debug(dt, "%s property %s at %s [SEQ]\n",
 				found_existing ? "existing" : "new",
-				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+				prop->name[0] ? prop->name : "-",
+				np ? dn_fullname(np, namebuf, sizeof(namebuf)) : "<NULL>");
 
 			dt->current_prop = prop;
 			dt->current_prop_existed = found_existing;
 		}
-		dt_debug(dt, "sequence to prop '%s' (depth %d)%s%s\n", prop->name,
-			dt->prop_seq_depth,
-			event->data.sequence_start.tag ? " tag=" : "",
-			event->data.sequence_start.tag ? (char *)event->data.sequence_start.tag : "");
+		dt_debug(dt, "sequence to prop '%s' (depth %d)%s%s\n",
+			 prop->name[0] ? prop->name : "-",
+			 dt->prop_seq_depth,
+			 event->data.sequence_start.tag ? " tag=" : "",
+			 event->data.sequence_start.tag ? (char *)event->data.sequence_start.tag : "");
 
 		assert(dt->prop_seq_depth + 1 <= ARRAY_SIZE(dt->prop_seq_tag));
 
@@ -1016,9 +1069,17 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			dt->prop_seq_tag[dt->prop_seq_depth] = NULL;
 
 		dt->prop_seq_depth++;
-
 		break;
+
 	case YAML_SEQUENCE_END_EVENT:
+		dt_debug(dt, "SEE\n");
+
+		if (dt->bare_seq) {
+			dt->bare_seq--;
+			dt_debug(dt, "bare_seq=%d\n", dt->bare_seq);
+			break;
+		}
+
 		assert(dt->prop_seq_depth > 0);
 		assert(dt->current_prop);
 		assert(dt->current_np);
@@ -1034,12 +1095,16 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		if (dt->prop_seq_depth == 0)
 			finalize_current_property(dt);
 
+		dt->bare_seq = false;
+
 		break;
 
 	case YAML_SCALAR_EVENT:
+		dt_debug(dt, "SE\n");
 		np = dt->current_np;
+		prop = dt->current_prop;
 
-		if (!dt->map_key) {
+		if (!dt->map_key && !dt->bare_seq) {
 			len = event->data.scalar.length;
 
 			if (!np) {
@@ -1064,16 +1129,15 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			dt->last_map_mark = dt->current_mark;
 
 		} else {
-			assert(np);
-
-			prop = dt->current_prop;
-
 			if (!prop) {
 				found_existing = false;
-				list_for_each_entry(prop, &np->properties, node) {
-					if (!strcmp(prop->name, dt->map_key)) {
-						found_existing = true;
-						break;
+				if (dt->map_key) {
+					assert(np);
+					list_for_each_entry(prop, &np->properties, node) {
+						if (!strcmp(prop->name, dt->map_key)) {
+							found_existing = true;
+							break;
+						}
 					}
 				}
 				if (!found_existing)
@@ -1082,7 +1146,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 				dt_debug(dt, "%s property %s at %s\n",
 					found_existing ? "existing" : "new",
-					prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+					prop->name[0] ? prop->name : "-",
+					np ? dn_fullname(np, namebuf, sizeof(namebuf)) : "<NULL>");
 				dt->current_prop = prop;
 				dt->current_prop_existed = found_existing;
 			}
@@ -1119,10 +1184,12 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 		if (!prop) {
 			found_existing = false;
-			list_for_each_entry(prop, &np->properties, node) {
-				if (!strcmp(prop->name, dt->map_key)) {
-					found_existing = true;
-					break;
+			if (dt->map_key) {
+				list_for_each_entry(prop, &np->properties, node) {
+					if (!strcmp(prop->name, dt->map_key)) {
+						found_existing = true;
+						break;
+					}
 				}
 			}
 			if (!found_existing)
@@ -1131,7 +1198,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			dt_debug(dt, "%s property %s at %s\n",
 				found_existing ? "existing" : "new",
-				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
+				prop->name[0] ? prop->name : "-",
+				dn_fullname(np, namebuf, sizeof(namebuf)));
 			dt->current_prop = prop;
 			dt->current_prop_existed = found_existing;
 		}
@@ -1151,13 +1219,17 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 void dt_parse(struct yaml_dt_state *dt)
 {
 	yaml_event_t event;
+	struct dt_yaml_mark m;
 	int err;
 	bool end;
 
 	while (1) {
 
-		if (!yaml_parser_parse(&dt->parser, &event))
-			dt_fatal(dt, "Parse error: %s\n", dt->parser.problem);
+		if (!yaml_parser_parse(&dt->parser, &event)) {
+			m.start = m.end = dt->parser.problem_mark;
+			dt_error_at(dt, &m, "%s\n", dt->parser.problem);
+			return;
+		}
 
 		err = process_yaml_event(dt, &event);
 		if (err)

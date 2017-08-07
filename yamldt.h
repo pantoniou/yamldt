@@ -188,6 +188,8 @@ struct yaml_dt_state {
 	int prop_seq_depth;
 	char *prop_seq_tag[YAMLDL_PROP_SEQ_TAG_DEPTH_MAX];
 	bool current_np_ref;
+	int bare_seq;
+	int bare_map;
 
 	/* emitter data */
 	bool error_flag;

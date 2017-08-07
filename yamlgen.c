@@ -476,7 +476,9 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 		outcount++;
 
 		fprintf(fp, "%*s", depth * 2, "");
-		if (prop->name[0] != '#')
+		if (prop->name[0] == '\0')
+			fprintf(fp, "-");
+		else if (prop->name[0] != '#')
 			fprintf(fp, "%s:", prop->name);
 		else
 			fprintf(fp, "\"%s\":", prop->name);
