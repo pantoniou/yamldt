@@ -80,6 +80,18 @@ struct dt_property {
 struct dt_ref {
 	struct ref r;
 	struct dt_yaml_mark m;
+	const char *tag;	/* tag after implicit resolve */
+	unsigned long long val;
+	bool is_int : 1;
+	bool is_str : 1;
+	bool is_bool : 1;
+	bool is_null : 1;
+	bool is_resolved : 1;
+	bool is_builtin_tag : 1;
+	bool is_hex : 1;
+	bool is_unsigned : 1;
+	struct node *npref;	/* r_anchor, r_path */
+	const char *use_label;
 };
 #define to_dt_ref(_r) 		container_of(_r, struct dt_ref, r)
 #define to_ref(_ref)		(&(_ref)->r)
@@ -264,5 +276,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker);
 void dt_parse(struct yaml_dt_state *dt);
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal);
+
+int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref);
 
 #endif

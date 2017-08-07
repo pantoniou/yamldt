@@ -118,110 +118,6 @@ static const struct tree_ops yaml_tree_ops = {
 	.error_at_ref		= yaml_dt_tree_error_at_ref,
 };
 
-static int parse_int(const char *str, int len, unsigned long long *valp,
-		     bool *unsignedp, bool *hexp)
-{
-	int ret;
-	sy_val_t val;
-	struct sy_state state, *sy = &state;
-	struct sy_config cfg;
-
-	memset(&cfg, 0, sizeof(cfg));
-	cfg.size = sy_workbuf_size_max(len);
-	cfg.workbuf = alloca(cfg.size);
-
-	sy_init(sy, &cfg);
-
-	assert(len > 0);
-	ret = sy_eval(sy, str, len, &val);
-	if (ret == 0) {
-		*valp = val.v;
-		*unsignedp = val.u;
-		*hexp = val.x;
-	}
-
-	return ret;
-}
-
-static const char *is_int_tag(const char *tag)
-{
-	static const char *tags[] = {
-		"!int",
-		"!int",
-		"!uint",
-		"!int8",
-		"!uint8",
-		"!int16",
-		"!uint16",
-		"!int32",
-		"!uint32",
-		"!int64",
-		"!uint64",
-	};
-
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(tags); i++)
-		if (!strcmp(tag, tags[i]))
-			return tags[i];
-
-	return NULL;
-}
-
-static bool int_val_in_range(const char *tag, unsigned long long val, bool is_unsigned,
-			     bool is_hex)
-{
-	long long sval;
-	bool sval_overflow;
-
-	/* yes, I'm paranoid */
-	assert(ULLONG_MAX >= UINT64_MAX);
-
-	if (is_hex)
-		is_unsigned = true;
-
-	sval = (long long)val;
-	sval_overflow = is_unsigned && val > ULLONG_MAX;
-
-	if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32"))
-		return  (is_unsigned && val  <= INT32_MAX) ||
-		       (!is_unsigned && sval >= INT32_MIN && sval <= INT32_MAX);
-
-	if (!strcmp(tag, "!uint") || !strcmp(tag, "!uint32"))
-		return val <= UINT32_MAX;
-
-	if (!strcmp(tag, "!int8"))
-		return  (is_unsigned && val  <= INT8_MAX) ||
-		       (!is_unsigned && sval >= INT8_MIN && sval <= INT8_MAX);
-
-	if (!strcmp(tag, "!uint8"))
-		return val <= UINT8_MAX;
-
-	if (!strcmp(tag, "!int16"))
-		return  (is_unsigned && val  <= INT16_MAX) ||
-		       (!is_unsigned && sval >= INT16_MIN && sval <= INT16_MAX);
-
-	if (!strcmp(tag, "!uint8"))
-		return val <= UINT16_MAX;
-
-	if (!strcmp(tag, "!int32"))
-		return  (is_unsigned && val  <= INT32_MAX) ||
-		       (!is_unsigned && sval >= INT32_MIN && sval <= INT32_MAX);
-
-	if (!strcmp(tag, "!uint32"))
-		return val <= UINT32_MAX;
-
-	if (!strcmp(tag, "!int64"))
-		return  (is_unsigned && val  <= INT64_MAX) ||
-		       (!is_unsigned && sval >= INT64_MIN && sval <= INT64_MAX &&
-			 !sval_overflow);
-
-	if (!strcmp(tag, "!uint64"))
-		return val <= UINT64_MAX;
-
-	return false;
-}
-
 static void ref_output_single(struct tree *t, FILE *fp,
 			      struct ref *ref, bool object,
 			      const char *compiler, const char *cflags,
@@ -229,15 +125,12 @@ static void ref_output_single(struct tree *t, FILE *fp,
 			      const char *output_compiler_tag,
 			      int depth)
 {
+	struct yaml_dt_state *dt = to_dt(t);
 	struct node *np;
 	struct property *prop;
 	struct label *l;
-	int ret, len;
+	int err;
 	unsigned long long val = 0;
-	bool is_unsigned;
-	bool is_hex;
-	bool is_int;
-	const char *p;
 	const char *xtag = NULL;
 	const char *tag = NULL;
 	char namebuf[NODE_FULLNAME_MAX];
@@ -264,48 +157,37 @@ static void ref_output_single(struct tree *t, FILE *fp,
 	memcpy(refname, ref->data, refnamelen);
 	refname[refnamelen] = '\0';
 
+	err = dt_resolve_ref(dt, ref);
+	if (err != 0) {
+		if (ref->type == r_anchor || ref->type == r_path) {
+			tree_error_at_ref(to_tree(dt), ref,
+				"Can't resolve reference to label %s\n",
+				refname);
+			return;
+		}
+		if (err == -EINVAL) {
+			tree_error_at_ref(to_tree(dt), ref, "Invalid %s\n",
+				refname);
+			return;
+		}
+		if (err == -ERANGE) {
+			tree_error_at_ref(to_tree(dt), ref, "Invalid range on %s\n",
+				refname);
+			return;
+		}
+	}
+
 	switch (ref->type) {
 	case r_anchor:
-		np = node_lookup_by_label(t, ref->data, ref->len);
-		if (!np && !object) {
-			tree_error_at_ref(t, ref,
-				    "Can't resolve reference to label %s\n",
-				    refname);
-			return;
-		}
-
-		/* object mode, just leave references here */
-		if (!np && object) {
-			fputc('*', fp);
-			fwrite(ref->data, ref->len, 1, fp);
-			break;
-		}
-
-		/* if not the first label, switch it to the first */
-		l = list_first_entry(&np->labels, struct label, node);
-		if (strlen(l->label) != ref->len ||
-		    memcmp(l->label, ref->data, ref->len)) {
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
-			tree_debug(t, "Switching label %s to label %s\n",
-				    namebuf, l->label);
-		}
-
-		fprintf(fp, "*%s", l->label);
-		break;
-
 	case r_path:
-		np = node_lookup_by_label(t, ref->data, ref->len);
-		if (!np && !object) {
-			tree_error_at_ref(t, ref,
-				    "Can't resolve reference to label %s\n",
-				    refname);
-			return;
-		}
+		np = to_dt_ref(ref)->npref;
 
 		/* object mode, just leave references here */
-		if (!np && object) {
-			fputs("!pathref ", fp);
+		if (!np) {
+			if (ref->type == r_anchor)
+				fputc('*', fp);
+			else
+				fputs("!pathref ", fp);
 			fwrite(ref->data, ref->len, 1, fp);
 			break;
 		}
@@ -320,55 +202,32 @@ static void ref_output_single(struct tree *t, FILE *fp,
 				    namebuf, l->label);
 		}
 
-		fprintf(fp, "!pathref %s", l->label);
+		if (ref->type == r_anchor)
+			fprintf(fp, "*%s", l->label);
+		else
+			fprintf(fp, "!pathref %s", l->label);
 		break;
 
 	case r_scalar:
-		np = prop->np;
-		assert(np);
-
-		len = ref->len;
-		p = ref->data;
-
-		/* try to parse as an int anyway */
-		ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
-		is_int = ret == 0;
+		tag = to_dt_ref(ref)->tag;
 
 		/* output explicit tag (which is not a string) */
 		if (xtag && strcmp(xtag, "!str") &&
 			(input_compiler_tag && strcmp(xtag, input_compiler_tag)))
 			fprintf(fp, "%s ", xtag);
 
-		/* TODO type checking/conversion here */
-		if (!tag && is_int) {
-			tag = is_hex || is_unsigned ? "!uint" : "!int";
-		} else if (!tag && ((len == 4 && !memcmp(p,  "true", 4)) ||
-		                  (len == 5 && !memcmp(p, "false", 5)) ))
-			tag = "!bool";
-		else if (!tag && (len == 0 ||
-		                 (len == 4 && !memcmp(p, "null", 4)) ||
-				 (len == 1 && *(char *)p == '~')) )
-			tag = "!null";
-		else if (!tag)
-			tag = "!str";
-
-		if (is_int_tag(tag)) {
-			if (!is_int) {
-				tree_error_at_ref(t, ref,
-					    "Invalid integer syntax; %s\n",
-					    refname);
-				return;
-			}
-			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
-				tree_error_at_ref(t, ref,
-					    "Integer out of range: %s\n",
-					    refname);
-				return;
-			}
-
-			if (is_hex)
-				fprintf(fp, "0x%llx", val);
-			else if (is_unsigned)
+		val = to_dt_ref(ref)->val;
+		if (to_dt_ref(ref)->is_int) {
+			if (to_dt_ref(ref)->is_hex) {
+				if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8"))
+					fprintf(fp, "0x%llx", val & 0xff);
+				if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16"))
+					fprintf(fp, "0x%llx", val & 0xffff);
+				if (!strcmp(tag, "!int32") || !strcmp(tag, "!uint32"))
+					fprintf(fp, "0x%llx", val & 0xffffffff);
+				else
+					fprintf(fp, "0x%llx", val);
+			} else if (to_dt_ref(ref)->is_unsigned)
 				fprintf(fp, "%llu", val);
 			else
 				fprintf(fp, "%lld", (long long)val);
@@ -394,16 +253,16 @@ static void ref_output_single(struct tree *t, FILE *fp,
 			}
 
 		} else if (!strcmp(tag, "!bool")) {
-			fwrite(ref->data, ref->len, 1, fp);
+			fputs(val ? "true" : "false", fp);
 		} else if (!strcmp(tag, "!null")) {
-			fwrite(ref->data, ref->len, 1, fp);
+			fputc('~', fp);
 		} else if (input_compiler_tag && !strcmp(tag, input_compiler_tag)) {
 			tree_debug(t, "Compiling...\n");
 
-			ret = compile(ref->data, ref->len,
+			err = compile(ref->data, ref->len,
 					compiler,cflags,
 					&output, &output_size);
-			if (ret) {
+			if (err) {
 				tree_error_at_ref(t, ref,
 					"Failed to compile %s:\n%s %s\n%s\n",
 					tag, compiler, cflags, refname);

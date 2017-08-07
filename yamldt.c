@@ -48,6 +48,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <limits.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
@@ -97,6 +98,113 @@ static const char *get_builtin_tag(const char *tag)
 
 	return NULL;
 }
+
+static int parse_int(const char *str, int len, unsigned long long *valp,
+		     bool *unsignedp, bool *hexp)
+{
+	int ret;
+	sy_val_t val;
+	struct sy_state state, *sy = &state;
+	struct sy_config cfg;
+
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.size = sy_workbuf_size_max(len);
+	if (cfg.size > 4096)
+		cfg.size = 4096;	/* do not allow pathological cases */
+	cfg.workbuf = alloca(cfg.size);
+
+	sy_init(sy, &cfg);
+
+	assert(len > 0);
+	ret = sy_eval(sy, str, len, &val);
+	if (ret == 0) {
+		*valp = val.v;
+		*unsignedp = val.u;
+		*hexp = val.x;
+	}
+
+	return ret;
+}
+
+static const char *is_int_tag(const char *tag)
+{
+	static const char *tags[] = {
+		"!int",
+		"!int",
+		"!uint",
+		"!int8",
+		"!uint8",
+		"!int16",
+		"!uint16",
+		"!int32",
+		"!uint32",
+		"!int64",
+		"!uint64",
+	};
+
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(tags); i++)
+		if (!strcmp(tag, tags[i]))
+			return tags[i];
+
+	return NULL;
+}
+
+static bool int_val_in_range(const char *tag, unsigned long long val, bool is_unsigned,
+			     bool is_hex)
+{
+	long long sval;
+	bool sval_overflow;
+
+	/* yes, I'm paranoid */
+	assert(ULLONG_MAX >= UINT64_MAX);
+
+	if (is_hex)
+		is_unsigned = true;
+
+	sval = (long long)val;
+	sval_overflow = is_unsigned && val > ULLONG_MAX;
+
+	if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32"))
+		return  (is_unsigned && val  <= INT32_MAX) ||
+		       (!is_unsigned && sval >= INT32_MIN && sval <= INT32_MAX);
+
+	if (!strcmp(tag, "!uint") || !strcmp(tag, "!uint32"))
+		return val <= UINT32_MAX;
+
+	if (!strcmp(tag, "!int8"))
+		return  (is_unsigned && val  <= INT8_MAX) ||
+		       (!is_unsigned && sval >= INT8_MIN && sval <= INT8_MAX);
+
+	if (!strcmp(tag, "!uint8"))
+		return val <= UINT8_MAX;
+
+	if (!strcmp(tag, "!int16"))
+		return  (is_unsigned && val  <= INT16_MAX) ||
+		       (!is_unsigned && sval >= INT16_MIN && sval <= INT16_MAX);
+
+	if (!strcmp(tag, "!uint8"))
+		return val <= UINT16_MAX;
+
+	if (!strcmp(tag, "!int32"))
+		return  (is_unsigned && val  <= INT32_MAX) ||
+		       (!is_unsigned && sval >= INT32_MIN && sval <= INT32_MAX);
+
+	if (!strcmp(tag, "!uint32"))
+		return val <= UINT32_MAX;
+
+	if (!strcmp(tag, "!int64"))
+		return  (is_unsigned && val  <= INT64_MAX) ||
+		       (!is_unsigned && sval >= INT64_MIN && sval <= INT64_MAX &&
+			 !sval_overflow);
+
+	if (!strcmp(tag, "!uint64"))
+		return val <= UINT64_MAX;
+
+	return false;
+}
+
 
 static void dt_print_at_msg(struct yaml_dt_state *dt,
 			    const struct dt_yaml_mark *m,
@@ -1473,6 +1581,114 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
+}
+
+int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
+{
+	struct tree *t = to_tree(dt);
+	struct node *np;
+	struct property *prop;
+	int ret, len;
+	unsigned long long val = 0;
+	bool is_unsigned;
+	bool is_hex;
+	bool is_int;
+	const char *p;
+	const char *xtag = NULL;
+	const char *tag = NULL;
+
+	prop = ref->prop;
+	assert(prop);
+
+	/* get tag */
+	xtag = ref->xtag;
+	if (!xtag)
+		xtag = ref->xtag_builtin;
+	tag = xtag;
+
+	switch (ref->type) {
+	case r_anchor:
+	case r_path:
+		np = node_lookup_by_label(t, ref->data, ref->len);
+		if (!np && !dt->cfg.object)
+			return -ENOENT;	/* not found */
+
+		to_dt_ref(ref)->tag = ref->type == r_anchor ? "!anchor" :
+							      "!pathref";
+
+		/* object mode, just leave references here */
+		if (!np)
+			break;
+
+		to_dt_ref(ref)->npref = np;
+		break;
+
+	case r_scalar:
+		np = prop->np;
+		assert(np);
+
+		len = ref->len;
+		p = ref->data;
+
+		/* try to parse as an int anyway */
+		ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
+		is_int = ret == 0;
+
+		/* TODO type checking/conversion here */
+		if (!tag && is_int)
+			tag = is_hex || is_unsigned ? "!uint" : "!int";
+		else if (!tag && ((len == 4 && !memcmp(p,  "true", 4)) ||
+		                  (len == 5 && !memcmp(p, "false", 5)) ))
+			tag = "!bool";
+		else if (!tag && (len == 0 ||
+		                 (len == 4 && !memcmp(p, "null", 4)) ||
+				 (len == 1 && *(char *)p == '~')) )
+			tag = "!null";
+		else if (!tag)
+			tag = "!str";
+
+		/* set tag here always */
+		to_dt_ref(ref)->tag = tag;
+
+		if (is_int_tag(tag)) {
+			if (!is_int)
+				return -EINVAL;
+			if (!int_val_in_range(tag, val, is_unsigned, is_hex))
+				return -ERANGE;
+
+			to_dt_ref(ref)->is_int = true;
+			to_dt_ref(ref)->is_hex = is_hex;
+			to_dt_ref(ref)->is_unsigned = is_unsigned;
+			to_dt_ref(ref)->val = val;
+			to_dt_ref(ref)->is_builtin_tag = true;
+
+		} else if (!strcmp(tag, "!str")) {
+			to_dt_ref(ref)->is_str = true;
+			to_dt_ref(ref)->is_builtin_tag = true;
+		} else if (!strcmp(tag, "!bool")) {
+
+			if (!(len == 4 && !memcmp(p,  "true", 4)) ||
+			     (len == 5 && !memcmp(p, "false", 5)) )
+				return -EINVAL;
+
+			to_dt_ref(ref)->is_bool = true;
+			to_dt_ref(ref)->val = (len == 4 && !memcmp(p,  "true", 4));
+			to_dt_ref(ref)->is_builtin_tag = true;
+		} else if (!strcmp(tag, "!null")) {
+			to_dt_ref(ref)->is_null = true;
+			to_dt_ref(ref)->is_builtin_tag = true;
+		} else
+			to_dt_ref(ref)->is_builtin_tag = false;
+		break;
+
+	default:
+		/* nothing */
+		break;
+	}
+
+	to_dt_ref(ref)->is_resolved = true;
+
+	return 0;
 }
 
 static struct option opts[] = {

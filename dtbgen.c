@@ -84,11 +84,7 @@ struct dtb_property {
 
 struct dtb_ref {
 	struct dt_ref dt;
-	const char *tag;		/* actual tag used for property gen */
 	unsigned int offset;
-	unsigned long long val;
-	bool is_int : 1;
-	bool resolved : 1;
 	struct list_head ovnode;	/* when resolving overlays */
 };
 #define to_dtb_ref(_r) 	\
@@ -270,56 +266,27 @@ static void prop_replace(struct property *prop, const void *data,
 #define RF_PATHS	(1 << 2)
 #define RF_CONTENT	(1 << 3)
 
-static int parse_int(const char *str, int len, unsigned long long *valp, bool *unsignedp)
-{
-	int ret;
-	sy_val_t val;
-	struct sy_state state, *sy = &state;
-	struct sy_config cfg;
-
-	memset(&cfg, 0, sizeof(cfg));
-	cfg.size = sy_workbuf_size_max(len);
-	cfg.workbuf = alloca(cfg.size);
-
-	sy_init(sy, &cfg);
-
-	assert(len > 0);
-	ret = sy_eval(sy, str, len, &val);
-	if (ret == 0) {
-		*valp = val.v;
-		*unsignedp = val.u;
-	}
-
-	return ret;
-}
-
 static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 {
-	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *np;
 	struct property *prop;
 	struct dtb_property *dtbprop;
-	int ret, len;
 	uint8_t val8;
 	fdt16_t val16;
 	fdt32_t val32;
 	fdt64_t val64;
-	unsigned long long val = 0;
 	const void *data = NULL;
 	int size = 0;
 	bool is_delete = false;
-	bool is_unsigned;
-	bool is_int = false;
 	bool append_0 = false;
-	bool was_resolved = false;
 	fdt32_t phandlet = 0;
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *tag = NULL;
-	const char *p;
 	char *refname;
 	int refnamelen;
 	void *output_data = NULL;
 	size_t output_size = 0;
+	int err;
 
 	prop = ref->prop;
 	assert(prop);
@@ -339,111 +306,75 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	memcpy(refname, ref->data, refnamelen);
 	refname[refnamelen] = '\0';
 
-	switch (ref->type) {
-	case r_anchor:
-		np = node_lookup_by_label(to_tree(dt),
-				ref->data, ref->len);
-		if (!np && !dtb->object) {
+	err = dt_resolve_ref(dt, ref);
+	if (err != 0) {
+		if (ref->type == r_anchor || ref->type == r_path) {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Can't resolve reference to label %s\n",
 				refname);
 			return;
 		}
+		if (err == -EINVAL) {
+			tree_error_at_ref(to_tree(dt), ref, "Invalid %s\n",
+				refname);
+			return;
+		}
+		if (err == -ERANGE) {
+			tree_error_at_ref(to_tree(dt), ref, "Invalid range on %s\n",
+				refname);
+			return;
+		}
+	}
 
-		if (np) {
-			phandlet = cpu_to_fdt32(to_dtb_node(np)->phandle);
-			was_resolved = true;
-		} else
-			phandlet = 0xffffffff;
-
-
+	switch (ref->type) {
+	case r_anchor:
+		np = to_dt_ref(ref)->npref;
+		phandlet = np ? cpu_to_fdt32(to_dtb_node(np)->phandle) :
+				0xffffffff;
 		data = &phandlet;
 		size = sizeof(phandlet);
 		break;
 
 	case r_path:
-		np = node_lookup_by_label(to_tree(dt),
-				ref->data, ref->len);
-		if (!np) {
-			tree_error_at_ref(to_tree(dt), ref,
-				    "Can't resolve reference to label %s\n",
-				    refname);
-			return;
-		}
-
+		np = to_dt_ref(ref)->npref;
 		if (np) {
 			data = dn_fullname(np, namebuf, sizeof(namebuf));
 			size = strlen(data) + 1;
-			was_resolved = true;
+		} else {
+			data = NULL;
+			size = 0;
 		}
 		break;
 
 	case r_scalar:
-		np = prop->np;
-		assert(np);
-
-		p = ref->data;
-		len = ref->len;
-
-		ret = parse_int(p, len, &val, &is_unsigned);
-		is_int = ret == 0;
+		tag = to_dt_ref(ref)->tag;
 
 		/* special memreserve handling */
-		if (!tag && !strcmp(prop->name, "/memreserve/"))
+		if (!strcmp(prop->name, "/memreserve/")) {
+			if (!to_dt_ref(ref)->is_int) {
+				tree_error_at_ref(to_tree(dt), ref,
+					"Invalid /memreserve/ property %s\n",
+					refname);
+				return;
+			}
 			tag = "!uint64";
-
-		/* TODO type checking/conversion here */
-		if (!tag && is_int)
-			tag = "!int";
-		else if (!tag && ((len == 4 && !memcmp(p,  "true", 4)) ||
-		                  (len == 5 && !memcmp(p, "false", 5)) ))
-			tag = "!bool";
-		else if (!tag && (len == 0 ||
-		                 (len == 4 && !memcmp(p, "null", 4)) ||
-				 (len == 1 && *(char *)p == '~')) )
-			tag = "!null";
-		else if (!tag)
-			tag = "!str";
+		}
 
 		if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32") ||
 		    !strcmp(tag, "!uint") || !strcmp(tag, "!uint32")) {
-			if (!is_int) {
-				tree_error_at_ref(to_tree(dt), ref,
-					    "Tagged int is invalid: %s\n",
-					    refname);
-				return;
-			}
-			val32 = cpu_to_fdt32((uint32_t)val);
+			val32 = cpu_to_fdt32((uint32_t)to_dt_ref(ref)->val);
 			data = &val32;
 			size = sizeof(val32);
 		} else if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8")) {
-			if (!is_int) {
-				tree_error_at_ref(to_tree(dt), ref,
-					    "Tagged int is invalid: %s\n",
-					    refname);
-				return;
-			}
-			val8 = (uint8_t)val;
+			val8 = (uint8_t)to_dt_ref(ref)->val;
 			data = &val8;
 			size = sizeof(val8);
 		} else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16")) {
-			if (!is_int) {
-				tree_error_at_ref(to_tree(dt), ref,
-					    "Tagged int is invalid: %s\n",
-					    refname);
-				return;
-			}
-			val16 = cpu_to_fdt16((uint16_t)val);
+			val16 = cpu_to_fdt16((uint16_t)to_dt_ref(ref)->val);
 			data = &val16;
 			size = sizeof(val16);
 		} else if (!strcmp(tag, "!int64") || !strcmp(tag, "!uint64")) {
-			if (!is_int) {
-				tree_error_at_ref(to_tree(dt), ref,
-					    "Tagged int is invalid: %s\n",
-					    refname);
-				return;
-			}
-			val64 = cpu_to_fdt64((uint64_t)val);
+			val64 = cpu_to_fdt64((uint64_t)to_dt_ref(ref)->val);
 			data = &val64;
 			size = sizeof(val64);
 		} else if (!strcmp(tag, "!str")) {
@@ -451,19 +382,13 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			size = ref->len;
 			append_0 = true;
 		} else if (!strcmp(tag, "!bool")) {
-			if (len == 4 && !memcmp(p,  "true", 4)) {
-				val = 1;
-				data = NULL;
-				size = 0;
-			} else {
-				val = 0;
-				data = NULL;
-				size = 0;
+			data = NULL;
+			size = 0;
+			if (!to_dt_ref(ref)->val)
 				dt_warning_at(dt, &to_dt_ref(ref)->m,
 					      "False boolean will not be"
 					      " present in DTB output; %s\n",
 					      refname);
-			}
 		} else if (!strcmp(tag, "!null")) {
 			data = NULL;
 			size = 0;
@@ -471,14 +396,14 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!filter")) {
 			dt_debug(dt, "Compiling...\n");
 
-			ret = compile(ref->data, ref->len,
+			err = compile(ref->data, ref->len,
 					dt->cfg.compiler, dt->cfg.cflags,
 					&output_data, &output_size);
-			if (ret) {
+			if (err) {
 				tree_error_at_ref(to_tree(dt), ref,
 					"Failed to compile %s:\n%s %s\n%s\n",
 					tag, dt->cfg.compiler, dt->cfg.cflags, refname);
-				break;
+				return;
 			}
 			data = output_data;
 			size = output_size;
@@ -488,7 +413,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 				refname);
 			return;
 		}
-		was_resolved = true;
 
 		break;
 
@@ -499,10 +423,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 
 	assert(tag != NULL);
 	to_dtb_ref(ref)->offset = dtbprop->size;
-	to_dtb_ref(ref)->tag = tag;
-	to_dtb_ref(ref)->val = val;
-	to_dtb_ref(ref)->is_int = is_int;
-	to_dtb_ref(ref)->resolved = was_resolved;
+
 	prop_append(prop, data, size, append_0);
 
 	if (is_delete)
@@ -512,8 +433,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 
 	if (output_data)
 		free(output_data);
-
-	np = prop->np;
 }
 
 static void resolve(struct yaml_dt_state *dt, struct node *npt,
@@ -727,7 +646,7 @@ static void add_fixups(struct yaml_dt_state *dt, struct node *np)
 		list_for_each_entry(ref, &prop->refs, node) {
 
 			/* adding anchors that were unresolved only */
-			if (ref->type != r_anchor || to_dtb_ref(ref)->resolved)
+			if (ref->type != r_anchor || to_dt_ref(ref)->is_resolved)
 				continue;
 
 			add_fixup(dt, ref);
@@ -906,7 +825,7 @@ static void add_local_fixups(struct yaml_dt_state *dt, struct node *np,
 		list_for_each_entry(ref, &prop->refs, node) {
 
 			/* adding anchors that were unresolved only */
-			if (ref->type != r_anchor || !to_dtb_ref(ref)->resolved)
+			if (ref->type != r_anchor || !to_dt_ref(ref)->is_resolved)
 				continue;
 
 			add_local_fixup(dt, ref, fixups_np);
@@ -1071,7 +990,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 			resolve_error = false;
 			list_for_each_entry(ref, &prop->refs, node) {
 				ref_resolve(dt, ref);
-				if (!to_dtb_ref(ref)->resolved)
+				if (!to_dt_ref(ref)->is_resolved)
 					resolve_error = true;
 			}
 
@@ -1627,6 +1546,12 @@ static int depth_pfx_col(struct yaml_dt_state *dt, int depth)
 	return depth * 4;
 }
 
+static bool is_cell_tag(const char *tag)
+{
+	return !strcmp(tag, "!int")   || !strcmp(tag, "!uint") ||
+	       !strcmp(tag, "!int32") || !strcmp(tag, "!uint32");
+}
+
 static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int depth)
 {
 	FILE *fp = dt->output;
@@ -1660,7 +1585,7 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 		else if (ref->type == r_path)
 			stag = "!str";		/* paths are strings */
 		else
-			stag = to_dtb_ref(ref)->tag;
+			stag = to_dt_ref(ref)->tag;
 		assert(stag != NULL);
 
 		/* get run of the same type */
@@ -1680,18 +1605,19 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			else if (refn->type == r_path)
 				tag = "!str";		/* paths are strings */
 			else
-				tag = to_dtb_ref(refn)->tag;
+				tag = to_dt_ref(refn)->tag;
 			assert(tag != NULL);
 
 			/* we're out? rewind back a bit */
-			if (strcmp(tag, stag))
+			if ((!is_cell_tag(tag) || !is_cell_tag(stag)) &&
+					strcmp(tag, stag))
 				break;
 
 			count++;
 		}
 
 		if (!strcmp(stag, "!bool")) {
-			if (to_dtb_ref(ref)->val)
+			if (to_dt_ref(ref)->val)
 				found_true_bool = true;
 			goto skip;
 		}
@@ -1702,6 +1628,9 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			col += strlen(" =");
 			output_name = true;
 		}
+
+		if (pos > 0)
+			fputc(',', fp);
 
 		fputc(' ', fp);
 
@@ -1730,19 +1659,19 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			if (i > 0)
 				fputc(' ', fp);
 
-			if (reft->type == r_anchor || !strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+			if (reft->type == r_anchor || !strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('&', fp);
 
-			if (!strcmp(stag, "!str") && strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
 
 			if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
-				fprintf(fp, " %02x", to_dtb_ref(reft)->is_int ?
-					    (unsigned int)to_dtb_ref(reft)->val & 0xff : 0);
+				fprintf(fp, " %02x", to_dt_ref(reft)->is_int ?
+					    (unsigned int)to_dt_ref(reft)->val & 0xff : 0);
 			else
 				fwrite(reft->data, reft->len, 1, fp);
 
-			if (!strcmp(stag, "!str") && strcmp(to_dtb_ref(ref)->tag, "!pathref"))
+			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
 
 			if ((!strcmp(stag, "!str") || !strcmp(stag, "!pathref")) &&
@@ -1836,9 +1765,9 @@ static int dts_emit(struct yaml_dt_state *dt)
 		ref = list_entry(&prop->refs, struct ref, node);
 		list_for_each_entry_continue(ref, &prop->refs, node) {
 			/* must have been already put into place */
-			if (!to_dtb_ref(ref)->is_int)
+			if (!to_dt_ref(ref)->is_int)
 				dt_fatal(dt, "Illegal /memreserve/ property\n");
-			start = to_dtb_ref(ref)->val;
+			start = to_dt_ref(ref)->val;
 
 			/* get next */
 			ref = list_entry(ref->node.next, struct ref, node);
@@ -1846,9 +1775,9 @@ static int dts_emit(struct yaml_dt_state *dt)
 				dt_fatal(dt, "Illegal /memreserve/ property\n");
 
 			/* must have been already put into place */
-			if (!to_dtb_ref(ref)->is_int)
+			if (!to_dt_ref(ref)->is_int)
 				dt_fatal(dt, "Illegal /memreserve/ property\n");
-			size = to_dtb_ref(ref)->val;
+			size = to_dt_ref(ref)->val;
 
 			fprintf(fp, "/memreserve/ %08llx %08llx\n", start, size);
 		}
