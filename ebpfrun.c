@@ -150,6 +150,48 @@ static uint64_t bpf_printf(uint64_t arg0, uint64_t arg1,
 	return -1;
 }
 
+static uint64_t bpf_get_int(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
+static uint64_t bpf_get_bool(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
+static uint64_t bpf_get_str(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
+static uint64_t bpf_get_strseq(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
+static uint64_t bpf_get_streq(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
+static uint64_t bpf_anystreq(uint64_t arg0, uint64_t arg1,
+			     uint64_t arg2, uint64_t arg3,
+			     uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	return 0;
+}
+
 static const struct ebpf_callback bpf_cb[] = {
 	[0] = {
 		.name = "unresolved",
@@ -162,6 +204,30 @@ static const struct ebpf_callback bpf_cb[] = {
 	[2] = {
 		.name = "bpf_printf",
 		.func = bpf_printf,
+	},
+	[3] = {
+		.name = "get_int",
+		.func = bpf_get_int,
+	},
+	[4] = {
+		.name = "get_bool",
+		.func = bpf_get_bool,
+	},
+	[5] = {
+		.name = "get_str",
+		.func = bpf_get_str,
+	},
+	[6] = {
+		.name = "get_strseq",
+		.func = bpf_get_strseq,
+	},
+	[7] = {
+		.name = "streq",
+		.func = bpf_streq,
+	},
+	[8] = {
+		.name = "streq",
+		.func = bpf_anystreq,
 	},
 	{ NULL, NULL }
 };
