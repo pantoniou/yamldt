@@ -214,21 +214,19 @@ static int prepare_schema_property(struct yaml_dt_state *dt,
 	return 0;
 }
 
-static int prepare_schema_node(struct yaml_dt_state *dt,
+static int prepare_schema_node_selector(struct yaml_dt_state *dt,
 		struct yaml_dt_state *sdt, struct node *np)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *cgdt = dtbchk->cgdt;
-	struct node *npp, *npp2;
 	struct property *prop;
 	struct ref *ref;
 	/* char namebuf[NODE_FULLNAME_MAX]; */
 	const char *constraint;
-	int ret, i, idx;
-	struct list_head frags;
+	int i, idx;
 	const char *type_prolog, *type_epilog;
 	const char *category_prolog, *category_epilog;
-	struct node *nptype, *npcategory;
+	struct node *npp, *nptype, *npcategory;
 	char idxbuf[9];
 	struct var vars[4];
 	char *buf;
@@ -238,7 +236,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 
 	fprintf(stderr, "Preparing schema node: %s\n", np->name);
 
-	INIT_LIST_HEAD(&frags);
+	/* generate select method */
 
 	/* open memstream */
 	fp = open_memstream(&buf, &size);
@@ -307,8 +305,6 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	fclose(fp);
 
 	if (size) {
-		fprintf(stderr, "%s\n", buf);
-
 		/* add the source */
 		prop = prop_alloc(to_tree(sdt), "selected-rule-source");
 		prop->np = np;
@@ -323,13 +319,144 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 
 	free(buf);
 
-	list_for_each_entry(npp, &np->children, node) {
-		if (!strcmp(npp->name, "properties")) {
-			list_for_each_entry(npp2, &npp->children, node) {
-				ret = prepare_schema_property(dt, sdt, npp2);
-				if (ret)
-					return ret;
-			}
+	return 0;
+}
+
+static int prepare_schema_node_checker(struct yaml_dt_state *dt,
+		struct yaml_dt_state *sdt, struct node *np)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *cgdt = dtbchk->cgdt;
+	struct property *prop;
+	struct ref *ref;
+	/* char namebuf[NODE_FULLNAME_MAX]; */
+	const char *constraint;
+	int idx;
+	const char *type_prolog, *type_epilog;
+	const char *category_prolog, *category_epilog;
+	struct node *child, *npp, *nptype, *npcategory;
+	char idxbuf[9];
+	struct var vars[4];
+	char *buf;
+	size_t size;
+	FILE *fp;
+	bool first;
+
+	/* generate checker method */
+
+	/* no properties node? */
+	child = dt_get_node(sdt, np, "properties", 0);
+	if (!child)
+		return 0;
+
+	/* open memstream */
+	fp = open_memstream(&buf, &size);
+	assert(fp);
+
+	/* for each property */
+	first = true;
+	idx = 0;
+	list_for_each_entry(npp, &child->children, node) {
+
+		constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
+		if (!constraint)
+			continue;
+
+		/* lookup failures are errors */
+		dt_set_error_on_failed_get(cgdt, true);
+
+		nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
+				dt_get_string(cgdt, npp, "type", 0, 0), 0);
+		type_prolog = dt_get_string(cgdt, nptype, "prolog", 0, 0);
+		type_epilog = dt_get_string(cgdt, nptype, "epilog", 0, 0);
+
+		npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
+				dt_get_string(cgdt, npp, "category", 0, 0), 0);
+		category_prolog = dt_get_string(cgdt, npcategory, "prolog", 0, 0);
+		category_epilog = dt_get_string(cgdt, npcategory, "epilog", 0, 0);
+
+		/* lookup failures are no more errors */
+		dt_set_error_on_failed_get(cgdt, false);
+
+		if (cgdt->error_flag)
+			dt_fatal(cgdt, "Bad codegen configuration\n");
+
+		/* setup the variables to expand */
+		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
+		idxbuf[sizeof(idxbuf) - 1] = '\0';
+		vars[0].name = "NODE_NAME";
+		vars[0].value = np->name;
+		vars[1].name = "PROPERTY_NAME";
+		vars[1].value = npp->name;
+		vars[2].name = "PROPERTY_INDEX";
+		vars[2].value = idxbuf;
+		vars[3].name = NULL;
+		vars[3].value = NULL;
+
+		/* prolog */
+		if (first) {
+			first = false;
+			output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
+			output_frag(dt, vars, fp, dtbchk->cg_node_check_prolog, 0);
+		}
+
+		output_frag(dt, vars, fp, type_prolog, 1);
+		output_frag(dt, vars, fp, category_prolog, 1);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
+		output_frag(dt, vars, fp, constraint, 2);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
+		output_frag(dt, vars, fp, category_epilog, 1);
+		output_frag(dt, vars, fp, type_epilog, 1);
+
+		idx++;
+	}
+
+	if (!first) {
+		output_frag(dt, vars, fp, dtbchk->cg_node_check_epilog, 0);
+		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
+	}
+	fclose(fp);
+
+	if (size) {
+		/* add the source */
+		prop = prop_alloc(to_tree(sdt), "check-rule-source");
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
+		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size, dtbchk->input_tag);
+		ref->prop = prop;
+		list_add_tail(&ref->node, &prop->refs);
+
+		dt_resolve_ref(sdt, ref);
+	}
+
+	free(buf);
+
+	return 0;
+}
+
+static int prepare_schema_node(struct yaml_dt_state *dt,
+		struct yaml_dt_state *sdt, struct node *np)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *cgdt = dtbchk->cgdt;
+	struct node *child, *npp;
+	int ret;
+
+	(void)cgdt;
+	fprintf(stderr, "Preparing schema node: %s\n", np->name);
+
+	ret = prepare_schema_node_selector(dt, sdt, np);
+
+	ret = prepare_schema_node_checker(dt, sdt, np);
+
+	list_for_each_entry(child, &np->children, node) {
+		if (strcmp(child->name, "properties"))
+			continue;
+		list_for_each_entry(npp, &child->children, node) {
+			ret = prepare_schema_property(dt, sdt, npp);
+			if (ret)
+				return ret;
 		}
 	}
 

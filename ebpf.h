@@ -63,7 +63,7 @@
 struct ebpf_vm;
 
 struct ebpf_ctx {
-	const struct ebpf_vm *vm;
+	struct ebpf_vm *vm;
 	void *mem;
 	void *mem_end;
 	size_t mem_size;
@@ -73,6 +73,7 @@ struct ebpf_ctx {
 	uint64_t *reg;
 	uint16_t pc;
 	int errcode;
+	struct list_head allocs;
 };
 
 typedef uint64_t
@@ -150,7 +151,7 @@ int ebpf_setup(struct ebpf_vm *vm, const struct ebpf_callback *callbacks,
 void ebpf_cleanup(struct ebpf_vm *vm);
 int ebpf_load_elf(struct ebpf_vm *vm, const void *elf, size_t elf_size);
 
-uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
+uint64_t ebpf_exec(struct ebpf_vm *vm, void *mem, size_t mem_len,
 		   int *errcode);
 
 bool
@@ -274,6 +275,60 @@ ebpf_store8(struct ebpf_ctx *ctx, void *addr, uint8_t val)
 		return ctx->errcode = -EFAULT;
 	*(uint8_t *)addr = val;
 	return 0;
+}
+
+struct ebpf_chunk {
+	struct list_head node;
+	bool writeable;
+	size_t size;
+	const void *addr;
+	uint8_t data[0];
+};
+#define to_ebpf_chunk(_p) container_of(_p, struct ebpf_chunk, data)
+
+/* allocate memory that the filter can access */
+static inline void *ebpf_alloc(struct ebpf_ctx *ctx, bool writeable, size_t size)
+{
+	struct ebpf_chunk *c;
+
+	size += sizeof(struct ebpf_chunk);
+	c = malloc(size);
+	if (!c)
+		return NULL;
+	memset(c, 0, size);
+	c->writeable = writeable;
+	c->size = size;
+	c->addr = c->data;	/* address is at our data */
+	list_add_tail(&c->node, &ctx->allocs);
+	return c->data;
+}
+
+/* open read only window for the filter */
+static inline int ebpf_open_memory_window(struct ebpf_ctx *ctx, const void *addr, size_t size)
+{
+	struct ebpf_chunk *c;
+
+	c = malloc(sizeof(*c));
+	if (!c)
+		return -1;
+	memset(c, 0, sizeof(*c));
+	c->writeable = false;
+	c->size = size;
+	c->addr = addr;
+	list_add_tail(&c->node, &ctx->allocs);
+	/* note that no entry is returned */
+	return 0;
+}
+
+static inline void ebpf_free(struct ebpf_ctx *ctx, void *p)
+{
+	struct ebpf_chunk *c;
+
+	if (!p)
+		return;
+	c = to_ebpf_chunk(p);
+	list_del(&c->node);
+	free(c);
 }
 
 #endif

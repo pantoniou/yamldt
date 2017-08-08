@@ -1,3 +1,7 @@
+/*
+ * select filter method for jedec,spi-nor
+ *
+ */
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -13,22 +17,22 @@ static int (*bpf_printf)(const char *fmt, ...) =
         (void *) 2;
 
 static int (*get_int)(struct node *np, const char *name, bool *existsp) = 
-	(void *) 3;
+        (void *) 3;
 
 static bool (*get_bool)(struct node *np, const char *name, bool *existsp) = 
-	(void *) 4;
+        (void *) 4;
 
 static const char *(*get_str)(struct node *np, const char *name, bool *existsp) = 
-	(void *) 5;
+        (void *) 5;
 
 static const char **(*get_strseq)(struct node *np, const char *name, bool *existsp) = 
-	(void *) 6;
+        (void *) 6;
 
 static bool (*streq)(const char *str1, const char *str2) =
-	(void *) 7;
+        (void *) 7;
 
 static bool (*anystreq)(const char **strv, const char *str2) =
-	(void *) 8;
+        (void *) 8;
 
 /* prolog for jedec,spi-nor */
 int select(struct node *np)
@@ -94,11 +98,11 @@ int select(struct node *np)
     ))
         return -1;
     skip_1:
-        do { } while(0);
+      do { } while(0); /* fix goto that requires a statement */
     
     }
 
 /* comment here due to YAML formatting */
     return 0;
 }
-/* nothing */
+/* jedec,spi-nor ends */

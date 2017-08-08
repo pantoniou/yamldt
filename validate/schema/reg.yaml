@@ -1,0 +1,13 @@
+%YAML 1.1
+---
+reg:
+  title: Contraint for reg properties
+
+  properties:
+    status: &reg-valid
+      category: required
+      type: intseq
+      description: The register property
+      constraint: |
+        count == (get_int(get_parent(np), "#address-cells", NULL) +
+                  get_int(get_parent(np), "#size-cells",    NULL))

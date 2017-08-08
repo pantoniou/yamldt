@@ -5,30 +5,51 @@ output-tag: "!ebpf"
 compiler: clang-5.0
 cflags: "-x c -ffreestanding -target bpf -O2 -c -o - -"
 common:
-  prolog: |
+  prolog: |+
+    /*
+     * filter method for ${NODE_NAME}
+     *
+     */
     #include <stdint.h>
+    #include <stdbool.h>
+
+    /* never accessed directly but the pointers are valid keys */
     struct node;
-    #define int_eq(_p, _v) (get_int(_p) == (_v))
-    #define int_ne(_p, _v) (get_int(_p) != (_v))
-    #define int_lt(_p, _v) (get_int(_p) <  (_v))
-    #define int_gt(_p, _v) (get_int(_p) >  (_v))
-    #define int_le(_p, _v) (get_int(_p) <= (_v))
-    #define int_ge(_p, _v) (get_int(_p) >= (_v))
-    
-    #define uint_eq(_p, _v) (get_uint(_p) == (_v))
-    #define uint_ne(_p, _v) (get_uint(_p) != (_v))
-    #define uint_lt(_p, _v) (get_uint(_p) <  (_v))
-    #define uint_gt(_p, _v) (get_uint(_p) >  (_v))
-    #define uint_le(_p, _v) (get_uint(_p) <= (_v))
-    #define uint_ge(_p, _v) (get_uint(_p) >= (_v))
-    
-    #define str_eq(_p, _v) (!strcmp(get_str(_p), (_v)))
-    #define str_ne(_p, _v) ( strcmp(get_str(_p), (_v)))
-    
-    #define strseq_anyeq(_v) (!any_strcmp(get_strseq(_p), (_v)))
-    #define strseq_anyne(_v) ( any_strcmp(get_strseq(_p), (_v)))
+    struct property;
+    struct ref;
+
+    static int (*callback)(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) =
+            (void *) 1;
+
+    static int (*bpf_printf)(const char *fmt, ...) =
+            (void *) 2;
+
+    static int64_t (*get_int)(struct node *np, const char *name, bool *existsp) = 
+            (void *) 3;
+
+    static bool (*get_bool)(struct node *np, const char *name, bool *existsp) = 
+            (void *) 4;
+
+    static const char *(*get_str)(struct node *np, const char *name, bool *existsp) = 
+            (void *) 5;
+
+    static const char **(*get_strseq)(struct node *np, const char *name, bool *existsp) = 
+            (void *) 6;
+
+    static bool (*streq)(const char *str1, const char *str2) =
+            (void *) 7;
+
+    static bool (*anystreq)(const char **strv, const char *str2) =
+            (void *) 8;
+
+    static struct node *(get_parent)(struct node *np) =
+            (void *) 9;
+
+    static const int64_t *(get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
+            (void *) 10;
+
   epilog: |
-    /* nothing */
+    /* ${NODE_NAME} ends */
 node:
   select:
     entry: select
@@ -67,7 +88,7 @@ property:
       int:
         prolog: |+
           {
-          const int v = get_int(np, "${PROPERTY_NAME}", &exists);
+          const int64_t v = get_int(np, "${PROPERTY_NAME}", &exists);
 
         epilog: |+
           }
@@ -75,6 +96,7 @@ property:
         prolog: |+
           {
           const unsigned int v = get_uint(np, "${PROPERTY_NAME}", &exists);
+
         epilog: +
           }
       str:
@@ -98,6 +120,15 @@ property:
 
         epilog: |+
           }
+      intseq:
+        prolog: |+
+          {
+          int64_t temp_count;
+          const int64_t *v = get_intseq(np, "${PROPERTY_NAME}", &temp_count, &exists);
+          const int64_t count = temp_count;
+
+        epilog: |+
+          }
     categories:
       required:
         prolog: |+
@@ -113,4 +144,5 @@ property:
 
         epilog: |+
           skip_${PROPERTY_INDEX}:
+            do { } while(0); /* fix goto that requires a statement */
 

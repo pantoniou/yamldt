@@ -577,6 +577,7 @@ ebpf_load_store_check(const struct ebpf_ctx *ctx, const void *addr, int size,
 {
 	const void *end = addr + size;
 	const struct ebpf_vm *vm = ctx->vm;
+	struct ebpf_chunk *c;
 
 	/* Context access */
 	if (ctx->mem && (addr >= ctx->mem && end <= ctx->mem_end))
@@ -594,6 +595,14 @@ ebpf_load_store_check(const struct ebpf_ctx *ctx, const void *addr, int size,
 	if (!store && (addr >= vm->rodata_start && end <= vm->rodata_end))
 		return true;
 
+	/* finally try allocated chunks (or memory windows) */
+	list_for_each_entry(c, &ctx->allocs, node) {
+		if (store && !c->writeable)
+			continue;
+		if (addr >= c->addr && end <= c->addr + c->size)
+			return true;
+	}
+
 	ebpf_debug(vm, "error: out of bounds memory %s at PC %u, addr %p, size %d\n",
 			store ? "store" : "load", ctx->pc, addr, size);
 	ebpf_debug(vm, "mem %p-%p stack %p-%p text %p-%p rodata %p-%p rwdata %p-%p\n",
@@ -607,7 +616,7 @@ ebpf_load_store_check(const struct ebpf_ctx *ctx, const void *addr, int size,
 	return false;
 }
 
-uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
+uint64_t ebpf_exec(struct ebpf_vm *vm, void *mem, size_t mem_len,
 		   int *errcode)
 {
 	uint16_t pc;
@@ -619,6 +628,7 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 	struct ebpf_unresolved_entry *ue;
 	struct ebpf_ctx ctx;
 	const char *lazy_name;
+	struct ebpf_chunk *c, *cn;
 
 	if (!vm)
 		return UINT64_MAX;
@@ -635,6 +645,7 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 	ctx.stack_size = sizeof(stack);
 	ctx.stack_end = stack + sizeof(stack);
 	ctx.reg = reg;
+	INIT_LIST_HEAD(&ctx.allocs);
 
 	reg[1] = (uintptr_t)mem;
 	reg[10] = (uintptr_t)ctx.stack_end;
@@ -970,7 +981,8 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 				pc += inst.offset;
 			break;
 		case EBPF_OP_EXIT:
-			return reg[0];
+			ctx.errcode = reg[0];
+			goto no_error;
 
 		case EBPF_OP_CALL:
 			ctx.pc = cur_pc;
@@ -1010,6 +1022,11 @@ uint64_t ebpf_exec(const struct ebpf_vm *vm, void *mem, size_t mem_len,
 
 	if (errcode)
 		*errcode = ctx.errcode;
+
+no_error:
+	/* free all memory */
+	list_for_each_entry_safe(c, cn, &ctx.allocs, node)
+		ebpf_free(&ctx, c->data);
 
 	return ctx.errcode;
 }
