@@ -4,6 +4,3 @@ valid_compatible: &valid_compatible
   version: 1
 
   title: valid compatible property contraint
-
-  constraint: ~
-

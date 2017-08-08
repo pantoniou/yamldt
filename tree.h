@@ -172,6 +172,14 @@ void node_free(struct tree *t, struct node *np);
 
 struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len);
+struct node *node_get_child_by_name(struct tree *t,
+			    struct node *np, const char *name,
+			    int index);
+struct property *prop_get_by_name(struct tree *t,
+		struct node *np, const char *name,
+		int index);
+struct ref *ref_get_by_index(struct tree *t,
+		struct property *prop, int index);
 
 void tree_apply_ref_node(struct tree *t, struct node *npref,
 			 struct node *np);

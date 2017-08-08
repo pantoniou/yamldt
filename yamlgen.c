@@ -213,7 +213,8 @@ static void ref_output_single(struct tree *t, FILE *fp,
 
 		/* output explicit tag (which is not a string) */
 		if (xtag && strcmp(xtag, "!str") &&
-			(input_compiler_tag && strcmp(xtag, input_compiler_tag)))
+			(!input_compiler_tag ||
+			 (input_compiler_tag && strcmp(xtag, input_compiler_tag))))
 			fprintf(fp, "%s ", xtag);
 
 		val = to_dt_ref(ref)->val;
@@ -240,7 +241,7 @@ static void ref_output_single(struct tree *t, FILE *fp,
 				fwrite(ref->data, ref->len, 1, fp);
 				fputc('"', fp);
 			} else {
-				fputs("|", fp);
+				fputs("|+", fp);
 				s = ref->data;
 				while (s && s < (char *)ref->data + ref->len) {
 					e = memchr(s, '\n', (char *)ref->data + ref->len - s);
@@ -293,7 +294,22 @@ static void ref_output_single(struct tree *t, FILE *fp,
 			free(b64_output);
 
 		} else {
-			fwrite(ref->data, ref->len, 1, fp);
+			/* no newlines? easy */
+			if (!memchr(ref->data, '\n', ref->len)) {
+				fwrite(ref->data, ref->len, 1, fp);
+			} else {
+				fputs("|+", fp);
+				s = ref->data;
+				while (s && s < (char *)ref->data + ref->len) {
+					e = memchr(s, '\n', (char *)ref->data + ref->len - s);
+					if (!e)
+						e = ref->data + ref->len;
+					fprintf(fp, "\n%*s", (depth + 1) * 2, "");
+					fwrite(s, e - s, 1, fp);
+					s = e < ((char *)ref->data + ref->len) ? e + 1 : NULL;
+				}
+			}
+
 			tree_debug(t, "Unknown tag %s: %s\n", tag, refname);
 		}
 

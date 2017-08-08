@@ -66,7 +66,7 @@
 #include "dtbcheck.h"
 
 #define DEFAULT_COMPILER "clang-5.0"
-#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
+#define DEFAULT_CFLAGS "-x c -ffreestanding -target bpf -O2 -c -o - -"
 #define DEFAULT_TAGS "!filter,!ebpf"
 
 static const char *get_builtin_tag(const char *tag)
@@ -227,13 +227,15 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 
 	ref = to_ref(dt_ref);
 
-	/* try to avoid copy if the pointer given is in read data */
-	if (data < dt->input_content || data >= dt->input_content + dt->input_size) {
-		p = malloc(len);
+	/* we could try to avoid the copy but.. it's easier for now to allocate */
+
+	/* if (data < dt->input_content || data >= dt->input_content + dt->input_size) { */
+		p = malloc(len + 1);
 		assert(p);
 		memcpy(p, data, len);
-	} else
-		p = (void *)data;
+		((char *)p)[len] = '\0';	/* and always terminate */
+	/* } else
+		p = (void *)data; */
 
 	ref->data = p;
 	ref->len = len;
@@ -639,6 +641,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	char *s;
 
 	memset(dt, 0, sizeof(*dt));
+	INIT_LIST_HEAD(&dt->children);
 
 	if (!yaml_parser_initialize(&dt->parser)) {
 		fprintf(stderr, "Could not initialize the parser object\n");
@@ -722,10 +725,59 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	return 0;
 }
 
+struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
+		const char *input, const char *output,
+		const char *name)
+{
+	struct yaml_dt_state *sdt;
+	struct yaml_dt_config cfg;
+	char *argv[2];
+	int err;
+
+	sdt = malloc(sizeof(*sdt));
+	assert(sdt);
+
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.debug = dt->cfg.debug;
+	cfg.output_file = output ? output : "/dev/null";
+
+	argv[0] = (char *)input;
+	argv[1] = NULL;
+	cfg.input_file = argv;
+	cfg.input_file_count = 1;
+
+	err = dt_setup(sdt, &cfg, output ? &yaml_emitter : &null_emitter,
+			   &null_checker);
+	if (err)
+		dt_fatal(dt, "Unable to setup single parser for %s -> %s\n",
+				input, output ? output : "<NULL>");
+
+	sdt->parent = dt;
+	sdt->name = strdup(name);
+	assert(sdt->name);
+	list_add_tail(&sdt->node, &dt->children);
+
+	err = dt_parse(sdt);
+	if (err)
+		dt_fatal(sdt, "Failed to parse single %s\n", input);
+
+	err = sdt->error_flag;
+	if (err) {
+		dt_cleanup(sdt, sdt->error_flag);
+		sdt = NULL;
+	}
+
+	return sdt;
+}
+
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 {
+	struct yaml_dt_state *child, *childn;
 	struct input *in, *inn;
 	bool rm_file;
+
+	list_for_each_entry_safe(child, childn, &dt->children, node)
+		dt_cleanup(child, abnormal);
 
 	if (dt->map_key)
 		free(dt->map_key);
@@ -768,7 +820,13 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 	if (rm_file)
 		remove(dt->cfg.output_file);
 
-	memset(dt, 0, sizeof(*dt));
+	/* children are dynamically allocated so free accordingly */
+	if (dt->parent) {
+		list_del(&dt->node);
+		dt->parent = NULL;
+		free(dt->name);
+		free(dt);
+	}
 }
 
 static void finalize_current_property(struct yaml_dt_state *dt)
@@ -977,8 +1035,6 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		break;
 	case YAML_STREAM_END_EVENT:
 		dt_debug(dt, "StEV\n");
-		dt_checker_check(dt);
-		dt_emitter_emit(dt);
 		dt_stream_end(dt);
 		break;
 	case YAML_DOCUMENT_START_EVENT:
@@ -1324,7 +1380,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	return 0;
 }
 
-void dt_parse(struct yaml_dt_state *dt)
+int dt_parse(struct yaml_dt_state *dt)
 {
 	yaml_event_t event;
 	struct dt_yaml_mark m;
@@ -1336,7 +1392,7 @@ void dt_parse(struct yaml_dt_state *dt)
 		if (!yaml_parser_parse(&dt->parser, &event)) {
 			m.start = m.end = dt->parser.problem_mark;
 			dt_error_at(dt, &m, "%s\n", dt->parser.problem);
-			return;
+			return -1;
 		}
 
 		err = process_yaml_event(dt, &event);
@@ -1350,6 +1406,9 @@ void dt_parse(struct yaml_dt_state *dt)
 		if (end)
 			break;
 	}
+	return 0;
+
+	// return dt->error_flag ? -1 : 0;
 }
 
 static void get_error_location(struct yaml_dt_state *dt,
@@ -1691,6 +1750,215 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 	return 0;
 }
 
+struct node *dt_get_node(struct yaml_dt_state *dt,
+			    struct node *parent, const char *name,
+			    int index)
+{
+	char namebuf[NODE_FULLNAME_MAX];
+	struct node *np;
+
+	np = node_get_child_by_name(to_tree(dt), parent, name, index);
+	if (!np && dt->error_on_failed_get)
+		dt_error_at(dt, &to_dt_node(parent)->m,
+				"Unable to find child node %s#%d of %s\n",
+				name, index,
+				dn_fullname(parent, namebuf, sizeof(namebuf)));
+
+	return np;
+}
+
+struct property *dt_get_property(struct yaml_dt_state *dt,
+			    struct node *np, const char *name,
+			    int index)
+{
+	char namebuf[NODE_FULLNAME_MAX];
+	struct property *prop;
+
+	prop = prop_get_by_name(to_tree(dt), np, name, index);
+
+	if (!prop && dt->error_on_failed_get)
+		dt_error_at(dt, &to_dt_node(np)->m,
+				"Unable to find property %s#%d of %s\n",
+				name, index,
+				dn_fullname(np, namebuf, sizeof(namebuf)));
+	return prop;
+}
+
+struct ref *dt_get_ref(struct yaml_dt_state *dt,
+		struct property *prop, int index)
+{
+	char namebuf[NODE_FULLNAME_MAX];
+	struct ref *ref;
+
+	ref = ref_get_by_index(to_tree(dt), prop, index);
+
+	if (!ref && dt->error_on_failed_get)
+		dt_error_at(dt, &to_dt_property(prop)->m,
+				"Unable to find ref #%d of prop %s of %s\n",
+				index, prop->name,
+				dn_fullname(prop->np, namebuf, sizeof(namebuf)));
+	return ref;
+}
+
+const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	if (!dt || !np || !name)
+		return NULL;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return NULL;
+	ref = dt_get_ref(dt, prop, rindex);
+	if (!ref)
+		return NULL;
+
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"Failed to resolve with getting %s property\n",
+			name);
+		return NULL;
+	}
+
+	/* everything is a string, but warn if not evaluated as such */
+	if (strcmp(to_dt_ref(ref)->tag, "!str"))
+		dt_warning_at(dt, &to_dt_ref(ref)->m,
+			"Retrieving as !str (%s) at %s property\n",
+			to_dt_ref(ref)->tag, name);
+
+	return ref->data;
+}
+
+unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex, int *error)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	if (error)
+		*error = -1;
+
+	if (!dt || !np || !name)
+		return -1ULL;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return -1ULL;
+	ref = dt_get_ref(dt, prop, rindex);
+	if (!ref)
+		return -1ULL;
+
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"resolve failed ref #%d of %s#%d\n",
+					rindex, name, pindex);
+		return -1ULL;
+	}
+
+	/* can't retreive a non int tag */
+	if (!is_int_tag(to_dt_ref(ref)->tag) || !to_dt_ref(ref)->is_int) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"not !int (%s) ref #%d of %s#%d\n",
+					to_dt_ref(ref)->tag, rindex,
+					name, pindex);
+		return -1ULL;
+	}
+
+	if (error)
+		*error = 0;
+
+	return to_dt_ref(ref)->val;
+}
+
+int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
+		 const char *name, int pindex, int rindex)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	if (!dt || !np || !name)
+		return -1;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return -1;
+	ref = dt_get_ref(dt, prop, rindex);
+	if (!ref)
+		return -1;
+
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"resolve failed ref #%d of %s#%d\n",
+					rindex, name, pindex);
+		return -1;
+	}
+
+	/* can't retreive a non int tag */
+	if (strcmp(to_dt_ref(ref)->tag, "!bool") || !to_dt_ref(ref)->is_bool) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"not !bool (%s) ref #%d of %s#%d\n",
+					to_dt_ref(ref)->tag, rindex,
+					name, pindex);
+		return -1;
+	}
+
+	return to_dt_ref(ref)->val ? 1 : 0;
+}
+
+struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
+			     const char *name, int pindex, int rindex)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	if (!dt || !np || !name)
+		return NULL;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return NULL;
+	ref = dt_get_ref(dt, prop, rindex);
+	if (!ref)
+		return NULL;
+
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"resolve failed ref #%d of %s#%d\n",
+					rindex, name, pindex);
+		return NULL;
+	}
+
+	if (!to_dt_ref(ref)->npref) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"Invalid node reference ref #%d of %s#%d\n",
+					rindex, name, pindex);
+		return NULL;
+	}
+	return to_dt_ref(ref)->npref;
+}
+
 static struct option opts[] = {
 	{ "output",	 	required_argument, 0, 'o' },
 	{ "debug",	 	no_argument,	   0, 'd' },
@@ -1702,6 +1970,9 @@ static struct option opts[] = {
 	{ "compatible",		no_argument,	   0, 'C' },
 	{ "yaml",		no_argument,	   0, 'y' },
 	{ "dts",		no_argument,	   0, 's' },
+	{ "schema",		required_argument, 0, 'S' },
+	{ "schema-save",	required_argument, 0, 'i' },
+	{ "codegen",		required_argument, 0, 'g' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -1728,6 +1999,7 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "   -y, --yaml          YAML mode\n"
 "   -S, --schema        Use schema file\n"
 "   -i, --schema-save   Save intermediate schema\n"
+"   -g, --codegen       Code generator configuration file\n"
 		);
 }
 
@@ -1827,7 +2099,7 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dlvCcysS:i:h?", opts, &option_index)) != -1) {
+			"o:dlvCcysS:i:g:h?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			cfg->output_file = optarg;
@@ -1872,6 +2144,9 @@ int main(int argc, char *argv[])
 		case 'i':
 			cfg->schema_save = optarg;
 			break;
+		case 'g':
+			cfg->codegen = optarg;
+			break;
 		case 'v':
 			printf("%s version %s\n", PACKAGE_NAME, VERSION);
 			return 0;
@@ -1899,9 +2174,14 @@ int main(int argc, char *argv[])
 	if (err)
 		return EXIT_FAILURE;
 
-	dt_parse(dt);
+	err = dt_parse(dt);
+
+	if (!err) {
+		dt_checker_check(dt);
+		dt_emitter_emit(dt);
+	}
 
 	dt_cleanup(dt, dt->error_flag);
 
-	return 0;
+	return err ? EXIT_FAILURE : 0;
 }

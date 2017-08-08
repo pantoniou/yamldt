@@ -126,6 +126,7 @@ struct yaml_dt_config {
 	/* for checkers */
 	const char *schema;
 	const char *schema_save;
+	const char *codegen;
 };
 
 struct input {
@@ -171,6 +172,11 @@ struct yaml_dt_checker {
 };
 
 struct yaml_dt_state {
+	struct yaml_dt_state *parent;
+	struct list_head node;
+	char *name;
+	struct list_head children;
+
 	struct yaml_dt_config cfg;
 	char *input_compiler_tag;
 	char *output_compiler_tag;
@@ -204,6 +210,7 @@ struct yaml_dt_state {
 	int bare_map;
 
 	/* emitter data */
+	bool error_on_failed_get;
 	bool error_flag;
 
 	/* tree build state (initialized by the emitter) */
@@ -219,6 +226,26 @@ struct yaml_dt_state {
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)
 #define to_tree(_dt)	(&(_dt)->tree)
+
+static inline bool dt_get_error_flag(struct yaml_dt_state *dt)
+{
+	return dt->error_flag;
+}
+
+static inline void dt_set_error_flag(struct yaml_dt_state *dt, bool error)
+{
+	dt->error_flag = error;
+}
+
+static inline bool dt_get_error_on_failed_get(struct yaml_dt_state *dt)
+{
+	return dt->error_on_failed_get;
+}
+
+static inline void dt_set_error_on_failed_get(struct yaml_dt_state *dt, bool error)
+{
+	dt->error_on_failed_get = error;
+}
 
 void dt_debug(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
@@ -274,9 +301,31 @@ void yaml_dt_tree_error_at_ref(struct tree *t, struct ref *ref,
 
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker);
-void dt_parse(struct yaml_dt_state *dt);
+int dt_parse(struct yaml_dt_state *dt);
+int dt_emitter_emit(struct yaml_dt_state *dt);
+int dt_checker_check(struct yaml_dt_state *dt);
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal);
 
+struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
+		const char *input, const char *output, const char *name);
 int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref);
+
+struct node *dt_get_node(struct yaml_dt_state *dt,
+			    struct node *parent, const char *name,
+			    int index);
+struct property *dt_get_property(struct yaml_dt_state *dt,
+			    struct node *np, const char *name,
+			    int index);
+struct ref *dt_get_ref(struct yaml_dt_state *dt,
+		struct property *prop, int index);
+const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex);
+unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex, int *error);
+int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
+		 const char *name, int pindex, int rindex);
+
+struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
+			     const char *name, int pindex, int rindex);
 
 #endif

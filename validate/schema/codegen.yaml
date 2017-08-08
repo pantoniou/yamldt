@@ -1,0 +1,116 @@
+# settings for validator code generator
+
+input-tag: "!filter"
+output-tag: "!ebpf"
+compiler: clang-5.0
+cflags: "-x c -ffreestanding -target bpf -O2 -c -o - -"
+common:
+  prolog: |
+    #include <stdint.h>
+    struct node;
+    #define int_eq(_p, _v) (get_int(_p) == (_v))
+    #define int_ne(_p, _v) (get_int(_p) != (_v))
+    #define int_lt(_p, _v) (get_int(_p) <  (_v))
+    #define int_gt(_p, _v) (get_int(_p) >  (_v))
+    #define int_le(_p, _v) (get_int(_p) <= (_v))
+    #define int_ge(_p, _v) (get_int(_p) >= (_v))
+    
+    #define uint_eq(_p, _v) (get_uint(_p) == (_v))
+    #define uint_ne(_p, _v) (get_uint(_p) != (_v))
+    #define uint_lt(_p, _v) (get_uint(_p) <  (_v))
+    #define uint_gt(_p, _v) (get_uint(_p) >  (_v))
+    #define uint_le(_p, _v) (get_uint(_p) <= (_v))
+    #define uint_ge(_p, _v) (get_uint(_p) >= (_v))
+    
+    #define str_eq(_p, _v) (!strcmp(get_str(_p), (_v)))
+    #define str_ne(_p, _v) ( strcmp(get_str(_p), (_v)))
+    
+    #define strseq_anyeq(_v) (!any_strcmp(get_strseq(_p), (_v)))
+    #define strseq_anyne(_v) ( any_strcmp(get_strseq(_p), (_v)))
+  epilog: |
+    /* nothing */
+node:
+  select:
+    entry: select
+    prolog: |+
+      /* prolog for ${NODE_NAME} */
+      int select(struct node *np)
+      {
+          bool exists;
+
+    epilog: |+
+
+      /* comment here due to YAML formatting */
+          return 0;
+      }
+  check:
+    entry: check
+    prolog: |+
+      /* prolog for ${NODE_NAME} */
+      int check(struct node *np)
+      {
+          bool exists;
+
+    epilog: |+
+      /* comment here due to YAML formatting */
+          return 0;
+      }
+property:
+  check:
+    prolog: |+
+      /* for ${PROPERTY_NAME} */
+      if (!(
+    epilog: |+
+      ))
+          return -1;
+    types:
+      int:
+        prolog: |+
+          {
+          const int v = get_int(np, "${PROPERTY_NAME}", &exists);
+
+        epilog: |+
+          }
+      uint:
+        prolog: |+
+          {
+          const unsigned int v = get_uint(np, "${PROPERTY_NAME}", &exists);
+        epilog: +
+          }
+      str:
+        prolog: |+
+          {
+          const char *v = get_str(np, "${PROPERTY_NAME}", &exists);
+
+        epilog: |+
+          }
+      bool:
+        prolog: |+
+          {
+          const char *v = get_str(np, "${PROPERTY_NAME}", &exists);
+
+        epilog: |+
+          }
+      strseq:
+        prolog: |+
+          {
+          const char **v = get_strseq(np, "${PROPERTY_NAME}", &exists);
+
+        epilog: |+
+          }
+    categories:
+      required:
+        prolog: |+
+          if (!exists)
+              return -1;
+
+        epilog: |+
+
+      optional:
+        prolog: |+
+          if (!exists)
+              goto skip_${PROPERTY_INDEX};
+
+        epilog: |+
+          skip_${PROPERTY_INDEX}:
+

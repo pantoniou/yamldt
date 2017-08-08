@@ -1,0 +1,12 @@
+%YAML 1.1
+---
+device-enabled:
+  title: Contraint for enabled devices
+
+  properties:
+    status: &device-status-enabled
+      category: optional
+      type: str
+      description: Marks device state as enabled
+      constraint: |
+        !exists || streq(v, "okay") || streq(v, "ok")

@@ -33,6 +33,7 @@
  */
 #include "config.h"
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -57,122 +58,275 @@
 #include "dtbcheck.h"
 #include "yamlgen.h"
 
-#define DEFAULT_COMPILER "clang-5.0"
-#define DEFAULT_CFLAGS "-x c -target bpf -O2 -c -o - -"
+struct frag {
+	struct list_head node;
+	const char *template;
+	int indent;
+	char *text;
+};
+
+struct var {
+	const char *name;
+	const char *value;
+};
 
 struct dtb_check_state {
 	/* copy from config */
 	const char *schema;
 	const char *schema_save;
+	const char *codegen;
+
 	/* schema loading */
-	struct yaml_dt_config cfg;
-	struct yaml_dt_state dt;
+	struct yaml_dt_state *sdt;
+
+	/* codegen */
+	struct yaml_dt_state *cgdt;
+	struct node *cgpnp_check;
+
+	const char *input_tag;
+	const char *output_tag;
+	const char *compiler;
+	const char *cflags;
+
+	struct node *cg_common;	/* -> common: */
+	const char *cg_common_prolog;
+	const char *cg_common_epilog;
+	struct node *cg_node;	/* -> node: */
+	struct node *cg_node_select;
+	struct node *cg_node_check;
+	const char *cg_node_select_prolog;
+	const char *cg_node_select_epilog;
+	const char *cg_node_check_prolog;
+	const char *cg_node_check_epilog;
+	struct node *cg_property;	/* -> property: */
+	struct node *cg_property_check;
+	const char *cg_property_check_prolog;
+	const char *cg_property_check_epilog;
+	struct node *cg_property_check_types;
+	struct node *cg_property_check_categories;
 };
 
 #define to_dtbchk(_dt) ((struct dtb_check_state *)(_dt)->checker_state)
 
-struct property *get_first_named_property(struct node *np, const char *name)
+int output_frag(struct yaml_dt_state *dt, const struct var *vars, FILE *fp,
+		const char *template, int indent)
 {
-	struct property *prop;
+	const char *s, *e, *le, *var;
+	char c;
+	int i, varlen;
+	enum {
+		normal,
+		escape,
+		dollar,
+		left_brace,
+		variable,
+	} state;
 
-	list_for_each_entry(prop, &np->properties, node)
-		if (!strcmp(name, prop->name))
-			return prop;
-	return NULL;
-}
+	s = template;
+	e = s + strlen(s);
 
-struct ref *get_ref_at(struct property *prop, int idx)
-{
-	struct ref *ref;
+	while (s < e) {
+		le = strchr(s, '\n');
+		if (!le)
+			le = e;
+		fprintf(fp, "%*s", indent * 4, "");
 
-	list_for_each_entry(ref, &prop->refs, node) {
-		if (idx-- == 0)
-			return ref;
+		state = normal;
+		var = NULL;
+		while ((c = *s) && s < le) {
+			switch (state) {
+			case normal:
+				if (c == '\\') {
+					state = escape;
+					break;
+				}
+				if (c == '$') {
+					state = dollar;
+					break;
+				}
+				fputc(c, fp);
+				break;
+			case escape:
+				if (c == '$') {
+					fputc('$', fp);
+					state = normal;
+					break;
+				}
+				fputc('\\', fp);
+				fputc(c, fp);
+				state = normal;
+				break;
+			case dollar:
+				if (c != '{') {
+					dt_fatal(dt, "Illegal $ escape\n");
+					return -1;
+				}
+				state = left_brace;
+				break;
+			case left_brace:
+				state = variable;
+				var = s;
+				break;
+			case variable:
+				if (c != '}')
+					break;
+				varlen = s - var;
+				for (i = 0; vars && vars[i].name; i++) {
+					if (strlen(vars[i].name) == varlen &&
+						!memcmp(vars[i].name, var, varlen))
+						break;
+				}
+				if (!vars || !vars[i].name) {
+					char *vartmp = alloca(varlen + 1);
+					memcpy(vartmp, var, varlen);
+					vartmp[varlen] = '\0';
+					dt_fatal(dt, "Illegal variable: %s\n", vartmp);
+					return -1;
+				}
+				fputs(vars[i].value, fp);
+				var = NULL;
+				state = normal;
+				break;
+			}
+			s++;
+		}
+		if (state != normal) {
+			dt_fatal(dt, "Bad line state\n");
+			return -1;
+		}
+
+		fputc('\n', fp);
+
+		s = le;
+		if (le < e)
+			s++;
 	}
-	return NULL;
+	return 0;
 }
 
-struct ref *get_first_named_property_ref_at(struct node *np, const char *name, int idx)
-{
-	struct property *prop;
-
-	prop = get_first_named_property(np, name);
-	if (!prop)
-		return NULL;
-
-	return get_ref_at(prop, idx);
-}
-
-struct ref *get_first_named_property_ref_at_with_tag(struct node *np, const char *name, int idx, const char *tag)
-{
-	struct property *prop;
-	struct ref *ref;
-
-	prop = get_first_named_property(np, name);
-	if (!prop)
-		return NULL;
-
-	ref = get_ref_at(prop, idx);
-	if (!ref)
-		return NULL;
-	if (ref->xtag && strcmp(ref->xtag, tag))
-		return NULL;
-	return ref;
-}
-
-bool ref_str_eq(struct ref *ref, const char *str)
-{
-	if (ref->xtag && strcmp(ref->xtag, "!str"))
-		return false;
-	if (strlen(str) != ref->len)
-		return false;
-	return strlen(str) == ref->len && !memcmp(ref->data, str, ref->len);
-}
-
-#if 0
-bool ref_int_eq(struct ref *ref, long long val)
-{
-	if (ref->xtag && strcmp(ref->xtag, "!int"))
-		return false;
-	return strlen(str) == ref->len && !memcpy(ref->data, str, ref->len);
-}
-#endif
 
 static int prepare_schema_property(struct yaml_dt_state *dt,
-		struct yaml_dt_state *cdt, struct node *np)
+		struct yaml_dt_state *sdt, struct node *np)
 {
-	struct ref *type, *category, *constraint;
-
 	fprintf(stderr, "Preparing property %s of schema node: %s\n",
 			np->name, np->parent->parent->name);
-
-	type = get_first_named_property_ref_at(np, "type", 0);
-	category = get_first_named_property_ref_at(np, "category", 0);
-	constraint = get_first_named_property_ref_at(np, "constraint", 0);
-
-	(void)constraint;
-
-	if (!type || !category) {
-		tree_error_at_node(to_tree(cdt), np,
-				"Missing schema properties\n");
-		return -1;
-	}
 
 	return 0;
 }
 
 static int prepare_schema_node(struct yaml_dt_state *dt,
-		struct yaml_dt_state *cdt, struct node *np)
+		struct yaml_dt_state *sdt, struct node *np)
 {
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *cgdt = dtbchk->cgdt;
 	struct node *npp, *npp2;
-	int ret;
+	struct property *prop;
+	struct ref *ref;
+	/* char namebuf[NODE_FULLNAME_MAX]; */
+	const char *constraint;
+	int ret, i, idx;
+	struct list_head frags;
+	const char *type_prolog, *type_epilog;
+	const char *category_prolog, *category_epilog;
+	struct node *nptype, *npcategory;
+	char idxbuf[9];
+	struct var vars[4];
+	char *buf;
+	size_t size;
+	FILE *fp;
+	bool first;
 
 	fprintf(stderr, "Preparing schema node: %s\n", np->name);
+
+	INIT_LIST_HEAD(&frags);
+
+	/* open memstream */
+	fp = open_memstream(&buf, &size);
+	assert(fp);
+
+	first = true;
+	idx = 0;
+	for (i = 0; (npp = dt_get_noderef(sdt, np, "selected", 0, i)) != NULL; i++) {
+		constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
+		if (!constraint)
+			continue;
+
+		/* lookup failures are errors */
+		dt_set_error_on_failed_get(cgdt, true);
+
+		nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
+				dt_get_string(cgdt, npp, "type", 0, 0), 0);
+		type_prolog = dt_get_string(cgdt, nptype, "prolog", 0, 0);
+		type_epilog = dt_get_string(cgdt, nptype, "epilog", 0, 0);
+
+		npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
+				dt_get_string(cgdt, npp, "category", 0, 0), 0);
+		category_prolog = dt_get_string(cgdt, npcategory, "prolog", 0, 0);
+		category_epilog = dt_get_string(cgdt, npcategory, "epilog", 0, 0);
+
+		/* lookup failures are no more errors */
+		dt_set_error_on_failed_get(cgdt, false);
+
+		if (cgdt->error_flag)
+			dt_fatal(cgdt, "Bad codegen configuration\n");
+
+		/* setup the variables to expand */
+		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
+		idxbuf[sizeof(idxbuf) - 1] = '\0';
+		vars[0].name = "NODE_NAME";
+		vars[0].value = np->name;
+		vars[1].name = "PROPERTY_NAME";
+		vars[1].value = npp->name;
+		vars[2].name = "PROPERTY_INDEX";
+		vars[2].value = idxbuf;
+		vars[3].name = NULL;
+		vars[3].value = NULL;
+
+		/* prolog */
+		if (first) {
+			first = false;
+			output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
+			output_frag(dt, vars, fp, dtbchk->cg_node_select_prolog, 0);
+		}
+
+		output_frag(dt, vars, fp, type_prolog, 1);
+		output_frag(dt, vars, fp, category_prolog, 1);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
+		output_frag(dt, vars, fp, constraint, 2);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
+		output_frag(dt, vars, fp, category_epilog, 1);
+		output_frag(dt, vars, fp, type_epilog, 1);
+
+		idx++;
+	}
+
+	if (!first) {
+		output_frag(dt, vars, fp, dtbchk->cg_node_select_epilog, 0);
+		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
+	}
+	fclose(fp);
+
+	if (size) {
+		fprintf(stderr, "%s\n", buf);
+
+		/* add the source */
+		prop = prop_alloc(to_tree(sdt), "selected-rule-source");
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
+		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size, dtbchk->input_tag);
+		ref->prop = prop;
+		list_add_tail(&ref->node, &prop->refs);
+
+		dt_resolve_ref(sdt, ref);
+	}
+
+	free(buf);
 
 	list_for_each_entry(npp, &np->children, node) {
 		if (!strcmp(npp->name, "properties")) {
 			list_for_each_entry(npp2, &npp->children, node) {
-				ret = prepare_schema_property(dt, cdt, npp2);
+				ret = prepare_schema_property(dt, sdt, npp2);
 				if (ret)
 					return ret;
 			}
@@ -185,13 +339,13 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 static int prepare_schema(struct yaml_dt_state *dt)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *cdt = &dtbchk->dt;	
+	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *root, *np;
 
-	root = tree_root(to_tree(cdt));
+	root = tree_root(to_tree(sdt));
 
 	list_for_each_entry(np, &root->children, node)
-		prepare_schema_node(dt, cdt, np);
+		prepare_schema_node(dt, sdt, np);
 
 	return 0;
 }
@@ -199,10 +353,8 @@ static int prepare_schema(struct yaml_dt_state *dt)
 int dtbchk_setup(struct yaml_dt_state *dt)
 {
 	struct dtb_check_state *dtbchk;
-	struct yaml_dt_state *cdt;
-	struct yaml_dt_config *ccfg;
-	char *argv[2];
-	FILE *fp;
+	struct yaml_dt_state *cgdt;
+	struct node *cgroot;
 	int err;
 
 	dtbchk = malloc(sizeof(*dtbchk));
@@ -211,46 +363,77 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 
 	dtbchk->schema = dt->cfg.schema;
 	dtbchk->schema_save = dt->cfg.schema_save;
+	dtbchk->codegen = dt->cfg.codegen;
 
 	dt->checker_state = dtbchk;
 
-	dt_debug(dt, "DTB checker configuration:\n");
-	dt_debug(dt, " schema     = %s\n", dtbchk->schema);
-	dt_debug(dt, " schema-save= %s\n", dtbchk->schema_save ? : "<NONE>");
+	if (!dtbchk->schema)
+		dt_fatal(dt, "No schema file provided\n");
 
-	fprintf(stderr, "parsing schema file...\n");
-	cdt = &dtbchk->dt;	
-	ccfg = &dtbchk->cfg;	
-	ccfg->debug = dt->cfg.debug;
-	ccfg->output_file = "/dev/null";
+	if (!dtbchk->codegen)
+		dt_fatal(dt, "No codegen file provided\n");
 
-	argv[0] = (char *)dtbchk->schema;
-	argv[1] = NULL;
-	ccfg->input_file = argv;
-	ccfg->input_file_count = 1;
+	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema,
+			dtbchk->schema_save, "schema");
+	if (!dtbchk->sdt)
+		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
 
-	err = dt_setup(cdt, ccfg, &null_emitter, &null_checker);
-	if (err)
-		dt_fatal(dt, "Unable to setup schema parser\n");
+	dtbchk->cgdt = dt_parse_single(dt, dtbchk->codegen, NULL, "codegen");
+	if (!dtbchk->cgdt)
+		dt_fatal(dt, "Couldn't parse codegen file %s\n", dtbchk->schema);
 
-	dt_parse(cdt);
+	cgdt = dtbchk->cgdt;
+	cgroot = tree_root(to_tree(cgdt));
+
+	/* lookup failures are errors */
+	dt_set_error_on_failed_get(cgdt, true);
+
+	dtbchk->input_tag = dt_get_string(cgdt, cgroot, "input-tag", 0, 0);
+	dtbchk->output_tag = dt_get_string(cgdt, cgroot, "output-tag", 0, 0);
+	dtbchk->compiler = dt_get_string(cgdt, cgroot, "compiler", 0, 0);
+	dtbchk->cflags = dt_get_string(cgdt, cgroot, "cflags", 0, 0);
+
+	dtbchk->cg_common = dt_get_node(cgdt, cgroot, "common", 0);
+	dtbchk->cg_common_prolog = dt_get_string(cgdt, dtbchk->cg_common, "prolog", 0, 0);
+	dtbchk->cg_common_epilog = dt_get_string(cgdt, dtbchk->cg_common, "epilog", 0, 0);
+
+	dtbchk->cg_node = dt_get_node(cgdt, cgroot, "node", 0);
+	dtbchk->cg_node_select = dt_get_node(cgdt, dtbchk->cg_node, "select", 0);
+	dtbchk->cg_node_check = dt_get_node(cgdt, dtbchk->cg_node, "check", 0);
+	dtbchk->cg_node_select_prolog = dt_get_string(cgdt, dtbchk->cg_node_select, "prolog", 0, 0);
+	dtbchk->cg_node_select_epilog = dt_get_string(cgdt, dtbchk->cg_node_select, "epilog", 0, 0);
+	dtbchk->cg_node_check_prolog = dt_get_string(cgdt, dtbchk->cg_node_check, "prolog", 0, 0);
+	dtbchk->cg_node_check_epilog = dt_get_string(cgdt, dtbchk->cg_node_check, "epilog", 0, 0);
+
+	dtbchk->cg_property = dt_get_node(cgdt, cgroot, "property", 0);
+	dtbchk->cg_property_check = dt_get_node(cgdt, dtbchk->cg_property, "check", 0);
+	dtbchk->cg_property_check_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "prolog", 0, 0);
+	dtbchk->cg_property_check_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "epilog", 0, 0);
+
+	dtbchk->cg_property_check_types = dt_get_node(cgdt, dtbchk->cg_property_check, "types", 0);
+	dtbchk->cg_property_check_categories = dt_get_node(cgdt, dtbchk->cg_property_check, "categories", 0);
+
+	if (cgdt->error_flag)
+		dt_fatal(cgdt, "Could not find codegen data\n");
+
+	dt_set_error_on_failed_get(cgdt, false);
 
 	err = prepare_schema(dt);
 	if (err)
 		dt_fatal(dt, "Failed to prepare schema\n");
 
-	if (dtbchk->schema_save) {
-		fp = fopen(dtbchk->schema_save, "wa");
-		if (!fp)
-			dt_fatal(dt, "Failed to open schema intermediate file %s\n",
-					dtbchk->schema_save);
-		yaml_flatten_node(to_tree(cdt), fp, false, NULL, NULL, NULL, NULL);
+	if (dtbchk->schema_save)
+		dt_emitter_emit(dtbchk->sdt);
 
-		fclose(fp);
-	}
-
-	if (cdt->error_flag)
-		dt_fatal(dt, "Unable to parse schema\n");
+	dt_debug(dt, "DTB checker configuration:\n");
+	dt_debug(dt, " schema      = %s\n", dtbchk->schema);
+	dt_debug(dt, " schema-save = %s\n", dtbchk->schema_save ? : "<NONE>");
+	dt_debug(dt, " codegen     = %s\n", dtbchk->codegen ? : "<NONE>");
+	dt_debug(dt, "-----------------\n");
+	dt_debug(dt, " input-tag   = %s\n", dtbchk->input_tag);
+	dt_debug(dt, " output-tag  = %s\n", dtbchk->output_tag);
+	dt_debug(dt, " compiler    = %s\n", dtbchk->compiler);
+	dt_debug(dt, " cflags      = %s\n", dtbchk->cflags);
 
 	return 0;
 }
@@ -258,13 +441,8 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 void dtbchk_cleanup(struct yaml_dt_state *dt)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *cdt;
 
-	/* cleanup schema */
-	cdt = &dtbchk->dt;	
-	dt_cleanup(cdt, cdt->error_flag);
-
-	memset(dtbchk, 0, sizeof(*dtbchk));
+	/* the children parsers are automatically cleaned */
 	free(dtbchk);
 }
 
@@ -283,8 +461,8 @@ static void check_node(struct yaml_dt_state *dt,
 		       struct node *np)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *cdt = &dtbchk->dt;
-	struct node *snp, *sroot = tree_root(to_tree(cdt));
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *snp, *sroot = tree_root(to_tree(sdt));
 	struct node *child;
 
 	/* check each rule in the root */

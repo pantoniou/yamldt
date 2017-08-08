@@ -15,12 +15,11 @@ uint64_t in_bss __attribute__((section(".bss")));
 
 uint64_t entry(void *foo)
 {
-	uint64_t i;
-	uint64_t j;
+		uint64_t i;
+		uint64_t j;
 
-	j = foo ? *(uint64_t *)foo : 10;
-	for (i = 0; i < j; i++)
-		bpf_printf("Hello %s %d %s %d\n", "world", 12 + i, "multiple", 14);
-
-	return 1;
+		j = foo ? *(uint64_t *)foo : 10;
+		for (i = 0; i < j; i++)
+				bpf_printf("Hello %s %d %s %d\n", "world", 12 + i, "multiple", 14);
+		return 1;
 }

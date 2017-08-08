@@ -223,15 +223,69 @@ static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
 struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len)
 {
-	assert(t && label);
-
-	if (!t->root)
+	if (!t || !label)
 		return NULL;
 
 	if (len < 0)
 		len = strlen(label);
 
 	return __node_lookup_by_label(t, t->root, label, len);
+}
+
+struct node *node_get_child_by_name(struct tree *t,
+			    struct node *np, const char *name,
+			    int index)
+{
+	struct node *child;
+
+	if (!t || !np || !name)
+		return NULL;
+
+	list_for_each_entry(child, &np->children, node) {
+		if (strcmp(child->name, name))
+			continue;
+		if (index == 0)
+			return child;
+		index--;
+	}
+	return NULL;
+}
+
+struct property *prop_get_by_name(struct tree *t,
+		struct node *np, const char *name,
+		int index)
+{
+	struct property *prop;
+
+	if (!t || !np || !name)
+		return NULL;
+
+	list_for_each_entry(prop, &np->properties, node) {
+		if (strcmp(prop->name, name))
+			continue;
+		if (index == 0)
+			return prop;
+		index--;
+	}
+	return NULL;
+}
+
+struct ref *ref_get_by_index(struct tree *t,
+		struct property *prop, int index)
+{
+	struct ref *ref;
+
+	if (!t || !prop)
+		return NULL;
+
+	list_for_each_entry(ref, &prop->refs, node) {
+		if (ref->type == r_seq_start || ref->type == r_seq_end)
+			continue;
+		if (index == 0)
+			return ref;
+		index--;
+	}
+	return NULL;
 }
 
 const char *dn_fullname_multi(struct node *np, char **buf, int *size)
