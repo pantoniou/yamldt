@@ -61,9 +61,14 @@
 
 #include "ebpf.h"
 
+#include "dt.h"
+#include "nullgen.h"
+#include "nullcheck.h"
+
 static struct option opts[] = {
-	{ "help",	no_argument, 0, 'h' },
-	{ "debug",	no_argument, 0, 'd' },
+	{ "check",	required_argument, 0, 'c' },
+	{ "help",	no_argument,       0, 'h' },
+	{ "debug",	no_argument,       0, 'd' },
 	{0, 0, 0, 0}
 };
 
@@ -178,7 +183,7 @@ static uint64_t bpf_get_strseq(uint64_t arg0, uint64_t arg1,
 	return 0;
 }
 
-static uint64_t bpf_get_streq(uint64_t arg0, uint64_t arg1,
+static uint64_t bpf_streq(uint64_t arg0, uint64_t arg1,
 			     uint64_t arg2, uint64_t arg3,
 			     uint64_t arg4, struct ebpf_ctx *ctx)
 {
@@ -243,6 +248,8 @@ void bpf_debug(void *arg, const char *fmt, ...)
 
 int main(int argc, char *argv[])
 {
+	struct yaml_dt_state dt_state, *dt = &dt_state;
+	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
 	int cc, option_index = 0;
 	struct stat st;
 	size_t filesz, nread;
@@ -250,13 +257,18 @@ int main(int argc, char *argv[])
 	FILE *fp;
 	char *filename;
 	bool debug = false;
+	char *check = NULL;
 	struct ebpf_vm vm;
 	uint64_t ret;
 	int err;
+	char *dtargv[2];
 
 	while ((cc = getopt_long(argc, argv,
-			"dh?", opts, &option_index)) != -1) {
+			"c:dh?", opts, &option_index)) != -1) {
 		switch (cc) {
+		case 'c':
+			check = optarg;
+			break;
 		case 'd':
 			debug = true;
 			break;
@@ -308,12 +320,42 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	ret = ebpf_exec(&vm, NULL, 0, &err);
+	if (!check) {
+		ret = ebpf_exec(&vm, NULL, 0, &err);
 
-	if (err)
-		fprintf(stderr, "Error code: %d (%s)\n", err, strerror(-err));
+		if (err)
+			fprintf(stderr, "Error code: %d (%s)\n", err, strerror(-err));
+		printf("Execution returns 0x%" PRIx64 "\n", ret);
 
-	printf("Execution returns 0x%" PRIx64 "\n", ret);
+	} else {
+		memset(dt, 0, sizeof(*dt));
+		memset(cfg, 0, sizeof(*cfg));
+		cfg->debug = debug;
+
+		dtargv[0] = check;
+		dtargv[1] = NULL;
+
+		cfg->input_file = dtargv;
+		cfg->input_file_count = 1;
+
+		err = dt_setup(dt, cfg, &null_emitter, &null_checker);
+		if (err) {
+			fprintf(stderr, "Failed to setup parser\n");
+			return EXIT_FAILURE;
+		}
+
+		err = dt_parse(dt);
+
+		if (err) {
+			fprintf(stderr, "Failed to parse\n");
+			dt_cleanup(dt, true);
+			return EXIT_FAILURE;
+		}
+
+		fprintf(stderr, "Now run filter!\n");
+
+		dt_cleanup(dt, false);
+	}
 
 	ebpf_cleanup(&vm);
 

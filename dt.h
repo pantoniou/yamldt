@@ -1,5 +1,5 @@
 /*
- * yamldt.h - YAML DT header
+ * dt.h - DT header for methods
  *
  * YAML to DTB generator
  *
@@ -34,8 +34,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef YAMLDT_H
-#define YAMLDT_H
+#ifndef DT_H
+#define DT_H
 
 #include "config.h"
 

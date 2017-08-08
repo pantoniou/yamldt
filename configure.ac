@@ -51,9 +51,9 @@ else
 	AC_MSG_RESULT([not found])
 fi
 
-AC_CHECK_HEADERS([elf.h], [has_ELF_H=yes], [has_ELF_H=no])
+AC_CHECK_HEADERS([elf.h], [has_ELF_H=true], [has_ELF_H=true])
 
-if test x$has_ELF_H = xyes; then
+if test x$has_ELF_H = xtrue; then
 	AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
 	AC_ARG_VAR([LIBELF_CFLAGS], "")
 	AC_ARG_VAR([LIBELF_LIBS], "")
@@ -91,7 +91,7 @@ fi
 
 # check if we can execute ebpf
 AC_MSG_CHECKING([whether we can execute ebpf programs])
-AM_CONDITIONAL([EXEC_EBPF], [test x$have_libelf = xtrue])
+AM_CONDITIONAL([EXEC_EBPF], [test x$have_libelf = xtrue -o x$has_ELF_H = xtrue])
 AM_COND_IF([EXEC_EBPF], [can_EXEC_EBPF=yes], [can_EXEC_EBPF=no])
 AC_MSG_RESULT([$can_EXEC_EBPF])
 

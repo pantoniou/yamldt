@@ -60,7 +60,7 @@
 #include "utils.h"
 #include "syexpr.h"
 
-#include "yamldt.h"
+#include "dt.h"
 
 #include "dtbgen.h"
 

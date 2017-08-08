@@ -45,7 +45,7 @@
 
 #include "utils.h"
 
-#include "yamldt.h"
+#include "dt.h"
 
 struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const void *data, int len,
