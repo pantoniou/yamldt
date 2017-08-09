@@ -23,22 +23,25 @@ common:
     struct property;
     struct ref;
 
+    /* flags when getting */
+    #define EXISTS 1
+    #define BADTYPE 2
     static int (*callback)(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) =
             (void *) 1;
 
     static int (*bpf_printf)(const char *fmt, ...) =
             (void *) 2;
 
-    static int64_t (*get_int)(struct node *np, const char *name, bool *existsp) = 
+    static int64_t (*get_int)(struct node *np, const char *name, uint64_t *flagsp) = 
             (void *) 3;
 
-    static bool (*get_bool)(struct node *np, const char *name, bool *existsp) = 
+    static bool (*get_bool)(struct node *np, const char *name, uint64_t *flagsp) = 
             (void *) 4;
 
-    static const char *(*get_str)(struct node *np, const char *name, bool *existsp) = 
+    static const char *(*get_str)(struct node *np, const char *name, uint64_t *flagsp) = 
             (void *) 5;
 
-    static const char **(*get_strseq)(struct node *np, const char *name, bool *existsp) = 
+    static const char **(*get_strseq)(struct node *np, const char *name, uint64_t *flagsp) = 
             (void *) 6;
 
     static bool (*streq)(const char *str1, const char *str2) =
@@ -50,7 +53,7 @@ common:
     static struct node *(*get_parent)(struct node *np) =
             (void *) 9;
 
-    static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
+    static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, uint64_t *flagsp) =
             (void *) 10;
 
   epilog: |
@@ -63,7 +66,6 @@ node:
       /* prolog for ${NODE_NAME} */
       int select(struct node *np)
       {
-          bool exists;
 
     epilog: |+
 
@@ -76,7 +78,6 @@ node:
       /* prolog for ${NODE_NAME} */
       int check(struct node *np)
       {
-          bool exists;
 
     epilog: |+
       /* comment here due to YAML formatting */
@@ -86,52 +87,72 @@ property:
   check:
     prolog: |+
       /* for ${PROPERTY_NAME} from ${RULE_NAME} rule */
+      if (badtype)
+          return -3000 - ${PROPERTY_INDEX};
       if (!(
     epilog: |+
       ))
-        return -1000 - ${PROPERTY_INDEX};
+          return -1000 - ${PROPERTY_INDEX};
     types:
       int:
         prolog: |+
           {
-          const int64_t v = get_int(np, "${PROPERTY_NAME}", &exists);
+          uint64_t flags;
+          const int64_t v = get_int(np, "${PROPERTY_NAME}", &flags);
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: |+
           }
       uint:
         prolog: |+
           {
-          const unsigned int v = get_uint(np, "${PROPERTY_NAME}", &exists);
+          uint64_t flags;
+          const unsigned int v = get_uint(np, "${PROPERTY_NAME}", &flags);
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: +
           }
       str:
         prolog: |+
           {
-          const char *v = get_str(np, "${PROPERTY_NAME}", &exists);
+          uint64_t flags;
+          const char *v = get_str(np, "${PROPERTY_NAME}", &flags);
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: |+
           }
       bool:
         prolog: |+
           {
-          const char *v = get_str(np, "${PROPERTY_NAME}", &exists);
+          uint64_t flags;
+          const char *v = get_str(np, "${PROPERTY_NAME}", &flags);
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: |+
           }
       strseq:
         prolog: |+
           {
-          const char **v = get_strseq(np, "${PROPERTY_NAME}", &exists);
+          uint64_t flags;
+          const char **v = get_strseq(np, "${PROPERTY_NAME}", &flags);
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: |+
           }
       intseq:
         prolog: |+
           {
+          uint64_t flags;
           int64_t temp_count;
-          const int64_t *v = get_intseq(np, "${PROPERTY_NAME}", &temp_count, &exists);
+          const int64_t *v = get_intseq(np, "${PROPERTY_NAME}", &temp_count, &flags);
           const int64_t count = temp_count;
+          const bool badtype = !!(flags & BADTYPE);
+          const bool exists = !!(flags & EXISTS);
 
         epilog: |+
           }

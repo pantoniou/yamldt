@@ -66,6 +66,9 @@
 
 #include "ebpf_dt.h"
 
+#define EXISTS 1
+#define BADTYPE 2
+
 uint64_t epbf_dt_lazy_func(uint64_t arg0, uint64_t arg1, uint64_t arg2,
 			  uint64_t arg3, uint64_t arg4,
 			  struct ebpf_ctx *ctx, const char *funcname)
@@ -203,7 +206,8 @@ static uint64_t bpf_get_int(uint64_t arg0, uint64_t arg1,
 	const char *name = (void *)(intptr_t)arg1;
 	int namelen, err;
 	char namebuf[NODE_FULLNAME_MAX];
-	bool *existsp = (void *)(intptr_t)arg2;
+	uint64_t flags = 0;
+	uint64_t *flagsp = (void *)(intptr_t)arg2;
 	unsigned long long v;
 
 	if (!np)
@@ -213,7 +217,7 @@ static uint64_t bpf_get_int(uint64_t arg0, uint64_t arg1,
 	if (namelen < 0)
 		return ctx->errcode = namelen;
 
-	if (!ebpf_store_check(ctx, existsp, sizeof(bool)))
+	if (!ebpf_store_check(ctx, flagsp, sizeof(*flagsp)))
 		return ctx->errcode = -EFAULT;
 
 	ebpf_debug(vm, "%s %s name=%s\n", __func__,
@@ -222,11 +226,13 @@ static uint64_t bpf_get_int(uint64_t arg0, uint64_t arg1,
 
 	v = dt_get_int(dt, np, name, 0, 0, &err);
 	if (err) {
-		*existsp = false;
-		return 0;
-	}
+		if (dt_get_rcount(dt, np, name, 0))
+			flags |= BADTYPE;
+		v = 0;
+	} else
+		flags |= EXISTS;
 
-	*existsp = true;
+	*flagsp = flags;
 
 	return (uint64_t)v;
 }
@@ -241,7 +247,8 @@ static uint64_t bpf_get_bool(uint64_t arg0, uint64_t arg1,
 	const char *name = (void *)(intptr_t)arg1;
 	int namelen, ret;
 	char namebuf[NODE_FULLNAME_MAX];
-	bool *existsp = (void *)(intptr_t)arg2;
+	uint64_t flags = 0;
+	uint64_t *flagsp = (void *)(intptr_t)arg2;
 
 	if (!np)
 		return ctx->errcode = -EINVAL;
@@ -250,7 +257,7 @@ static uint64_t bpf_get_bool(uint64_t arg0, uint64_t arg1,
 	if (namelen < 0)
 		return ctx->errcode = namelen;
 
-	if (!ebpf_store_check(ctx, existsp, sizeof(bool)))
+	if (!ebpf_store_check(ctx, flagsp, sizeof(*flagsp)))
 		return ctx->errcode = -EFAULT;
 
 	ebpf_debug(vm, "%s %s name=%s\n", __func__,
@@ -259,11 +266,13 @@ static uint64_t bpf_get_bool(uint64_t arg0, uint64_t arg1,
 
 	ret = dt_get_bool(dt, np, name, 0, 0);
 	if (ret < 0) {
-		*existsp = false;
-		return 0;
-	}
+		if (dt_get_rcount(dt, np, name, 0))
+			flags |= BADTYPE;
+		ret = false;
+	} else
+		flags |= EXISTS;
 
-	*existsp = true;
+	*flagsp = flags;
 
 	return (uint64_t)ret;
 }
@@ -278,7 +287,8 @@ static uint64_t bpf_get_str(uint64_t arg0, uint64_t arg1,
 	const char *name = (void *)(intptr_t)arg1;
 	int namelen, err;
 	char namebuf[NODE_FULLNAME_MAX];
-	bool *existsp = (void *)(intptr_t)arg2;
+	uint64_t flags = 0;
+	bool *flagsp = (void *)(intptr_t)arg2;
 	const char *str;
 
 	if (!np)
@@ -288,7 +298,7 @@ static uint64_t bpf_get_str(uint64_t arg0, uint64_t arg1,
 	if (namelen < 0)
 		return ctx->errcode = namelen;
 
-	if (!ebpf_store_check(ctx, existsp, sizeof(bool)))
+	if (!ebpf_store_check(ctx, flagsp, sizeof(*flagsp)))
 		return ctx->errcode = -EFAULT;
 
 	ebpf_debug(vm, "%s %s name=%s\n", __func__,
@@ -297,16 +307,18 @@ static uint64_t bpf_get_str(uint64_t arg0, uint64_t arg1,
 
 	str = dt_get_string(dt, np, name, 0, 0);
 	if (!str) {
-		*existsp = false;
-		return 0;
+		if (dt_get_rcount(dt, np, name, 0))
+			flags |= BADTYPE;
+	} else {
+		flags |= EXISTS;
+
+		/* open window to the pointed string */
+		err = ebpf_open_memory_window(ctx, str, strlen(str) + 1);
+		if (err)
+			return ctx->errcode = -ENOMEM;
 	}
 
-	/* open window to the pointed string */
-	err = ebpf_open_memory_window(ctx, str, strlen(str) + 1);
-	if (err)
-		return ctx->errcode = -ENOMEM;
-
-	*existsp = true;
+	*flagsp = flags;
 
 	ebpf_debug(vm, "v = \"%s\"\n", str);
 
@@ -321,7 +333,8 @@ static uint64_t bpf_get_strseq(uint64_t arg0, uint64_t arg1,
 	struct yaml_dt_state *dt = ctx_to_dt(vm_to_ctx(vm));
 	struct node *np = get_and_verify_node(dt, tree_root(to_tree(dt)), arg0);
 	const char *name = (void *)(intptr_t)arg1;
-	bool *existsp = (void *)(intptr_t)arg2;
+	uint64_t flags = 0;
+	uint64_t *flagsp = (void *)(intptr_t)arg2;
 	int namelen, i, count ,err;
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *s;
@@ -334,7 +347,7 @@ static uint64_t bpf_get_strseq(uint64_t arg0, uint64_t arg1,
 	if (namelen < 0)
 		return ctx->errcode = namelen;
 
-	if (!ebpf_store_check(ctx, existsp, sizeof(bool)))
+	if (!ebpf_store_check(ctx, flagsp, sizeof(*flagsp)))
 		return ctx->errcode = -EFAULT;
 
 	ebpf_debug(vm, "%s %s name=%s\n", __func__,
@@ -348,29 +361,33 @@ static uint64_t bpf_get_strseq(uint64_t arg0, uint64_t arg1,
 
 	/* if no strings are found return nothing */
 	if (count == 0) {
-		*existsp = false;
-		return 0;
-	}
+		if (dt_get_rcount(dt, np, name, 0))
+			flags |= BADTYPE;
+		strv = NULL;
+	} else {
 
-	/* allocate a strv array */
-	strv = ebpf_alloc(ctx, false, sizeof(*strv) * (count + 1));
-	if (!strv)
-		return ctx->errcode = -ENOMEM;
+		flags |= EXISTS;
 
-	/* now fill it in */
-	for (i = 0; i < count; i++) {
-		s = dt_get_string(dt, np, name, 0, i);
-		assert(s);
-
-		/* open window to the pointed string */
-		err = ebpf_open_memory_window(ctx, s, strlen(s) + 1);
-		if (err)
+		/* allocate a strv array */
+		strv = ebpf_alloc(ctx, false, sizeof(*strv) * (count + 1));
+		if (!strv)
 			return ctx->errcode = -ENOMEM;
-		strv[i] = s;
-	}
-	strv[i] = NULL;
 
-	*existsp = true;
+		/* now fill it in */
+		for (i = 0; i < count; i++) {
+			s = dt_get_string(dt, np, name, 0, i);
+			assert(s);
+
+			/* open window to the pointed string */
+			err = ebpf_open_memory_window(ctx, s, strlen(s) + 1);
+			if (err)
+				return ctx->errcode = -ENOMEM;
+			strv[i] = s;
+		}
+		strv[i] = NULL;
+	}
+
+	*flagsp = flags;
 
 	for (i = 0; i < count; i++)
 		ebpf_debug(vm, "v[%d] = \"%s\"\n", i, strv[i]);
@@ -450,10 +467,11 @@ static uint64_t bpf_get_intseq(uint64_t arg0, uint64_t arg1,
 	struct node *np = get_and_verify_node(dt, tree_root(to_tree(dt)), arg0);
 	const char *name = (void *)(intptr_t)arg1;
 	int64_t *countp = (void *)(intptr_t)arg2;
-	bool *existsp = (void *)(intptr_t)arg3;
+	uint64_t flags = 0;
+	uint64_t *flagsp = (void *)(intptr_t)arg3;
 	int namelen, i, count, err;
 	char namebuf[NODE_FULLNAME_MAX];
-	int64_t *intp;
+	int64_t *intp = NULL;
 
 	if (!np || !name)
 		return ctx->errcode = -EINVAL;
@@ -462,34 +480,35 @@ static uint64_t bpf_get_intseq(uint64_t arg0, uint64_t arg1,
 	if (namelen < 0)
 		return ctx->errcode = namelen;
 
-	if (!ebpf_store_check(ctx, countp, sizeof(int64_t)))
+	if (!ebpf_store_check(ctx, countp, sizeof(*countp)))
 		return ctx->errcode = -EFAULT;
 
-	if (!ebpf_store_check(ctx, existsp, sizeof(bool)))
+	if (!ebpf_store_check(ctx, flagsp, sizeof(*flagsp)))
 		return ctx->errcode = -EFAULT;
 
 	ebpf_debug(vm, "%s %s name=%s\n", __func__,
 		dn_fullname(np, namebuf, sizeof(namebuf)),
 		name);
 
+	count = dt_get_rcount(dt, np, name, 0);
+
+	/* if nothing is found return nothing */
+	if (count == 0)
+		goto err_out;
+
 	/* get number of ints that the property contains */
-	for (count = 0; ; count++) {
-		(void)dt_get_int(dt, np, name, 0, count, &err);
+	for (i = 0; i < count; i++) {
+		(void)dt_get_int(dt, np, name, 0, i, &err);
 		if (err < 0) {
-			*existsp = false;
-			return ctx->errcode = err;
+			flags |= BADTYPE;
+			count = 0;
+			goto err_out;
 		}
 			
 		count++;
 	}
 
-	/* if no strings are found return nothing */
-	if (count == 0) {
-		*existsp = false;
-		return 0;
-	}
-
-	/* allocate a strv array */
+	/* allocate a int array */
 	intp = ebpf_alloc(ctx, false, sizeof(*intp) * count);
 	if (!intp)
 		return ctx->errcode = -ENOMEM;
@@ -499,11 +518,14 @@ static uint64_t bpf_get_intseq(uint64_t arg0, uint64_t arg1,
 		intp[i] = dt_get_int(dt, np, name, 0, i, &err);
 		assert(err == 0);
 	}
+	flags |= EXISTS;
+
+err_out:
 
 	*countp = count;
-	*existsp = true;
+	*flagsp = flags;
 
-	for (i = 0; i < count; i++)
+	for (i = 0; intp && i < count; i++)
 		ebpf_debug(vm, "v[%d] = %llu\n", i, intp[i]);
 
 	return (uint64_t)(intptr_t)intp;
