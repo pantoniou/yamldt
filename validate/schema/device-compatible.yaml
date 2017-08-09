@@ -1,0 +1,7 @@
+%YAML 1.1
+---
+device-compatible: &device-compatible
+  title: Contraint for devices with compatible properties
+  # select node for checking when the compatible constraint and
+  # the device status enable constraint are met.
+  selected: [ "compatible", *device-status-enabled ]

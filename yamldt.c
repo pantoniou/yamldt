@@ -83,6 +83,7 @@ static struct option opts[] = {
 	{ "schema",		required_argument, 0, 'S' },
 	{ "schema-save",	required_argument, 0, 'i' },
 	{ "codegen",		required_argument, 0, 'g' },
+	{ "save-temps",		no_argument, 	   0, 'T' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -103,6 +104,7 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "                       (default: " DEFAULT_CFLAGS ")\n"
 "   -t, --compile-tags  Tags to use for compiler input/output markers\n"
 "                       (default: " DEFAULT_TAGS ")\n"
+"   -T, --save-temps    Save temporary files\n"
 "   -c                  Don't resolve references (object mode)\n"
 "   -C, --compatible    Compatible mode\n"
 "   -s, --dts           DTS mode\n"
@@ -209,7 +211,7 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dlvCcysS:i:g:h?", opts, &option_index)) != -1) {
+			"o:dlTvCcysS:i:g:h?", opts, &option_index)) != -1) {
 		switch (cc) {
 		case 'o':
 			cfg->output_file = optarg;
@@ -219,6 +221,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'l':
 			cfg->late = true;
+			break;
+		case 'T':
+			cfg->save_temps = true;
 			break;
 		case 'O':
 			cfg->compiler = optarg;

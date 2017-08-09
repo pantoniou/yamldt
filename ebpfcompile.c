@@ -1,7 +1,7 @@
 /*
- * ebpfrun.c - Tester for the ebpf VM
+ * ebpfcompile.c - Compile a filter
  *
- * Use this to test the EBPF VM
+ * Wrapper over clang
  *
  * (C) Copyright Pantelis Antoniou <pantelis.antoniou@konsulko.com>
  *

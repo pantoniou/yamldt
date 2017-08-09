@@ -92,6 +92,8 @@ struct dt_ref {
 	bool is_unsigned : 1;
 	struct node *npref;	/* r_anchor, r_path */
 	const char *use_label;
+	void *binary;		/* to avoid costly conversions */
+	size_t binary_size;
 };
 #define to_dt_ref(_r) 		container_of(_r, struct dt_ref, r)
 #define to_ref(_ref)		(&(_ref)->r)
@@ -112,6 +114,7 @@ struct yaml_dt_config {
 	const char *compiler;
 	const char *cflags;
 	const char *compiler_tags;
+	bool save_temps;
 
 	/* for dtb & yaml */
 	bool object;
@@ -187,6 +190,7 @@ struct yaml_dt_state {
 	size_t input_alloc;
 	size_t input_lines;
 	struct list_head inputs;
+	char **alloc_argv;
 
 	/* yaml parser state */
 	bool last_was_marker;
@@ -208,6 +212,7 @@ struct yaml_dt_state {
 	bool current_np_ref;
 	int bare_seq;
 	int bare_map;
+	bool stream_ended;
 
 	/* emitter data */
 	bool error_on_failed_get;
@@ -318,12 +323,19 @@ struct property *dt_get_property(struct yaml_dt_state *dt,
 			    int index);
 struct ref *dt_get_ref(struct yaml_dt_state *dt,
 		struct property *prop, int index);
+
+int dt_get_rcount(struct yaml_dt_state *dt, struct node *np,
+		  const char *name, int pindex);
+
 const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex);
 unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex, int *error);
 int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
 		 const char *name, int pindex, int rindex);
+const void *dt_get_binary(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex,
+			  size_t *binary_size);
 
 struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
 			     const char *name, int pindex, int rindex);

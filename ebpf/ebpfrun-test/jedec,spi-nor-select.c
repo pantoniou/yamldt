@@ -1,10 +1,13 @@
 /*
- * select filter method for jedec,spi-nor
+ * filter method for jedec,spi-nor
  *
  */
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifndef NULL
+#define NULL 0
+#endif
 /* never accessed directly but the pointers are valid keys */
 struct node;
 struct property;
@@ -16,7 +19,7 @@ static int (*callback)(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg
 static int (*bpf_printf)(const char *fmt, ...) =
         (void *) 2;
 
-static int (*get_int)(struct node *np, const char *name, bool *existsp) = 
+static int64_t (*get_int)(struct node *np, const char *name, bool *existsp) = 
         (void *) 3;
 
 static bool (*get_bool)(struct node *np, const char *name, bool *existsp) = 
@@ -34,6 +37,12 @@ static bool (*streq)(const char *str1, const char *str2) =
 static bool (*anystreq)(const char **strv, const char *str2) =
         (void *) 8;
 
+static struct node *(*get_parent)(struct node *np) =
+        (void *) 9;
+
+static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
+        (void *) 10;
+
 /* prolog for jedec,spi-nor */
 int select(struct node *np)
 {
@@ -45,7 +54,7 @@ int select(struct node *np)
     if (!exists)
         return -1;
     
-    /* for compatible */
+    /* for compatible from jedec,spi-nor rule */
     if (!(
         anystreq(v,  "at25df321a") ||
         anystreq(v,  "at25df641") ||
@@ -83,7 +92,7 @@ int select(struct node *np)
         anystreq(v,    "w25q128") ||
         anystreq(v,    "w25q256")
     ))
-        return -1;
+      return -1000 - 0;
     
     }
     {
@@ -92,11 +101,11 @@ int select(struct node *np)
     if (!exists)
         goto skip_1;
     
-    /* for status */
+    /* for status from device-compatible rule */
     if (!(
         !exists || streq(v, "okay") || streq(v, "ok")
     ))
-        return -1;
+      return -1000 - 1;
     skip_1:
       do { } while(0); /* fix goto that requires a statement */
     

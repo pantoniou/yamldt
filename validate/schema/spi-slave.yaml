@@ -8,12 +8,14 @@ spi-slave: &spi_slave
   maintainer:
     name: Mark Brown <broonie@kernel.org>
 
+  inherits: *device-compatible
+
   description: >
     SPI (Serial Peripheral Interface) slave bus devices are children of
     a SPI master bus device.
 
-  constraint: |
-    class_of(parent(n), "spi") && is_enabled(n)
+  # constraint: |+
+  #  class_of(parent(n), "spi")
 
   properties:
     reg:
@@ -69,7 +71,7 @@ spi-slave: &spi_slave
     spi-tx-bus-width:
       category: optional
       type: int
-      constraint: eq(v, 1) || eq(v, 2) || eq(v, 4)
+      constraint: v == 1 || v == 2 || v == 4
       description: >
         The bus width(number of data wires) that
         used for MOSI. Defaults to 1 if not present.
@@ -77,7 +79,7 @@ spi-slave: &spi_slave
     spi-rx-bus-width:
       category: optional
       type: int
-      constraint: eq(v, 1) || eq(v, 2) || eq(v, 4)
+      constraint: v == 1 || v == 2 || v == 4
       description: >
         The bus width(number of data wires) that
         used for MISO. Defaults to 1 if not present.

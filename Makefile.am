@@ -23,6 +23,11 @@ yamldt_SOURCES = yamldt.c \
 		 base64.c base64.h
 yamldt_LDADD = -lm $(LIBYAML_LIBS)
 
+if EXEC_EBPF
+yamldt_SOURCES += ebpf.c ebpf.h \
+		  ebpf_dt.c ebpf_dt.h
+endif
+
 intexpr_SOURCES = intexpr.c \
 		  syexpr.c syexpr.h \
 		  utils.c utils.h 
@@ -46,6 +51,7 @@ bin_PROGRAMS += ebpfrun ebpfcompile
 ebpfrun_CFLAGS = $(LIBELF_CFLAGS) $(LIBYAML_CFLAGS)
 ebpfrun_SOURCES = ebpfrun.c \
 		  ebpf.c ebpf.h \
+		  ebpf_dt.c ebpf_dt.h \
 		  utils.c utils.h \
 		  dt.c dt.h \
 		  tree.c tree.h \

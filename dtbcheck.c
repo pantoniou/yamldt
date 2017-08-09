@@ -58,6 +58,11 @@
 #include "dtbcheck.h"
 #include "yamlgen.h"
 
+#ifdef CAN_RUN_EBPF
+#include "ebpf.h"
+#include "ebpf_dt.h"
+#endif
+
 struct frag {
 	struct list_head node;
 	const char *template;
@@ -70,11 +75,25 @@ struct var {
 	const char *value;
 };
 
+enum constraint_type {
+	t_select,
+	t_check
+};
+
+struct constraint_desc {
+	struct list_head node;
+	enum constraint_type type;
+	int idx;		/* index in the code gen */
+	struct node *np;	/* schema node */
+	struct node *npp;	/* schema property node (that has the constraint) */
+};
+
 struct dtb_check_state {
 	/* copy from config */
 	const char *schema;
 	const char *schema_save;
 	const char *codegen;
+	bool save_temps;
 
 	/* schema loading */
 	struct yaml_dt_state *sdt;
@@ -84,7 +103,9 @@ struct dtb_check_state {
 	struct node *cgpnp_check;
 
 	const char *input_tag;
+	const char *input_ext;
 	const char *output_tag;
+	const char *output_ext;
 	const char *compiler;
 	const char *cflags;
 
@@ -104,6 +125,9 @@ struct dtb_check_state {
 	const char *cg_property_check_epilog;
 	struct node *cg_property_check_types;
 	struct node *cg_property_check_categories;
+
+	/* constraint list to map from error codes */
+	struct list_head clist;
 };
 
 #define to_dtbchk(_dt) ((struct dtb_check_state *)(_dt)->checker_state)
@@ -114,6 +138,7 @@ int output_frag(struct yaml_dt_state *dt, const struct var *vars, FILE *fp,
 	const char *s, *e, *le, *var;
 	char c;
 	int i, varlen;
+	char *vartmp;
 	enum {
 		normal,
 		escape,
@@ -177,7 +202,7 @@ int output_frag(struct yaml_dt_state *dt, const struct var *vars, FILE *fp,
 						break;
 				}
 				if (!vars || !vars[i].name) {
-					char *vartmp = alloca(varlen + 1);
+					vartmp = alloca(varlen + 1);
 					memcpy(vartmp, var, varlen);
 					vartmp[varlen] = '\0';
 					dt_fatal(dt, "Illegal variable: %s\n", vartmp);
@@ -204,263 +229,556 @@ int output_frag(struct yaml_dt_state *dt, const struct var *vars, FILE *fp,
 	return 0;
 }
 
-
-static int prepare_schema_property(struct yaml_dt_state *dt,
-		struct yaml_dt_state *sdt, struct node *np)
-{
-	fprintf(stderr, "Preparing property %s of schema node: %s\n",
-			np->name, np->parent->parent->name);
-
-	return 0;
-}
-
-static int prepare_schema_node_selector(struct yaml_dt_state *dt,
-		struct yaml_dt_state *sdt, struct node *np)
+static int append_constraint(struct yaml_dt_state *dt,
+			     struct yaml_dt_state *sdt,
+			     struct node *node_np,
+			     struct node *property_np,
+			     FILE *fp, const char *constraint,
+			     const struct var *vars,
+			     enum constraint_type type,
+			     int idx)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *cgdt = dtbchk->cgdt;
-	struct property *prop;
-	struct ref *ref;
-	/* char namebuf[NODE_FULLNAME_MAX]; */
-	const char *constraint;
-	int i, idx;
 	const char *type_prolog, *type_epilog;
 	const char *category_prolog, *category_epilog;
-	struct node *npp, *nptype, *npcategory;
-	char idxbuf[9];
-	struct var vars[4];
-	char *buf;
-	size_t size;
-	FILE *fp;
-	bool first;
+	struct node *nptype, *npcategory;
+	const char *prolog;
 
-	fprintf(stderr, "Preparing schema node: %s\n", np->name);
-
-	/* generate select method */
-
-	/* open memstream */
-	fp = open_memstream(&buf, &size);
-	assert(fp);
-
-	first = true;
-	idx = 0;
-	for (i = 0; (npp = dt_get_noderef(sdt, np, "selected", 0, i)) != NULL; i++) {
-		constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
-		if (!constraint)
-			continue;
-
-		/* lookup failures are errors */
-		dt_set_error_on_failed_get(cgdt, true);
-
-		nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
-				dt_get_string(cgdt, npp, "type", 0, 0), 0);
-		type_prolog = dt_get_string(cgdt, nptype, "prolog", 0, 0);
-		type_epilog = dt_get_string(cgdt, nptype, "epilog", 0, 0);
-
-		npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
-				dt_get_string(cgdt, npp, "category", 0, 0), 0);
-		category_prolog = dt_get_string(cgdt, npcategory, "prolog", 0, 0);
-		category_epilog = dt_get_string(cgdt, npcategory, "epilog", 0, 0);
-
-		/* lookup failures are no more errors */
-		dt_set_error_on_failed_get(cgdt, false);
-
-		if (cgdt->error_flag)
-			dt_fatal(cgdt, "Bad codegen configuration\n");
-
-		/* setup the variables to expand */
-		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
-		idxbuf[sizeof(idxbuf) - 1] = '\0';
-		vars[0].name = "NODE_NAME";
-		vars[0].value = np->name;
-		vars[1].name = "PROPERTY_NAME";
-		vars[1].value = npp->name;
-		vars[2].name = "PROPERTY_INDEX";
-		vars[2].value = idxbuf;
-		vars[3].name = NULL;
-		vars[3].value = NULL;
-
-		/* prolog */
-		if (first) {
-			first = false;
-			output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
-			output_frag(dt, vars, fp, dtbchk->cg_node_select_prolog, 0);
-		}
-
-		output_frag(dt, vars, fp, type_prolog, 1);
-		output_frag(dt, vars, fp, category_prolog, 1);
-		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
-		output_frag(dt, vars, fp, constraint, 2);
-		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
-		output_frag(dt, vars, fp, category_epilog, 1);
-		output_frag(dt, vars, fp, type_epilog, 1);
-
-		idx++;
+	switch (type) {
+	case t_select:
+		prolog = dtbchk->cg_node_select_prolog;
+		break;
+	case t_check:
+		prolog = dtbchk->cg_node_check_prolog;
+		break;
+	default:
+		return -1;
 	}
 
-	if (!first) {
-		output_frag(dt, vars, fp, dtbchk->cg_node_select_epilog, 0);
-		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
+	/* lookup failures are errors */
+	dt_set_error_on_failed_get(cgdt, true);
+
+	nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
+			dt_get_string(cgdt, property_np, "type", 0, 0), 0);
+	type_prolog = dt_get_string(cgdt, nptype, "prolog", 0, 0);
+	type_epilog = dt_get_string(cgdt, nptype, "epilog", 0, 0);
+
+	npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
+			dt_get_string(cgdt, property_np, "category", 0, 0), 0);
+	category_prolog = dt_get_string(cgdt, npcategory, "prolog", 0, 0);
+	category_epilog = dt_get_string(cgdt, npcategory, "epilog", 0, 0);
+
+	/* lookup failures are no more errors */
+	dt_set_error_on_failed_get(cgdt, false);
+
+	if (cgdt->error_flag)
+		dt_fatal(cgdt, "Bad codegen configuration\n");
+
+	/* common prolog on start */
+	if (ftell(fp) == 0) {
+		output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
+		output_frag(dt, vars, fp, prolog, 0);
 	}
-	fclose(fp);
 
-	if (size) {
-		/* add the source */
-		prop = prop_alloc(to_tree(sdt), "selected-rule-source");
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
-
-		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size, dtbchk->input_tag);
-		ref->prop = prop;
-		list_add_tail(&ref->node, &prop->refs);
-
-		dt_resolve_ref(sdt, ref);
-	}
-
-	free(buf);
+	output_frag(dt, vars, fp, type_prolog, 1);
+	output_frag(dt, vars, fp, category_prolog, 1);
+	output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
+	output_frag(dt, vars, fp, constraint, 2);
+	output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
+	output_frag(dt, vars, fp, category_epilog, 1);
+	output_frag(dt, vars, fp, type_epilog, 1);
 
 	return 0;
 }
 
-static int prepare_schema_node_checker(struct yaml_dt_state *dt,
-		struct yaml_dt_state *sdt, struct node *np)
+static int count_selected_single(struct yaml_dt_state *dt, struct node *np)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *cgdt = dtbchk->cgdt;
-	struct property *prop;
-	struct ref *ref;
-	/* char namebuf[NODE_FULLNAME_MAX]; */
-	const char *constraint;
-	int idx;
-	const char *type_prolog, *type_epilog;
-	const char *category_prolog, *category_epilog;
-	struct node *child, *npp, *nptype, *npcategory;
-	char idxbuf[9];
-	struct var vars[4];
-	char *buf;
-	size_t size;
-	FILE *fp;
-	bool first;
+	struct yaml_dt_state *sdt = dtbchk->sdt;
 
-	/* generate checker method */
-
-	/* no properties node? */
-	child = dt_get_node(sdt, np, "properties", 0);
-	if (!child)
-		return 0;
-
-	/* open memstream */
-	fp = open_memstream(&buf, &size);
-	assert(fp);
-
-	/* for each property */
-	first = true;
-	idx = 0;
-	list_for_each_entry(npp, &child->children, node) {
-
-		constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
-		if (!constraint)
-			continue;
-
-		/* lookup failures are errors */
-		dt_set_error_on_failed_get(cgdt, true);
-
-		nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
-				dt_get_string(cgdt, npp, "type", 0, 0), 0);
-		type_prolog = dt_get_string(cgdt, nptype, "prolog", 0, 0);
-		type_epilog = dt_get_string(cgdt, nptype, "epilog", 0, 0);
-
-		npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
-				dt_get_string(cgdt, npp, "category", 0, 0), 0);
-		category_prolog = dt_get_string(cgdt, npcategory, "prolog", 0, 0);
-		category_epilog = dt_get_string(cgdt, npcategory, "epilog", 0, 0);
-
-		/* lookup failures are no more errors */
-		dt_set_error_on_failed_get(cgdt, false);
-
-		if (cgdt->error_flag)
-			dt_fatal(cgdt, "Bad codegen configuration\n");
-
-		/* setup the variables to expand */
-		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
-		idxbuf[sizeof(idxbuf) - 1] = '\0';
-		vars[0].name = "NODE_NAME";
-		vars[0].value = np->name;
-		vars[1].name = "PROPERTY_NAME";
-		vars[1].value = npp->name;
-		vars[2].name = "PROPERTY_INDEX";
-		vars[2].value = idxbuf;
-		vars[3].name = NULL;
-		vars[3].value = NULL;
-
-		/* prolog */
-		if (first) {
-			first = false;
-			output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
-			output_frag(dt, vars, fp, dtbchk->cg_node_check_prolog, 0);
-		}
-
-		output_frag(dt, vars, fp, type_prolog, 1);
-		output_frag(dt, vars, fp, category_prolog, 1);
-		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
-		output_frag(dt, vars, fp, constraint, 2);
-		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
-		output_frag(dt, vars, fp, category_epilog, 1);
-		output_frag(dt, vars, fp, type_epilog, 1);
-
-		idx++;
-	}
-
-	if (!first) {
-		output_frag(dt, vars, fp, dtbchk->cg_node_check_epilog, 0);
-		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
-	}
-	fclose(fp);
-
-	if (size) {
-		/* add the source */
-		prop = prop_alloc(to_tree(sdt), "check-rule-source");
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
-
-		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size, dtbchk->input_tag);
-		ref->prop = prop;
-		list_add_tail(&ref->node, &prop->refs);
-
-		dt_resolve_ref(sdt, ref);
-	}
-
-	free(buf);
-
-	return 0;
+	return dt_get_rcount(sdt, np, "selected", 0);
 }
 
-static int prepare_schema_node(struct yaml_dt_state *dt,
-		struct yaml_dt_state *sdt, struct node *np)
+static void count_selected(struct yaml_dt_state *dt, struct node *np, int *count)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *cgdt = dtbchk->cgdt;
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *npp;
+	int i, rcount;
+
+	*count += count_selected_single(dt, np);
+
+	rcount = dt_get_rcount(sdt, np, "inherits", 0);
+	for (i = 0; i < rcount; i++) {
+		npp = dt_get_noderef(sdt, np, "inherits", 0, i);
+		if (!npp)
+			continue;
+		count_selected(dt, npp, count);
+	}
+}
+
+static int count_constraints_single(struct yaml_dt_state *dt, struct node *np)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *child, *npp;
-	int ret;
+	int count;
 
-	(void)cgdt;
-	fprintf(stderr, "Preparing schema node: %s\n", np->name);
+	/* constraints of the node */
+	count = dt_get_rcount(sdt, np, "constraint", 0);
 
-	ret = prepare_schema_node_selector(dt, sdt, np);
+	/* constraints of the properties */
+	list_for_each_entry(child, &np->children, node) {
+		if (strcmp(child->name, "properties"))
+			continue;
+		list_for_each_entry(npp, &child->children, node)
+			count += dt_get_rcount(sdt, npp, "constraint", 0);
+	}
 
-	ret = prepare_schema_node_checker(dt, sdt, np);
+	return count;
+}
 
+static void count_constraints(struct yaml_dt_state *dt, struct node *np, int *count)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *npp;
+	int i, rcount;
+
+	/* constraints of the node */
+	*count += count_constraints_single(dt, np);
+
+	/* iterating into inherits */
+	rcount = dt_get_rcount(sdt, np, "inherits", 0);
+	for (i = 0; i < rcount; i++) {
+		npp = dt_get_noderef(sdt, np, "inherits", 0, i);
+		if (!npp)
+			continue;
+		count_constraints(dt, npp, count);
+	}
+}
+
+void print_inherits(struct yaml_dt_state *dt, struct node *np, int depth)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	char namebuf[NODE_FULLNAME_MAX];
+	struct node *npp;
+	int i, rcount, scount, ccount;
+
+	scount = 0;
+	count_selected(dt, np, &scount);
+
+	ccount = 0;
+	count_constraints(dt, np, &ccount);
+
+	dt_debug(dt, "%*s", depth * 4, "");
+	dt_debug(dt, "%s - selected#=%d constraints#=%d\n",
+			dn_fullname(np, namebuf, sizeof(namebuf)),
+			scount, ccount);
+
+	rcount = dt_get_rcount(sdt, np, "inherits", 0);
+	for (i = 0; i < rcount; i++) {
+		npp = dt_get_noderef(sdt, np, "inherits", 0, i);
+		if (!npp) {
+			dt_debug(dt, "%*s", depth * 4, "");
+			dt_debug(dt, "#%d of inherits not a ref\n", i); 
+			continue;
+		}
+		print_inherits(dt, npp, depth + 1);
+	}
+}
+
+static struct node *
+__get_selected_constraint_property_single(struct yaml_dt_state *dt,
+		struct node **npstack, int top, int stacksz, int idx,
+		const char **constraint, struct node **nprule)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *np = npstack[top];
+	struct node *npp;
+	const char *propname;
+	char namebuf[NODE_FULLNAME_MAX];
+
+	dt_debug(dt, "%s on %s#%d\n", __func__,
+			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
+
+	/* first try for node deref */
+	npp = dt_get_noderef(sdt, np, "selected", 0, idx);
+	if (npp) {
+		*constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
+		if (*constraint) {
+			*nprule = np;
+			return npp;
+		}
+		dt_fatal(dt, "FFFF\n");
+		return NULL;
+	}
+
+	/* otherwise it might be property name */
+
+	/* get the property name */
+	propname = dt_get_string(sdt, np, "selected", 0, idx);
+	if (!propname)
+		return NULL;
+
+	/* we have to use the most 'deep' property starting from start */
+
+	while (top >= 0 && (np = npstack[top]) != NULL) {
+
+		dt_debug(dt, "checking %s on %s#%d for %s\n", __func__,
+				dn_fullname(np, namebuf, sizeof(namebuf)), idx,
+				propname);
+
+		/* get properties node of the current node */
+		npp = dt_get_node(sdt, np, "properties", 0);
+		if (npp)
+			npp = dt_get_node(sdt, npp, propname, 0);
+		if (npp) {
+			dt_debug(dt, "found constraint %s on %s#%d\n", __func__,
+					dn_fullname(npp, namebuf, sizeof(namebuf)), idx);
+
+			*constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
+			if (*constraint) {
+				*nprule = np;
+				return npp;
+			}
+		}
+		top--;
+	}
+
+	return NULL;
+}
+
+static struct node *
+__get_check_constraint_property_single(struct yaml_dt_state *dt,
+		struct node **npstack, int top, int stacksz, int idx,
+		const char **constraint, struct node **nprule)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *np = npstack[top];
+	struct node *npp, *child;
+	char namebuf[NODE_FULLNAME_MAX];
+	int rcount;
+
+	dt_debug(dt, "%s on %s#%d\n", __func__,
+			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
+
+	rcount = dt_get_rcount(sdt, np, "constraint", 0);
+	if (idx < rcount) {
+		*constraint = dt_get_string(sdt, np, "constraint", 0, idx);
+		if (!*constraint)
+			dt_fatal(dt, "Can't get constraint\n");
+		*nprule = np;
+		return np;
+	}
+	idx -= rcount;
+
+	/* constraints of the properties */
 	list_for_each_entry(child, &np->children, node) {
 		if (strcmp(child->name, "properties"))
 			continue;
 		list_for_each_entry(npp, &child->children, node) {
-			ret = prepare_schema_property(dt, sdt, npp);
-			if (ret)
-				return ret;
+			rcount = dt_get_rcount(sdt, npp, "constraint", 0);
+			if (idx < rcount) {
+				*constraint = dt_get_string(sdt, npp, "constraint", 0, idx);
+				if (!*constraint)
+					dt_fatal(dt, "Can't get constraint\n");
+				*nprule = np;
+				return npp;
+			}
+			idx -= rcount;
 		}
 	}
+	return NULL;
+}
 
-	return ret;
+static struct node *
+__get_constraint_property(struct yaml_dt_state *dt,
+				   struct node **npstack, int top, int stacksz,
+				   int idx, const char **constraint,
+				   struct node **nprule,
+				   enum constraint_type type)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	char namebuf[NODE_FULLNAME_MAX];
+	struct node *np = npstack[top];
+	struct node *npp;
+	int rcount, scount, j;
+
+	dt_debug(dt, "%s:", __func__);
+	dt_debug(dt, " this=%s#%d",
+			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
+	dt_debug(dt, "\n");
+
+	/* try selected on this node */
+	if (type == t_select) {
+		rcount = count_selected_single(dt, np);
+		if (idx < rcount)
+			return __get_selected_constraint_property_single(dt, npstack,
+					top, stacksz, idx, constraint, nprule);
+	} else {
+		rcount = count_constraints_single(dt, np);
+		if (idx < rcount)
+			return __get_check_constraint_property_single(dt, npstack,
+					top, stacksz, idx, constraint, nprule);
+	}
+	idx -= rcount;
+
+	/* go for each inherit in sequence */
+	rcount = dt_get_rcount(sdt, np, "inherits", 0);
+	for (j = 0; j < rcount; j++) {
+		npp = dt_get_noderef(sdt, np, "inherits", 0, j);
+		if (!npp)
+			dt_fatal(dt, "Bad inherits\n");
+		scount = 0;
+		count_selected(dt, npp, &scount);
+		if (idx < scount) {
+			assert(top + 1 < stacksz);
+			npstack[++top] = npp;
+			return __get_constraint_property(dt, npstack,
+					top, stacksz, idx, constraint, nprule, type);
+		}
+		idx -= scount;
+	}
+
+	return NULL;
+}
+
+static struct node *
+get_constraint_property(struct yaml_dt_state *dt, struct node *np,
+				 int idx, const char **constraint,
+				 struct node **nprule,
+				 enum constraint_type type)
+{
+	struct node *npstack[32];
+
+	*constraint = NULL;
+	*nprule = NULL;
+	npstack[0] = np;
+	return __get_constraint_property(dt,
+			npstack, 0, ARRAY_SIZE(npstack), idx,
+			constraint, nprule, type);
+}
+
+static void save_file(struct yaml_dt_state *dt, const char *base,
+		      enum constraint_type type, const char *ext,
+		      void *data, size_t size)
+{
+	FILE *fp;
+	char *filename;
+	int ret;
+	size_t nwrite;
+
+	ret = asprintf(&filename, "%s%s%s", base,
+			type == t_select ? "-select" : "-check",
+			ext);
+	if (ret == -1)
+		dt_fatal(dt, "Failed to allocate string %s%s%s\n", base,
+				type == t_select ? "-select" : "-check", ext);
+
+	fp = fopen(filename, "wb");
+	if (!fp)
+		dt_fatal(dt, "Failed to open %s%s%s\n", base,
+				type == t_select ? "-select" : "-check", ext);
+
+	nwrite = fwrite(data, 1, size, fp);
+	if (nwrite != size)
+		dt_fatal(dt, "Failed to write %s%s%s\n", base,
+				type == t_select ? "-select" : "-check", ext);
+
+	fclose(fp);
+	free(filename);
+}
+
+static int prepare_schema_node(struct yaml_dt_state *dt,
+		struct yaml_dt_state *sdt, struct node *np,
+		enum constraint_type type)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct property *prop;
+	struct ref *ref;
+	/* char namebuf[NODE_FULLNAME_MAX]; */
+	const char *cnst;
+	int i, idx, err;
+	struct node *npp, *nprule;
+	char idxbuf[9];
+#define NODE_NAME_IDX 0
+#define PROPERTY_NAME_IDX 1
+#define PROPERTY_INDEX_IDX 2
+#define RULE_NAME_IDX 3
+#define VARS_COUNT 4
+	struct var vars[VARS_COUNT + 1];
+	char *buf;
+	size_t size;
+	FILE *fp;
+	void *output;
+	size_t output_size;
+	void *b64_output;
+	size_t b64_output_size;
+	const char *source_name;
+	const char *output_name;;
+	const char *epilog;
+	struct constraint_desc *cd;
+
+	switch (type) {
+	case t_select:
+		source_name = "selected-rule-source";
+		output_name = "selected-rule-output";
+		epilog = dtbchk->cg_node_select_epilog;
+		break;
+	case t_check:
+		source_name = "check-rule-source";
+		output_name = "check-rule-output";
+		epilog = dtbchk->cg_node_check_epilog;
+		break;
+	default:
+		return -1;
+	}
+
+	/* open memstream */
+	fp = open_memstream(&buf, &size);
+	assert(fp);
+
+	/* setup the variables to expand */
+	snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", -1);
+	idxbuf[sizeof(idxbuf) - 1] = '\0';
+
+	vars[NODE_NAME_IDX].name = "NODE_NAME";
+	vars[NODE_NAME_IDX].value = np->name;
+	vars[PROPERTY_NAME_IDX].name = "PROPERTY_NAME";
+	vars[PROPERTY_NAME_IDX].value = "";
+	vars[PROPERTY_INDEX_IDX].name = "PROPERTY_INDEX";
+	vars[PROPERTY_INDEX_IDX].value = idxbuf;
+	vars[RULE_NAME_IDX].name = "RULE_NAME";
+	vars[RULE_NAME_IDX].value = "";
+	vars[VARS_COUNT].name = NULL;
+	vars[VARS_COUNT].value = NULL;
+
+	/* try specific constraints */
+	idx = 0;
+	for (i = 0;
+	     (npp = get_constraint_property(dt, np, i, &cnst, &nprule, type)) != NULL;
+	     i++) {
+
+		/* it can happen for non-instantiated rules */
+		if (!cnst)
+			continue;
+
+		dt_debug(dt, "Appending constraint for %s prop %s: %s\n",
+				np->name, npp->name, cnst);
+
+		/* update variables */
+		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
+		idxbuf[sizeof(idxbuf) - 1] = '\0';
+		vars[PROPERTY_INDEX_IDX].value = idxbuf;
+		vars[PROPERTY_NAME_IDX].value = npp->name;
+		vars[RULE_NAME_IDX].value = nprule->name;
+
+		append_constraint(dt, sdt, np, npp, fp, cnst, vars, type, idx);
+
+		/* add the constraint desc entry */
+		cd = malloc(sizeof(*cd));
+		assert(cd);
+		memset(cd, 0, sizeof(*cd));
+		cd->type = type;
+		cd->idx = idx;
+		cd->np = np;
+		cd->npp = npp;
+		list_add_tail(&cd->node, &dtbchk->clist);
+
+		idx++;
+	}
+
+	/* mark end */
+	snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", -1);
+	idxbuf[sizeof(idxbuf) - 1] = '\0';
+	vars[PROPERTY_INDEX_IDX].value = idxbuf;
+	vars[PROPERTY_NAME_IDX].value = "";
+	vars[RULE_NAME_IDX].value = "";
+
+	/* it output was generated tack on epilog */
+	if (ftell(fp) != 0) {
+		output_frag(dt, vars, fp, epilog, 0);
+		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
+	}
+	fclose(fp);
+
+	err = 0;
+	if (size) {
+		/* add the source */
+		prop = prop_alloc(to_tree(sdt), source_name);
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
+		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size,
+				dtbchk->input_tag);
+		ref->prop = prop;
+		list_add_tail(&ref->node, &prop->refs);
+
+		dt_resolve_ref(sdt, ref);
+
+		if (dtbchk->save_temps)
+			save_file(dt, np->name, type, dtbchk->input_ext,
+				  buf, size);
+
+		/* and compile it */
+		err = compile(ref->data, ref->len,
+				dtbchk->compiler,
+				dtbchk->cflags,
+				&output, &output_size);
+		if (err) {
+			tree_error_at_ref(to_tree(sdt), ref,
+				"Failed to compile %s:\n%s %s\n",
+				to_dt_ref(ref)->tag,
+				dtbchk->compiler, dtbchk->cflags);
+			goto out_err;
+		}
+
+		b64_output = base64_encode(output, output_size,
+					   &b64_output_size);
+
+		if (dtbchk->save_temps)
+			save_file(dt, np->name, type, dtbchk->output_ext,
+					output, output_size);
+
+		if (!b64_output) {
+			tree_error_at_ref(to_tree(sdt), ref,
+				"Failed to encode to base64\n");
+			err = -ENOMEM;
+			goto out_err;
+		}
+
+		/* add the output */
+		prop = prop_alloc(to_tree(sdt), output_name);
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
+		ref = ref_alloc(to_tree(sdt), r_scalar,
+				b64_output, b64_output_size,
+				dtbchk->output_tag);
+		ref->prop = prop;
+		list_add_tail(&ref->node, &prop->refs);
+
+		dt_resolve_ref(sdt, ref);
+
+		/* save to ref */
+		to_dt_ref(ref)->binary = output;
+		to_dt_ref(ref)->binary_size = output_size;
+
+		free(b64_output);
+
+	}
+
+out_err:
+
+	free(buf);
+
+	return err;
 }
 
 static int prepare_schema(struct yaml_dt_state *dt)
@@ -468,11 +786,21 @@ static int prepare_schema(struct yaml_dt_state *dt)
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *root, *np;
+	int ret;
 
 	root = tree_root(to_tree(sdt));
 
-	list_for_each_entry(np, &root->children, node)
-		prepare_schema_node(dt, sdt, np);
+	list_for_each_entry(np, &root->children, node) {
+		ret = prepare_schema_node(dt, sdt, np, t_select);
+		if (ret)
+			dt_fatal(dt, "Failed to prepare selector %s\n",
+					np->name);
+
+		ret = prepare_schema_node(dt, sdt, np, t_check);
+		if (ret)
+			dt_fatal(dt, "Failed to prepare checker %s\n",
+					np->name);
+	}
 
 	return 0;
 }
@@ -491,6 +819,9 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	dtbchk->schema = dt->cfg.schema;
 	dtbchk->schema_save = dt->cfg.schema_save;
 	dtbchk->codegen = dt->cfg.codegen;
+	dtbchk->save_temps = dt->cfg.save_temps;
+
+	INIT_LIST_HEAD(&dtbchk->clist);
 
 	dt->checker_state = dtbchk;
 
@@ -516,7 +847,9 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	dt_set_error_on_failed_get(cgdt, true);
 
 	dtbchk->input_tag = dt_get_string(cgdt, cgroot, "input-tag", 0, 0);
+	dtbchk->input_ext = dt_get_string(cgdt, cgroot, "input-extension", 0, 0);
 	dtbchk->output_tag = dt_get_string(cgdt, cgroot, "output-tag", 0, 0);
+	dtbchk->output_ext = dt_get_string(cgdt, cgroot, "output-extension", 0, 0);
 	dtbchk->compiler = dt_get_string(cgdt, cgroot, "compiler", 0, 0);
 	dtbchk->cflags = dt_get_string(cgdt, cgroot, "cflags", 0, 0);
 
@@ -567,45 +900,175 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 
 void dtbchk_cleanup(struct yaml_dt_state *dt)
 {
+	struct constraint_desc *cd, *cdn;
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 
 	/* the children parsers are automatically cleaned */
+
+	/* clean constraint descriptors */
+	list_for_each_entry_safe(cd, cdn, &dtbchk->clist, node) {
+		list_del(&cd->node);
+		free(cd);
+	}
+
 	free(dtbchk);
 }
 
-static void check_single_rule(struct yaml_dt_state *dt,
-		struct node *np, struct node *snp)
+#ifdef CAN_RUN_EBPF
+
+/* find the constraint entry by error code */
+static struct constraint_desc *lookup_constraint_by_ret(struct yaml_dt_state *dt,
+		struct node *np, struct node *snp, uint64_t vmret)
 {
-#if 0
-	char namebuf[NODE_FULLNAME_MAX];
-	fprintf(stderr, "%s: against %s\n",
-			dn_fullname(np, namebuf, sizeof(namebuf)),
-			snp->name ? : "/");
-#endif
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct constraint_desc *cd;
+	int idx;
+	long long ret = (int64_t)vmret;
+
+	if (ret >= 0 || ret < -3000)
+		return NULL;
+
+	if (ret < -2000) 		/* exist check */
+		idx = -(ret + 2000);
+	else if (ret < -1000) 		/* property check */
+		idx = -(ret + 1000);
+	else if (ret == -1)		/* node constraint */
+		return NULL;
+	else
+		return NULL;
+
+	list_for_each_entry(cd, &dtbchk->clist, node) {
+		if (cd->type == t_check && cd->np == snp && cd->idx == idx)
+			return cd;
+	}
+	return NULL;
 }
 
-static void check_node(struct yaml_dt_state *dt,
-		       struct node *np)
+static void check_node_single(struct yaml_dt_state *dt,
+		       struct node *np, struct node *snp,
+		       struct ebpf_dt_ctx *select_ctx,
+		       struct ebpf_dt_ctx *check_ctx)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
-	struct node *snp, *sroot = tree_root(to_tree(sdt));
 	struct node *child;
+	char namebuf[NODE_FULLNAME_MAX];
+	int err;
+	uint64_t vmret;
+	struct constraint_desc *cd;
+	struct property *prop;
+	struct ref *ref;
 
-	/* check each rule in the root */
-	list_for_each_entry(snp, &sroot->children, node)
-		check_single_rule(dt, np, snp);
+	dt_debug(dt, "%s: against %s - running select\n",
+			dn_fullname(np, namebuf, sizeof(namebuf)),
+			snp->name ? : "/");
+
+	vmret = ebpf_exec(&select_ctx->vm, np, 0, &err);
+	if (err)
+		dt_fatal(dt, "exec failed with code %d (%s)\n",
+				err, strerror(-err));
+
+	if (vmret == 0) {
+		dt_debug(dt, "select match at node %s\n",
+			dn_fullname(np, namebuf, sizeof(namebuf)));
+
+		/* now running check */
+		vmret = ebpf_exec(&check_ctx->vm, np, 0, &err);
+		if (err)
+			dt_fatal(dt, "exec failed with code %d (%s)\n",
+					err, strerror(-err));
+		if (vmret == 0)
+			dt_debug(dt, "node %s is correct\n",
+				dn_fullname(np, namebuf, sizeof(namebuf)));
+		else {
+			cd = lookup_constraint_by_ret(dt, np, snp, vmret);
+			if (cd) {
+				if ((prop = dt_get_property(dt, np, cd->npp->name, 0)) &&
+				    (ref = dt_get_ref(dt, prop, 0))) {
+					tree_error_at_ref(to_tree(dt), ref,
+						"illegal property value\n");
+				}
+
+				/* tree_error_at_node(to_tree(sdt), cd->npp,
+					"property was defined at %s\n",
+					dn_fullname(cd->npp, namebuf, sizeof(namebuf))); */
+
+				if ((prop = dt_get_property(sdt, cd->npp, "constraint", 0)) &&
+				    (ref = dt_get_ref(sdt, prop, 0)))
+					tree_error_at_ref(to_tree(sdt), ref,
+						"constraint that fails was defined here\n");
+			} else {
+				tree_error_at_node(to_tree(dt), np,
+					"node %s has failed verification (code=%lld)\n",
+					dn_fullname(np, namebuf, sizeof(namebuf)),
+					(long long)vmret);
+
+			}
+		}
+	}
 
 	list_for_each_entry(child, &np->children, node)
-		check_node(dt, child);
+		check_node_single(dt, child, snp, select_ctx, check_ctx);
 }
 
 int dtbchk_check(struct yaml_dt_state *dt)
 {
-	fprintf(stderr, "CHECK NOW\n");
-	check_node(dt, tree_root(to_tree(dt)));
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *snp, *sroot = tree_root(to_tree(sdt));
+	size_t check_size, select_size;
+	const char *check, *select;
+	struct ebpf_dt_ctx select_ctx;
+	struct ebpf_dt_ctx check_ctx;
+	struct ebpf_vm *select_vm;
+	struct ebpf_vm *check_vm;
+	int ret;
+
+	/* check each rule in the root */
+	list_for_each_entry(snp, &sroot->children, node) {
+
+		select = dt_get_binary(sdt, snp, "selected-rule-output",
+				0, 0, &select_size);
+		check = dt_get_binary(sdt, snp, "check-rule-output",
+				0, 0, &check_size);
+
+		/* can't check this node */
+		if (!select || !check)
+			continue;
+
+		select_vm = &select_ctx.vm;
+		select_ctx.dt = dt;
+		check_ctx.dt = dt;
+		check_vm = &check_ctx.vm;
+
+		/* setup the select and check vms */
+		ret = ebpf_setup(select_vm, bpf_dt_cb, NULL, NULL, NULL);
+		if (ret)
+			dt_fatal(dt, "Failed to setup select vm ebpf\n");
+
+		ret = ebpf_load_elf(select_vm, select, select_size);
+		if (ret)
+			dt_fatal(dt, "Failed to load select vm ebpf\n");
+
+		ret = ebpf_setup(check_vm, bpf_dt_cb, NULL, NULL, NULL);
+		if (ret)
+			dt_fatal(dt, "Failed to setup check vm ebpf\n");
+
+		ret = ebpf_load_elf(check_vm, check, check_size);
+		if (ret)
+			dt_fatal(dt, "Failed to load check vm ebpf\n");
+
+		check_node_single(dt, tree_root(to_tree(dt)), snp,
+				&select_ctx, &check_ctx);
+
+		ebpf_cleanup(select_vm);
+		ebpf_cleanup(check_vm);
+	}
+
 	return 0;
 }
+
+#endif
 
 static bool dtbchk_select(int argc, char **argv)
 {
@@ -623,7 +1086,9 @@ static const struct yaml_dt_checker_ops dtb_checker_ops = {
 	.select		= dtbchk_select,
 	.setup		= dtbchk_setup,
 	.cleanup	= dtbchk_cleanup,
+#ifdef CAN_RUN_EBPF
 	.check		= dtbchk_check,
+#endif
 };
 
 struct yaml_dt_checker dtb_checker = {

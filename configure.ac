@@ -3,7 +3,7 @@
 
 #AC_PREREQ(2.60)
 m4_include(m4/version.m4)
-AC_INIT(yamldt, m4_defn([VERSION_NUMBER]), panto@antoniou-consulting.com)
+AC_INIT(yamldt, m4_defn([VERSION_NUMBER]), pantelis.antoniou@konsulko.com)
 AC_CONFIG_MACRO_DIR([m4])
 AC_REVISION([VERSION_NUMBER])
 AC_CONFIG_SRCDIR([yamldt.c])
@@ -37,7 +37,7 @@ AM_CONDITIONAL([HAVE_LIBYAML], [test x$have_libyaml = xtrue])
 AC_MSG_CHECKING([for dtc with YAML support])
 AC_PATH_PROGS_FEATURE_CHECK([DTC], [dtc],
 	[[ echo '/dts-v1/; / { };' | \
-	 	$ac_path_DTC -I dts -O yaml - -o - >/dev/null && \
+	 	$ac_path_DTC -I dts -O yaml - -o - 2>/dev/null >/dev/null && \
            ac_cv_path_DTC=$ac_path_DTC ac_path_DTC_found=:]])
 AC_SUBST([DTC], [$ac_cv_path_DTC])
 
@@ -94,6 +94,10 @@ AC_MSG_CHECKING([whether we can execute ebpf programs])
 AM_CONDITIONAL([EXEC_EBPF], [test x$have_libelf = xtrue -o x$has_ELF_H = xtrue])
 AM_COND_IF([EXEC_EBPF], [can_EXEC_EBPF=yes], [can_EXEC_EBPF=no])
 AC_MSG_RESULT([$can_EXEC_EBPF])
+
+if test x$can_EXEC_EBPF = xyes ;  then
+	AC_DEFINE([CAN_RUN_EBPF], [], [can run ebpf])
+fi
 
 # copy subdirs to allow foreign builds to work
 cp_subdirs=

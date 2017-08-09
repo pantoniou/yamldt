@@ -2,6 +2,8 @@
 
 input-tag: "!filter"
 output-tag: "!ebpf"
+input-extension: ".c"
+output-extension: ".ebpf"
 compiler: clang-5.0
 cflags: "-x c -ffreestanding -target bpf -O2 -c -o - -"
 common:
@@ -13,6 +15,9 @@ common:
     #include <stdint.h>
     #include <stdbool.h>
 
+    #ifndef NULL
+    #define NULL 0
+    #endif
     /* never accessed directly but the pointers are valid keys */
     struct node;
     struct property;
@@ -42,16 +47,17 @@ common:
     static bool (*anystreq)(const char **strv, const char *str2) =
             (void *) 8;
 
-    static struct node *(get_parent)(struct node *np) =
+    static struct node *(*get_parent)(struct node *np) =
             (void *) 9;
 
-    static const int64_t *(get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
+    static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
             (void *) 10;
 
   epilog: |
     /* ${NODE_NAME} ends */
 node:
   select:
+    # entry is select()
     entry: select
     prolog: |+
       /* prolog for ${NODE_NAME} */
@@ -79,11 +85,11 @@ node:
 property:
   check:
     prolog: |+
-      /* for ${PROPERTY_NAME} */
+      /* for ${PROPERTY_NAME} from ${RULE_NAME} rule */
       if (!(
     epilog: |+
       ))
-          return -1;
+        return -1000 - ${PROPERTY_INDEX};
     types:
       int:
         prolog: |+
@@ -133,7 +139,7 @@ property:
       required:
         prolog: |+
           if (!exists)
-              return -1;
+              return -2000 - ${PROPERTY_INDEX};
 
         epilog: |+
 

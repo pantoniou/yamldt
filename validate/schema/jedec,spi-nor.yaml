@@ -10,9 +10,8 @@ jedec,spi-nor:
     name: Unknown
 
   inherits: *spi_slave
-  selected: 
-    - *jedec-spi-nor-compatible
-    - *device-status-enabled
+  # selected: [ *jedec-spi-nor-compatible, *device-status-enabled ]
+  # selected: [ "compatible", *device-status-enabled ]
 
   properties:
     reg:
@@ -71,7 +70,7 @@ jedec,spi-nor:
       type: int
       description: Maximum frequency of the SPI bus the chip can operate at
       constraint: |
-        v > 0 && v < 50000000
+        v > 0 && v < 100000000
 
     m25p,fast-read:
       category: optional

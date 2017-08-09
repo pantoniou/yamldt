@@ -264,6 +264,9 @@ void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 	if (p < dt->input_content || p >= dt->input_content + dt->input_size)
 		free(p);
 
+	if (dt_ref->binary)
+		free(dt_ref->binary);
+
 	free(dt_ref);
 }
 
@@ -441,6 +444,7 @@ static void dt_stream_start(struct yaml_dt_state *dt)
 	dt->current_prop = NULL;
 	dt->prop_seq_depth = 0;
 	dt->error_flag = false;
+	dt->stream_ended = false;
 }
 
 static void dt_stream_end(struct yaml_dt_state *dt)
@@ -454,6 +458,7 @@ static void dt_stream_end(struct yaml_dt_state *dt)
 		prop_free(to_tree(dt), dt->current_prop);
 		dt->current_prop = NULL;
 	}
+	dt->stream_ended = false;
 }
 
 static void dt_document_start(struct yaml_dt_state *dt)
@@ -729,7 +734,8 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	struct yaml_dt_state *sdt;
 	struct yaml_dt_config cfg;
 	char *argv[2];
-	int err;
+	char **alloc_argv = NULL;
+	int i, err;
 
 	sdt = malloc(sizeof(*sdt));
 	assert(sdt);
@@ -738,10 +744,19 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	cfg.debug = dt->cfg.debug;
 	cfg.output_file = output ? output : "/dev/null";
 
-	argv[0] = (char *)input;
-	argv[1] = NULL;
-	cfg.input_file = argv;
-	cfg.input_file_count = 1;
+	if (!strchr(input, ' ')) {
+		argv[0] = (char *)input;
+		argv[1] = NULL;
+		cfg.input_file = argv;
+		cfg.input_file_count = 1;
+	} else {
+		alloc_argv = str_to_argv("", input);
+		assert(alloc_argv);
+		cfg.input_file = alloc_argv + 1;
+		for (i = 0; alloc_argv[i + 1]; i++)
+			;
+		cfg.input_file_count = i;
+	}
 
 	err = dt_setup(sdt, &cfg, output ? &yaml_emitter : &null_emitter,
 			   &null_checker);
@@ -816,6 +831,9 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	if (rm_file)
 		remove(dt->cfg.output_file);
+
+	if (dt->alloc_argv)
+		free(dt->alloc_argv);
 
 	/* children are dynamically allocated so free accordingly */
 	if (dt->parent) {
@@ -1511,25 +1529,28 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	line = dt->current_mark.start.line;
-	column = dt->current_mark.start.column;
-	end_line = dt->current_mark.end.line;
-	end_column = dt->current_mark.end.column;
+	if (!dt->stream_ended) {
+		line = dt->current_mark.start.line;
+		column = dt->current_mark.start.column;
+		end_line = dt->current_mark.end.line;
+		end_column = dt->current_mark.end.column;
 
-	get_error_location(dt, line, column,
-			filebuf, sizeof(filebuf),
-			linebuf, sizeof(linebuf),
-			&line);
+		get_error_location(dt, line, column,
+				filebuf, sizeof(filebuf),
+				linebuf, sizeof(linebuf),
+				&line);
 
-	if (end_line != line)
-		end_column = strlen(linebuf) + 1;
+		if (end_line != line)
+			end_column = strlen(linebuf) + 1;
 
-	fprintf(stderr, "%s:%zd:%zd: %s\n %s\n %*s^",
-			filebuf, line, column + 1,
-			str, linebuf, (int)column, "");
-	while (++column < end_column - 1)
-		fprintf(stderr, "~");
-	fprintf(stderr, "\n");
+		fprintf(stderr, "%s:%zd:%zd: %s\n %s\n %*s^",
+				filebuf, line, column + 1,
+				str, linebuf, (int)column, "");
+		while (++column < end_column - 1)
+			fprintf(stderr, "~");
+		fprintf(stderr, "\n");
+	} else
+		fprintf(stderr, "%s\n", str);
 
 	dt_stream_end(dt);
 	dt_cleanup(dt, true);
@@ -1754,6 +1775,9 @@ struct node *dt_get_node(struct yaml_dt_state *dt,
 	char namebuf[NODE_FULLNAME_MAX];
 	struct node *np;
 
+	if (!dt || !parent || !name)
+		return NULL;
+
 	np = node_get_child_by_name(to_tree(dt), parent, name, index);
 	if (!np && dt->error_on_failed_get)
 		dt_error_at(dt, &to_dt_node(parent)->m,
@@ -1771,6 +1795,9 @@ struct property *dt_get_property(struct yaml_dt_state *dt,
 	char namebuf[NODE_FULLNAME_MAX];
 	struct property *prop;
 
+	if (!dt || !np || !name)
+		return NULL;
+
 	prop = prop_get_by_name(to_tree(dt), np, name, index);
 
 	if (!prop && dt->error_on_failed_get)
@@ -1787,6 +1814,9 @@ struct ref *dt_get_ref(struct yaml_dt_state *dt,
 	char namebuf[NODE_FULLNAME_MAX];
 	struct ref *ref;
 
+	if (!dt || !prop)
+		return NULL;
+
 	ref = ref_get_by_index(to_tree(dt), prop, index);
 
 	if (!ref && dt->error_on_failed_get)
@@ -1795,6 +1825,24 @@ struct ref *dt_get_ref(struct yaml_dt_state *dt,
 				index, prop->name,
 				dn_fullname(prop->np, namebuf, sizeof(namebuf)));
 	return ref;
+}
+
+int dt_get_rcount(struct yaml_dt_state *dt, struct node *np,
+		  const char *name, int pindex)
+{
+	struct property *prop;
+	int rindex;
+
+	if (!dt || !np || !name)
+		return 0;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return 0;
+	rindex = 0;
+	while (dt_get_ref(dt, prop, rindex))
+		rindex++;
+	return rindex;
 }
 
 const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
@@ -1917,6 +1965,40 @@ int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
 	}
 
 	return to_dt_ref(ref)->val ? 1 : 0;
+}
+
+const void *dt_get_binary(struct yaml_dt_state *dt, struct node *np,
+			  const char *name, int pindex, int rindex,
+			  size_t *binary_size)
+{
+	struct property *prop;
+	struct ref *ref;
+
+	if (!dt || !np || !name)
+		return NULL;
+
+	prop = dt_get_property(dt, np, name, pindex);
+	if (!prop)
+		return NULL;
+	ref = dt_get_ref(dt, prop, rindex);
+	if (!ref)
+		return NULL;
+
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"Failed to resolve with getting %s property\n",
+			name);
+		return NULL;
+	}
+
+	if (binary_size)
+		*binary_size = to_dt_ref(ref)->binary_size;
+
+	return to_dt_ref(ref)->binary;
 }
 
 struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
