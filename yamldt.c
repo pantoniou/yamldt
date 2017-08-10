@@ -84,6 +84,8 @@ static struct option opts[] = {
 	{ "schema-save",	required_argument, 0, 'i' },
 	{ "codegen",		required_argument, 0, 'g' },
 	{ "save-temps",		no_argument, 	   0, 'T' },
+	{ "silent",		no_argument,	   0,  0  },
+	{ "color",		required_argument, 0,  0  },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -112,6 +114,8 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "   -S, --schema        Use schema file\n"
 "   -i, --schema-save   Save intermediate schema\n"
 "   -g, --codegen       Code generator configuration file\n"
+"       --silent        Be really silent\n"
+"       --color         [auto|off|on]\n"
 		);
 }
 
@@ -149,6 +153,7 @@ int main(int argc, char *argv[])
 	cfg->compiler = DEFAULT_COMPILER;
 	cfg->cflags = DEFAULT_CFLAGS;
 	cfg->compiler_tags = DEFAULT_TAGS;
+	cfg->color = -1;
 
 	/* try to find output file argument */
 	for (i = 1; i < argc; i++) {
@@ -212,6 +217,24 @@ int main(int argc, char *argv[])
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
 			"o:dlTvCcysS:i:g:h?", opts, &option_index)) != -1) {
+
+		if (cc == 0 && option_index >= 0) {
+			s = opts[option_index].name;
+			if (!strcmp(s, "silent")) {
+				cfg->silent = true;
+				continue;
+			}
+			if (!strcmp(s, "color")) {
+				if (!strcmp(optarg, "auto"))
+					cfg->color = -1;
+				else if (!strcmp(optarg, "on"))
+					cfg->color = 1;
+				else
+					cfg->color = 0;
+				continue;
+			}
+		}
+
 		switch (cc) {
 		case 'o':
 			cfg->output_file = optarg;
@@ -295,7 +318,6 @@ int main(int argc, char *argv[])
 		dt_checker_check(dt);
 		dt_emitter_emit(dt);
 	}
-
 	dt_cleanup(dt, dt->error_flag);
 
 	return err ? EXIT_FAILURE : 0;

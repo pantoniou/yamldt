@@ -741,6 +741,8 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.debug = dt->cfg.debug;
+	cfg.silent = dt->cfg.silent;
+	cfg.color = dt->cfg.color;
 	cfg.output_file = output ? output : "/dev/null";
 
 	if (!strchr(input, ' ')) {
@@ -1510,6 +1512,15 @@ static void get_error_location(struct yaml_dt_state *dt,
 	*linep = lastline;
 }
 
+#define RED "\x1b[31;1m"
+#define GREEN "\x1b[32;1m"
+#define YELLOW "\x1b[33;1m"
+#define BLUE "\x1b[34;1m"
+#define MAGENTA "\x1b[35;1m"
+#define CYAN "\x1b[36;1m"
+#define WHITE "\x1b[37;1m"
+#define RESET "\x1b[0m"
+
 void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
@@ -1518,6 +1529,14 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 	char linebuf[1024];
 	char filebuf[PATH_MAX + 1];
 	size_t line, column, end_line, end_column;
+	const char *emph = "", *kind = "", *marker = "", *reset = "";
+
+	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) || dt->cfg.color == 1) {
+		emph = WHITE;
+		kind = RED;
+		marker = GREEN;
+		reset = RESET;
+	}
 
 	va_start(ap, fmt);
 	vsnprintf(str, sizeof(str) - 1, fmt, ap);
@@ -1542,9 +1561,11 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 		if (end_line != line)
 			end_column = strlen(linebuf) + 1;
 
-		fprintf(stderr, "%s:%zd:%zd: %s\n %s\n %*s^",
-				filebuf, line, column + 1,
-				str, linebuf, (int)column, "");
+		fprintf(stderr, "%s%s:%zd:%zd: %s%s%s\n %s\n %*s%s^%s",
+				emph, filebuf, line, column + 1,
+				kind, str, reset,
+				linebuf,
+				(int)column, "", marker, reset);
 		while (++column < end_column - 1)
 			fprintf(stderr, "~");
 		fprintf(stderr, "\n");
@@ -1564,6 +1585,19 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	char linebuf[1024];
 	char filebuf[PATH_MAX + 1];
 	size_t line, column, end_line, end_column;
+	const char *emph = "", *kind = "", *marker = "", *reset = "";
+
+	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) || dt->cfg.color == 1) {
+		emph = WHITE;
+		if (!strcmp(type, "error"))
+			kind = RED;
+		else if (!strcmp(type, "warning"))
+			kind = MAGENTA;
+		else
+			kind = YELLOW;
+		marker = GREEN;
+		reset = RESET;
+	}
 
 	line = m->start.line;
 	column = m->start.column;
@@ -1578,12 +1612,13 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	if (end_line != line)
 		end_column = strlen(linebuf) + 1;
 
-	fprintf(stderr, "%s:%zd:%zd: %s: %s\n %s\n %*s^",
-			filebuf, line, column + 1,
-			type, msg, linebuf, (int)column, "");
+	fprintf(stderr, "%s%s:%zd:%zd: %s%s:%s %s%s\n %s\n %*s%s^",
+			emph, filebuf, line, column + 1,
+			kind, type, emph, msg, reset,
+			linebuf, (int)column, "", marker);
 	while (++column < end_column - 1)
 		fprintf(stderr, "~");
-	fprintf(stderr, "\n");
+	fprintf(stderr, "%s\n", reset);
 }
 
 void dt_print_at(struct yaml_dt_state *dt,
