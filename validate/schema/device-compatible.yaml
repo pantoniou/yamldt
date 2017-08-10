@@ -5,3 +5,6 @@ device-compatible: &device-compatible
   # select node for checking when the compatible constraint and
   # the device status enable constraint are met.
   selected: [ "compatible", *device-status-enabled ]
+
+  class: constraint
+  virtual: true

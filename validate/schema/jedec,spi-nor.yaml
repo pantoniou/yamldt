@@ -10,8 +10,6 @@ jedec,spi-nor:
     name: Unknown
 
   inherits: *spi_slave
-  # selected: [ *jedec-spi-nor-compatible, *device-status-enabled ]
-  # selected: [ "compatible", *device-status-enabled ]
 
   properties:
     reg:

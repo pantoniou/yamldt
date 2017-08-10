@@ -10,6 +10,9 @@ spi-slave: &spi_slave
 
   inherits: *device-compatible
 
+  class: spi-slave
+  virtual: true
+
   description: >
     SPI (Serial Peripheral Interface) slave bus devices are children of
     a SPI master bus device.

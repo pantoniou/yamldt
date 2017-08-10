@@ -110,6 +110,7 @@ struct yaml_dt_config {
 	int input_file_count;
 	const char *output_file;
 	bool debug;
+	bool silent;
 	bool late;
 	const char *compiler;
 	const char *cflags;
@@ -255,6 +256,9 @@ static inline void dt_set_error_on_failed_get(struct yaml_dt_state *dt, bool err
 void dt_debug(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
 
+void dt_info(struct yaml_dt_state  *dt, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 2, 0)));
+
 void dt_fatal(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)))
 		__attribute__ ((noreturn));
@@ -327,16 +331,26 @@ struct ref *dt_get_ref(struct yaml_dt_state *dt,
 int dt_get_rcount(struct yaml_dt_state *dt, struct node *np,
 		  const char *name, int pindex);
 
+const char *dt_ref_string(struct yaml_dt_state *dt, struct ref *ref);
 const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex);
+
+unsigned long long dt_ref_int(struct yaml_dt_state *dt, struct ref *ref,
+			      int *error);
 unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex, int *error);
+
+int dt_ref_bool(struct yaml_dt_state *dt, struct ref *ref);
 int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
 		 const char *name, int pindex, int rindex);
+
+const void *dt_ref_binary(struct yaml_dt_state *dt, struct ref *ref,
+			  size_t *binary_size);
 const void *dt_get_binary(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex,
 			  size_t *binary_size);
 
+struct node *dt_ref_noderef(struct yaml_dt_state *dt, struct ref *ref);
 struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
 			     const char *name, int pindex, int rindex);
 

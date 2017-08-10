@@ -3,4 +3,7 @@
 valid_compatible: &valid_compatible
   version: 1
 
-  title: valid compatible property contraint
+  title: valid compatible property constraint
+
+  class: constraint
+  virtual: true

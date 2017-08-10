@@ -63,6 +63,8 @@
 #include "ebpf_dt.h"
 #endif
 
+#define NPSTACK_SIZE	8
+
 struct frag {
 	struct list_head node;
 	const char *template;
@@ -80,12 +82,27 @@ enum constraint_type {
 	t_check
 };
 
+enum constraint_subtype {
+	st_select_ref,
+	st_select_prop,
+	st_check_category,
+	st_check_type,
+	st_check_rule,
+};
+
 struct constraint_desc {
 	struct list_head node;
+	struct constraint_desc *parent;
+	struct list_head children;	/* constraints that operate on the same properties */
 	enum constraint_type type;
+	enum constraint_subtype subtype;
 	int idx;		/* index in the code gen */
 	struct node *np;	/* schema node */
 	struct node *npp;	/* schema property node (that has the constraint) */
+	const char *constraint;	/* if available */
+	const char *propname;	/* propname */
+	int npstacksz;		/* size of the stack */
+	struct node *npstack[];	/* the actual stack */
 };
 
 struct dtb_check_state {
@@ -123,6 +140,8 @@ struct dtb_check_state {
 	struct node *cg_property_check;
 	const char *cg_property_check_prolog;
 	const char *cg_property_check_epilog;
+	const char *cg_property_check_badtype_prolog;
+	const char *cg_property_check_badtype_epilog;
 	struct node *cg_property_check_types;
 	struct node *cg_property_check_categories;
 
@@ -229,32 +248,24 @@ int output_frag(struct yaml_dt_state *dt, const struct var *vars, FILE *fp,
 	return 0;
 }
 
+static inline bool constraint_should_skip_content(struct yaml_dt_state *dt,
+		const struct constraint_desc *cd)
+{
+	return cd->type == t_check && (cd->subtype == st_check_type ||
+				       cd->subtype == st_check_category);
+}
+
 static int append_constraint(struct yaml_dt_state *dt,
-			     struct yaml_dt_state *sdt,
-			     struct node *node_np,
-			     struct node *property_np,
-			     FILE *fp, const char *constraint,
-			     const struct var *vars,
-			     enum constraint_type type,
-			     int idx)
+			     struct constraint_desc *cd,
+			     FILE *fp, const struct var *vars)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *cgdt = dtbchk->cgdt;
+	struct node *property_np = cd->npp;
 	const char *type_prolog, *type_epilog;
 	const char *category_prolog, *category_epilog;
 	struct node *nptype, *npcategory;
-	const char *prolog;
-
-	switch (type) {
-	case t_select:
-		prolog = dtbchk->cg_node_select_prolog;
-		break;
-	case t_check:
-		prolog = dtbchk->cg_node_check_prolog;
-		break;
-	default:
-		return -1;
-	}
+	struct constraint_desc *cdt;
 
 	/* lookup failures are errors */
 	dt_set_error_on_failed_get(cgdt, true);
@@ -275,18 +286,28 @@ static int append_constraint(struct yaml_dt_state *dt,
 	if (cgdt->error_flag)
 		dt_fatal(cgdt, "Bad codegen configuration\n");
 
-	/* common prolog on start */
-	if (ftell(fp) == 0) {
-		output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
-		output_frag(dt, vars, fp, prolog, 0);
+	output_frag(dt, vars, fp, type_prolog, 1);
+	output_frag(dt, vars, fp, dtbchk->cg_property_check_badtype_prolog, 1);
+	output_frag(dt, vars, fp, category_prolog, 1);
+
+	if (!constraint_should_skip_content(dt, cd)) {
+
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
+		output_frag(dt, vars, fp, cd->constraint, 2);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
 	}
 
-	output_frag(dt, vars, fp, type_prolog, 1);
-	output_frag(dt, vars, fp, category_prolog, 1);
-	output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
-	output_frag(dt, vars, fp, constraint, 2);
-	output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
+	list_for_each_entry(cdt, &cd->children, node) {
+		if (constraint_should_skip_content(dt, cdt))
+			continue;
+
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_prolog, 1);
+		output_frag(dt, vars, fp, cdt->constraint, 2);
+		output_frag(dt, vars, fp, dtbchk->cg_property_check_epilog, 1);
+	}
+
 	output_frag(dt, vars, fp, category_epilog, 1);
+	output_frag(dt, vars, fp, dtbchk->cg_property_check_badtype_epilog, 1);
 	output_frag(dt, vars, fp, type_epilog, 1);
 
 	return 0;
@@ -323,7 +344,7 @@ static int count_constraints_single(struct yaml_dt_state *dt, struct node *np)
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *child, *npp;
-	int count;
+	int count, constraint_count;
 
 	/* constraints of the node */
 	count = dt_get_rcount(sdt, np, "constraint", 0);
@@ -332,8 +353,12 @@ static int count_constraints_single(struct yaml_dt_state *dt, struct node *np)
 	list_for_each_entry(child, &np->children, node) {
 		if (strcmp(child->name, "properties"))
 			continue;
-		list_for_each_entry(npp, &child->children, node)
-			count += dt_get_rcount(sdt, npp, "constraint", 0);
+		list_for_each_entry(npp, &child->children, node) {
+			constraint_count = dt_get_rcount(sdt, npp, "constraint", 0);
+			if (dt_get_string(sdt, npp, "type", 0, 0))
+				constraint_count++;
+			count += constraint_count;
+		}
 	}
 
 	return count;
@@ -373,8 +398,8 @@ void print_inherits(struct yaml_dt_state *dt, struct node *np, int depth)
 	ccount = 0;
 	count_constraints(dt, np, &ccount);
 
-	dt_debug(dt, "%*s", depth * 4, "");
-	dt_debug(dt, "%s - selected#=%d constraints#=%d\n",
+	fprintf(stderr, "%*s", depth * 4, "");
+	fprintf(stderr, "%s - selected#=%d constraints#=%d\n",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
 			scount, ccount);
 
@@ -382,187 +407,12 @@ void print_inherits(struct yaml_dt_state *dt, struct node *np, int depth)
 	for (i = 0; i < rcount; i++) {
 		npp = dt_get_noderef(sdt, np, "inherits", 0, i);
 		if (!npp) {
-			dt_debug(dt, "%*s", depth * 4, "");
-			dt_debug(dt, "#%d of inherits not a ref\n", i); 
+			fprintf(stderr, "%*s", depth * 4, "");
+			fprintf(stderr, "#%d of inherits not a ref\n", i); 
 			continue;
 		}
 		print_inherits(dt, npp, depth + 1);
 	}
-}
-
-static struct node *
-__get_selected_constraint_property_single(struct yaml_dt_state *dt,
-		struct node **npstack, int top, int stacksz, int idx,
-		const char **constraint, struct node **nprule)
-{
-	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *sdt = dtbchk->sdt;
-	struct node *np = npstack[top];
-	struct node *npp;
-	const char *propname;
-	char namebuf[NODE_FULLNAME_MAX];
-
-	dt_debug(dt, "%s on %s#%d\n", __func__,
-			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
-
-	/* first try for node deref */
-	npp = dt_get_noderef(sdt, np, "selected", 0, idx);
-	if (npp) {
-		*constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
-		if (*constraint) {
-			*nprule = np;
-			return npp;
-		}
-		dt_fatal(dt, "FFFF\n");
-		return NULL;
-	}
-
-	/* otherwise it might be property name */
-
-	/* get the property name */
-	propname = dt_get_string(sdt, np, "selected", 0, idx);
-	if (!propname)
-		return NULL;
-
-	/* we have to use the most 'deep' property starting from start */
-
-	while (top >= 0 && (np = npstack[top]) != NULL) {
-
-		dt_debug(dt, "checking %s on %s#%d for %s\n", __func__,
-				dn_fullname(np, namebuf, sizeof(namebuf)), idx,
-				propname);
-
-		/* get properties node of the current node */
-		npp = dt_get_node(sdt, np, "properties", 0);
-		if (npp)
-			npp = dt_get_node(sdt, npp, propname, 0);
-		if (npp) {
-			dt_debug(dt, "found constraint %s on %s#%d\n", __func__,
-					dn_fullname(npp, namebuf, sizeof(namebuf)), idx);
-
-			*constraint = dt_get_string(sdt, npp, "constraint", 0, 0);
-			if (*constraint) {
-				*nprule = np;
-				return npp;
-			}
-		}
-		top--;
-	}
-
-	return NULL;
-}
-
-static struct node *
-__get_check_constraint_property_single(struct yaml_dt_state *dt,
-		struct node **npstack, int top, int stacksz, int idx,
-		const char **constraint, struct node **nprule)
-{
-	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *sdt = dtbchk->sdt;
-	struct node *np = npstack[top];
-	struct node *npp, *child;
-	char namebuf[NODE_FULLNAME_MAX];
-	int rcount;
-
-	dt_debug(dt, "%s on %s#%d\n", __func__,
-			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
-
-	rcount = dt_get_rcount(sdt, np, "constraint", 0);
-	if (idx < rcount) {
-		*constraint = dt_get_string(sdt, np, "constraint", 0, idx);
-		if (!*constraint)
-			dt_fatal(dt, "Can't get constraint\n");
-		*nprule = np;
-		return np;
-	}
-	idx -= rcount;
-
-	/* constraints of the properties */
-	list_for_each_entry(child, &np->children, node) {
-		if (strcmp(child->name, "properties"))
-			continue;
-		list_for_each_entry(npp, &child->children, node) {
-			rcount = dt_get_rcount(sdt, npp, "constraint", 0);
-			if (idx < rcount) {
-				*constraint = dt_get_string(sdt, npp, "constraint", 0, idx);
-				if (!*constraint)
-					dt_fatal(dt, "Can't get constraint\n");
-				*nprule = np;
-				return npp;
-			}
-			idx -= rcount;
-		}
-	}
-	return NULL;
-}
-
-static struct node *
-__get_constraint_property(struct yaml_dt_state *dt,
-				   struct node **npstack, int top, int stacksz,
-				   int idx, const char **constraint,
-				   struct node **nprule,
-				   enum constraint_type type)
-{
-	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct yaml_dt_state *sdt = dtbchk->sdt;
-	char namebuf[NODE_FULLNAME_MAX];
-	struct node *np = npstack[top];
-	struct node *npp;
-	int rcount, scount, j;
-
-	dt_debug(dt, "%s:", __func__);
-	dt_debug(dt, " this=%s#%d",
-			dn_fullname(np, namebuf, sizeof(namebuf)), idx);
-	dt_debug(dt, "\n");
-
-	/* try selected on this node */
-	if (type == t_select) {
-		rcount = count_selected_single(dt, np);
-		if (idx < rcount)
-			return __get_selected_constraint_property_single(dt, npstack,
-					top, stacksz, idx, constraint, nprule);
-	} else {
-		rcount = count_constraints_single(dt, np);
-		if (idx < rcount)
-			return __get_check_constraint_property_single(dt, npstack,
-					top, stacksz, idx, constraint, nprule);
-	}
-	idx -= rcount;
-
-	/* go for each inherit in sequence */
-	rcount = dt_get_rcount(sdt, np, "inherits", 0);
-	for (j = 0; j < rcount; j++) {
-		npp = dt_get_noderef(sdt, np, "inherits", 0, j);
-		if (!npp)
-			dt_fatal(dt, "Bad inherits\n");
-		scount = 0;
-		count_selected(dt, npp, &scount);
-		if (idx < scount) {
-			assert(top + 1 < stacksz);
-			npstack[++top] = npp;
-			return __get_constraint_property(dt, npstack,
-					top, stacksz, idx, constraint, nprule, type);
-		}
-		idx -= scount;
-	}
-
-	return NULL;
-}
-
-static struct node *
-get_constraint_property(struct yaml_dt_state *dt, struct node *np,
-				 int idx, const char **constraint,
-				 struct node **nprule,
-				 enum constraint_type type)
-{
-	struct node *npstack[32];
-
-	*constraint = NULL;
-	*nprule = NULL;
-	npstack[0] = np;
-	return __get_constraint_property(dt,
-			npstack, 0, ARRAY_SIZE(npstack), idx,
-			constraint, nprule, type);
 }
 
 static void save_file(struct yaml_dt_state *dt, const char *base,
@@ -595,17 +445,282 @@ static void save_file(struct yaml_dt_state *dt, const char *base,
 	free(filename);
 }
 
+static void add_constraint(struct yaml_dt_state *dt,
+	struct list_head *clist,
+	enum constraint_type type, enum constraint_subtype subtype, int *idxp,
+	struct node **npstack, int top, int stacksz,
+	struct node *npp, const char *constraint,
+	const char *propname)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *cgdt = dtbchk->cgdt;
+	struct node *np = npstack[top];
+	struct constraint_desc *cd, *cdt, *cdn;
+	struct node *nptype, *npcategory;
+	struct list_head *lh;
+	size_t size;
+
+	/* constraint must have type and category properties */
+	nptype = dt_get_node(cgdt, dtbchk->cg_property_check_types,
+			dt_get_string(cgdt, npp, "type", 0, 0), 0);
+	if (!nptype)
+		return;
+
+	npcategory = dt_get_node(cgdt, dtbchk->cg_property_check_categories,
+			dt_get_string(cgdt, npp, "category", 0, 0), 0);
+	if (!npcategory)
+		return;
+
+	size = sizeof(*cd) + sizeof(*npstack) * (top + 1);
+	cd = malloc(size);
+	assert(cd);
+	memset(cd, 0, size);
+	cd->type = type;
+	cd->subtype = subtype;
+	cd->idx = *idxp;
+	cd->np = np;
+	cd->npp = npp;
+	cd->constraint = constraint;
+	cd->propname = propname;
+	cd->npstacksz = top + 1;
+	memcpy(cd->npstack, npstack, sizeof(*npstack) * cd->npstacksz);
+	INIT_LIST_HEAD(&cd->children);
+	cd->parent = NULL;
+
+	/* if a property constraint exist with that name */
+	list_for_each_entry(cdt, clist, node) {
+		if (cdt->type == cd->type && !strcmp(cdt->propname, cd->propname)) {
+			cd->parent = cdt;
+			break;
+		}
+	}
+
+	lh = cd->parent ? &cdt->children : clist;
+
+	/* detect duplicate constraints */
+	list_for_each_entry(cdn, lh, node) {
+		if (cdn->type == cd->type && cdn->subtype == cd->subtype &&
+		    cdn->npp == cd->npp && !strcmp(cdn->constraint, cd->constraint)) {
+			free(cd);
+			return;
+		}
+	}
+
+	list_add_tail(&cd->node, lh);
+
+	(*idxp)++;
+#if 0
+	char namebuf[NODE_FULLNAME_MAX];
+	const char *typename;
+	const char *subtypename;
+
+	switch (type) {
+	case t_select:
+		typename = "select";
+		break;
+	case t_check:
+		typename = "check";
+		break;
+	default:
+		typename = "*unknown*";
+		break;
+	}
+
+	switch (subtype) {
+	case st_select_ref:
+		subtypename = "ref";
+		break;
+	case st_select_prop:
+		subtypename = "prop";
+		break;
+	case st_check_category:
+		subtypename = "category";
+		break;
+	case st_check_type:
+		subtypename = "type";
+		break;
+	case st_check_rule:
+		subtypename = "rule";
+		break;
+	default:
+		subtypename = "*unknown*";
+		break;
+	}
+
+	fprintf(stderr, "%s type=%s, subtype=%s idx=%d\n", __func__, typename, subtypename, *idxp - 1);
+	fprintf(stderr, "    np=%s\n", dn_fullname(np, namebuf, sizeof(namebuf)));
+	fprintf(stderr, "    npp=%s\n", dn_fullname(npp, namebuf, sizeof(namebuf)));
+	fprintf(stderr, "    constraint=%s\n", constraint ? : "<NULL>");
+	fprintf(stderr, "    propname=%s\n", propname ? : "<NULL>");
+	for (i = 0; i < cd->npstacksz; i++)
+		fprintf(stderr, "    npstack[%d]=%s\n", i,
+				dn_fullname(cd->npstack[i], namebuf, sizeof(namebuf)));
+	fprintf(stderr, "    nptype=%s\n", dn_fullname(nptype, namebuf, sizeof(namebuf)));
+	fprintf(stderr, "    npcategory=%s\n", dn_fullname(npcategory, namebuf, sizeof(namebuf)));
+#endif
+}
+
+static void free_constraint(struct yaml_dt_state *dt, struct constraint_desc *cd)
+{
+	struct constraint_desc *cdc, *cdcn;
+
+	list_del(&cd->node);
+	list_for_each_entry_safe(cdc, cdcn, &cd->children, node)
+		free_constraint(dt, cdc);
+	free(cd);
+}
+
+static void collect_constraint_prop(struct yaml_dt_state *dt,
+		struct node **npstack, int top, int stacksz,
+		enum constraint_type type, enum constraint_type subtype,
+		struct list_head *clist, int *idxp, struct node *npp,
+		const char *propname)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct property *cprop;
+	const char *constraint;
+	struct ref *cref;
+	int k, l;
+
+	/* iterate over all constraints */
+	for (k = 0; (cprop = dt_get_property(sdt, npp, "constraint", k)); k++) {
+		/* iterate over all refs in the "constraints" property */
+		for (l = 0; (cref = dt_get_ref(sdt, cprop, l)); l++) {
+			constraint = dt_get_string(sdt, npp, "constraint", k, l);
+			if (!constraint) {
+				tree_error_at_ref(to_tree(sdt), cref,
+					"not a string\n");
+				continue;
+			}
+			add_constraint(dt, clist, type, subtype, idxp,
+					npstack, top, stacksz, npp, constraint,
+					propname);
+		}
+	}
+}
+
+static void collect_constraint_check_default(struct yaml_dt_state *dt,
+		struct node **npstack, int top, int stacksz,
+		struct list_head *clist, int *idxp, struct node *npp,
+		const char *propname)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	const char *category;
+	const char *ptype;
+
+	/* those may not exist if the rule is not defining properties */
+	category = dt_get_string(sdt, npp, "category", 0, 0);
+	if (category)
+		add_constraint(dt, clist, t_check, st_check_category, idxp,
+				npstack, top, stacksz, npp, category,
+				propname);
+
+	ptype = dt_get_string(sdt, npp, "type", 0, 0);
+	if (!ptype)
+		add_constraint(dt, clist, t_check, st_check_type, idxp,
+				npstack, top, stacksz, npp, ptype,
+				propname);
+}
+
+static void collect_constraint_node(struct yaml_dt_state *dt,
+		struct node **npstack, int top, int stacksz,
+		enum constraint_type type, struct list_head *clist, int *idxp)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *np = npstack[top];
+	struct node *npp, *npt, *nppt;
+	const char *propname;
+	struct property *prop;
+	struct ref *ref;
+	int i, j, m, n, rcount;
+
+	if (type == t_select) {
+		/* iterate over all selected properties */
+		for (i = 0; (prop = dt_get_property(sdt, np, "selected", i)); i++) {
+
+			/* iterate over all refs in the "selected" property */
+			for (j = 0; (ref = dt_get_ref(sdt, prop, j)); j++) {
+
+				/* try *ref first */
+				npp = dt_ref_noderef(sdt, ref);
+				if (npp) {
+					collect_constraint_prop(dt, npstack, top, stacksz,
+							type, st_select_ref, clist, idxp,
+							npp, npp->name);
+					continue;
+				}
+
+				/* try property name */
+				propname = dt_ref_string(sdt, ref);
+				if (!propname) {
+					tree_error_at_ref(to_tree(sdt), ref,
+						"Not a constraint reference or property\n");
+					continue;
+				}
+
+				/* now collect all the constraints for that property name */
+				for (m = top; m >= 0 && (npt = npstack[m]); m--) {
+					for (n = 0; (npp = dt_get_node(sdt, npt, "properties", n)); n++) {
+
+						list_for_each_entry(nppt, &npp->children, node) {
+
+							/* property name must match */
+							if (strcmp(nppt->name, propname))
+								continue;
+
+							collect_constraint_prop(dt, npstack, top, stacksz,
+									t_select, st_select_prop, clist, idxp,
+									nppt, propname);
+						}
+					}
+				}
+			}
+		}
+	} else if (type == t_check) {
+		/* now collect all the constraints for that property name */
+		for (m = top; m >= 0 && (npt = npstack[m]); m--) {
+			for (n = 0; (npp = dt_get_node(sdt, npt, "properties", n)); n++) {
+
+				list_for_each_entry(nppt, &npp->children, node) {
+
+					collect_constraint_check_default(dt, npstack, top, stacksz,
+							clist, idxp, nppt, nppt->name);
+
+					/* collect the rule constraints */
+					collect_constraint_prop(dt, npstack, top, stacksz,
+							t_check, st_check_rule, clist, idxp,
+							nppt, nppt->name);
+				}
+			}
+
+
+		}
+	} else
+		return;
+
+	/* collect constraints we've inherited */
+	rcount = dt_get_rcount(sdt, np, "inherits", 0);
+	for (i = 0; i < rcount; i++) {
+		npp = dt_get_noderef(sdt, np, "inherits", 0, i);
+		if (npp) {
+			assert(top + 1 < stacksz);
+			npstack[++top] = npp;
+			collect_constraint_node(dt, npstack, top, stacksz, type, clist, idxp);
+		}
+	}
+}
+
 static int prepare_schema_node(struct yaml_dt_state *dt,
 		struct yaml_dt_state *sdt, struct node *np,
-		enum constraint_type type)
+		enum constraint_type type, int *idxp)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct property *prop;
 	struct ref *ref;
-	/* char namebuf[NODE_FULLNAME_MAX]; */
-	const char *cnst;
-	int i, idx, err;
-	struct node *npp, *nprule;
+	int err;
 	char idxbuf[9];
 #define NODE_NAME_IDX 0
 #define PROPERTY_NAME_IDX 1
@@ -613,7 +728,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 #define RULE_NAME_IDX 3
 #define VARS_COUNT 4
 	struct var vars[VARS_COUNT + 1];
-	char *buf;
+	char *buf = NULL;
 	size_t size;
 	FILE *fp;
 	void *output;
@@ -622,23 +737,36 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	size_t b64_output_size;
 	const char *source_name;
 	const char *output_name;;
+	const char *prolog;
 	const char *epilog;
-	struct constraint_desc *cd;
+	struct list_head clist;
+	struct constraint_desc *cd, *cdn;
+	struct node *npstack[NPSTACK_SIZE];
 
 	switch (type) {
 	case t_select:
 		source_name = "selected-rule-source";
 		output_name = "selected-rule-output";
+		prolog = dtbchk->cg_node_select_prolog;
 		epilog = dtbchk->cg_node_select_epilog;
 		break;
 	case t_check:
 		source_name = "check-rule-source";
 		output_name = "check-rule-output";
+		prolog = dtbchk->cg_node_check_prolog;
 		epilog = dtbchk->cg_node_check_epilog;
 		break;
 	default:
 		return -1;
 	}
+
+	INIT_LIST_HEAD(&clist);
+	npstack[0] = np;
+	collect_constraint_node(dt, npstack, 0, ARRAY_SIZE(npstack), type, &clist, idxp);
+
+	/* nothing to do */
+	if (list_empty(&clist))
+		return 0;
 
 	/* open memstream */
 	fp = open_memstream(&buf, &size);
@@ -659,39 +787,26 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	vars[VARS_COUNT].name = NULL;
 	vars[VARS_COUNT].value = NULL;
 
-	/* try specific constraints */
-	idx = 0;
-	for (i = 0;
-	     (npp = get_constraint_property(dt, np, i, &cnst, &nprule, type)) != NULL;
-	     i++) {
+	output_frag(dt, vars, fp, dtbchk->cg_common_prolog, 0);
+	output_frag(dt, vars, fp, prolog, 0);
 
-		/* it can happen for non-instantiated rules */
-		if (!cnst)
-			continue;
-
-		dt_debug(dt, "Appending constraint for %s prop %s: %s\n",
-				np->name, npp->name, cnst);
+	/* iterate over all constraints */
+	list_for_each_entry_safe(cd, cdn, &clist, node) {
 
 		/* update variables */
-		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
+		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", cd->idx);
 		idxbuf[sizeof(idxbuf) - 1] = '\0';
 		vars[PROPERTY_INDEX_IDX].value = idxbuf;
-		vars[PROPERTY_NAME_IDX].value = npp->name;
-		vars[RULE_NAME_IDX].value = nprule->name;
+		vars[PROPERTY_NAME_IDX].value = cd->propname;
+		vars[RULE_NAME_IDX].value = cd->np->name;
 
-		append_constraint(dt, sdt, np, npp, fp, cnst, vars, type, idx);
+		dt_debug(dt, "Appending constraint for %s prop %s (%s): %s\n",
+				cd->np->name, cd->npp->name, cd->propname, cd->constraint);
 
-		/* add the constraint desc entry */
-		cd = malloc(sizeof(*cd));
-		assert(cd);
-		memset(cd, 0, sizeof(*cd));
-		cd->type = type;
-		cd->idx = idx;
-		cd->np = np;
-		cd->npp = npp;
+		append_constraint(dt, cd, fp, vars);
+
+		list_del(&cd->node);
 		list_add_tail(&cd->node, &dtbchk->clist);
-
-		idx++;
 	}
 
 	/* mark end */
@@ -701,11 +816,8 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	vars[PROPERTY_NAME_IDX].value = "";
 	vars[RULE_NAME_IDX].value = "";
 
-	/* it output was generated tack on epilog */
-	if (ftell(fp) != 0) {
-		output_frag(dt, vars, fp, epilog, 0);
-		output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
-	}
+	output_frag(dt, vars, fp, epilog, 0);
+	output_frag(dt, vars, fp, dtbchk->cg_common_epilog, 0);
 	fclose(fp);
 
 	err = 0;
@@ -776,7 +888,10 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 
 out_err:
 
-	free(buf);
+	if (buf)
+		free(buf);
+
+	assert(list_empty(&clist));
 
 	return err;
 }
@@ -786,17 +901,24 @@ static int prepare_schema(struct yaml_dt_state *dt)
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *root, *np;
-	int ret;
+	int ret, idx;
 
 	root = tree_root(to_tree(sdt));
 
+	idx = 0;
 	list_for_each_entry(np, &root->children, node) {
-		ret = prepare_schema_node(dt, sdt, np, t_select);
+
+		/* never generate checkers for virtuals */
+		ret = dt_get_bool(sdt, np, "virtual", 0, 0);
+		if (ret == 1)
+			continue;
+
+		ret = prepare_schema_node(dt, sdt, np, t_select, &idx);
 		if (ret)
 			dt_fatal(dt, "Failed to prepare selector %s\n",
 					np->name);
 
-		ret = prepare_schema_node(dt, sdt, np, t_check);
+		ret = prepare_schema_node(dt, sdt, np, t_check, &idx);
 		if (ret)
 			dt_fatal(dt, "Failed to prepare checker %s\n",
 					np->name);
@@ -825,16 +947,11 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 
 	dt->checker_state = dtbchk;
 
-	if (!dtbchk->schema)
-		dt_fatal(dt, "No schema file provided\n");
-
 	if (!dtbchk->codegen)
 		dt_fatal(dt, "No codegen file provided\n");
 
-	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema,
-			dtbchk->schema_save, "schema");
-	if (!dtbchk->sdt)
-		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
+	if (!dtbchk->schema)
+		dt_fatal(dt, "No schema file provided\n");
 
 	dtbchk->cgdt = dt_parse_single(dt, dtbchk->codegen, NULL, "codegen");
 	if (!dtbchk->cgdt)
@@ -869,6 +986,8 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	dtbchk->cg_property_check = dt_get_node(cgdt, dtbchk->cg_property, "check", 0);
 	dtbchk->cg_property_check_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "prolog", 0, 0);
 	dtbchk->cg_property_check_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "epilog", 0, 0);
+	dtbchk->cg_property_check_badtype_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-prolog", 0, 0);
+	dtbchk->cg_property_check_badtype_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-epilog", 0, 0);
 
 	dtbchk->cg_property_check_types = dt_get_node(cgdt, dtbchk->cg_property_check, "types", 0);
 	dtbchk->cg_property_check_categories = dt_get_node(cgdt, dtbchk->cg_property_check, "categories", 0);
@@ -877,6 +996,13 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 		dt_fatal(cgdt, "Could not find codegen data\n");
 
 	dt_set_error_on_failed_get(cgdt, false);
+
+	/* schema is parsed after codegen */
+	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema,
+			dtbchk->schema_save, "schema");
+	if (!dtbchk->sdt)
+		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
+
 
 	err = prepare_schema(dt);
 	if (err)
@@ -906,10 +1032,8 @@ void dtbchk_cleanup(struct yaml_dt_state *dt)
 	/* the children parsers are automatically cleaned */
 
 	/* clean constraint descriptors */
-	list_for_each_entry_safe(cd, cdn, &dtbchk->clist, node) {
-		list_del(&cd->node);
-		free(cd);
-	}
+	list_for_each_entry_safe(cd, cdn, &dtbchk->clist, node)
+		free_constraint(dt, cd);
 
 	free(dtbchk);
 }
@@ -918,30 +1042,61 @@ void dtbchk_cleanup(struct yaml_dt_state *dt)
 
 /* find the constraint entry by error code */
 static struct constraint_desc *lookup_constraint_by_ret(struct yaml_dt_state *dt,
-		struct node *np, struct node *snp, uint64_t vmret)
+		struct node *np, struct node *snp, uint64_t vmret,
+		const char **errmsg)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct constraint_desc *cd;
+	struct constraint_desc *cd, *cdt;
 	int idx;
 	long long ret = (int64_t)vmret;
 
-	if (ret >= 0 || ret < -3000)
+	if (ret >= 0 || ret < -4000)
 		return NULL;
 
-	if (ret < -2000) 		/* exist check */
+	if (ret < -3000) { 		/* badtype check */
+		idx = -(ret + 3000);
+		*errmsg = "bad property type";
+	} else if (ret < -2000) {	/* exist check */
 		idx = -(ret + 2000);
-	else if (ret < -1000) 		/* property check */
+		*errmsg = "property does not exist";
+	} else if (ret < -1000) { 	/* property check */
 		idx = -(ret + 1000);
-	else if (ret == -1)		/* node constraint */
+		*errmsg = "constraint rule failed";
+	} else if (ret == -1)		/* node constraint */
 		return NULL;
 	else
 		return NULL;
 
+	/* two levels (we group by property */
 	list_for_each_entry(cd, &dtbchk->clist, node) {
-		if (cd->type == t_check && cd->np == snp && cd->idx == idx)
+		if (cd->idx == idx)
 			return cd;
+		list_for_each_entry(cdt, &cd->children, node) {
+			if (cdt->idx == idx)
+				return cdt;
+		}
 	}
 	return NULL;
+}
+
+static void dump_constraints(struct yaml_dt_state *dt,
+		struct node *np, struct node *snp)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct constraint_desc *cd, *cdt;
+	char namebuf[NODE_FULLNAME_MAX];
+
+	/* two levels (we group by property */
+	list_for_each_entry(cd, &dtbchk->clist, node) {
+		printf("%3d: %s (%s)\n", cd->idx,
+				dn_fullname(cd->npp, namebuf, sizeof(namebuf)),
+				cd->propname);
+		list_for_each_entry(cdt, &cd->children, node) {
+			printf("   %3d: %s (%s)\n", cdt->idx,
+					dn_fullname(cdt->npp, namebuf, sizeof(namebuf)),
+					cdt->propname);
+		}
+	}
 }
 
 static void check_node_single(struct yaml_dt_state *dt,
@@ -958,6 +1113,8 @@ static void check_node_single(struct yaml_dt_state *dt,
 	struct constraint_desc *cd;
 	struct property *prop;
 	struct ref *ref;
+	const char *errmsg;
+	bool errout;
 
 	dt_debug(dt, "%s: against %s - running select\n",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
@@ -969,8 +1126,9 @@ static void check_node_single(struct yaml_dt_state *dt,
 				err, strerror(-err));
 
 	if (vmret == 0) {
-		dt_debug(dt, "select match at node %s\n",
-			dn_fullname(np, namebuf, sizeof(namebuf)));
+		dt_debug(dt, "select match at node %s against %s\n",
+			dn_fullname(np, namebuf, sizeof(namebuf)),
+			snp->name);
 
 		/* now running check */
 		vmret = ebpf_exec(&check_ctx->vm, np, 0, &err);
@@ -978,31 +1136,49 @@ static void check_node_single(struct yaml_dt_state *dt,
 			dt_fatal(dt, "exec failed with code %d (%s)\n",
 					err, strerror(-err));
 		if (vmret == 0)
-			dt_debug(dt, "node %s is correct\n",
-				dn_fullname(np, namebuf, sizeof(namebuf)));
+			dt_info(dt, "node %s is correct against %s\n",
+				dn_fullname(np, namebuf, sizeof(namebuf)),
+				snp->name);
 		else {
-			cd = lookup_constraint_by_ret(dt, np, snp, vmret);
+			dt_info(dt, "node %s is not correct against %s (%lld)\n",
+				dn_fullname(np, namebuf, sizeof(namebuf)),
+				snp->name, (long long)vmret);
+			cd = lookup_constraint_by_ret(dt, np, snp, vmret, &errmsg);
 			if (cd) {
+				errout = false;
 				if ((prop = dt_get_property(dt, np, cd->npp->name, 0)) &&
 				    (ref = dt_get_ref(dt, prop, 0))) {
-					tree_error_at_ref(to_tree(dt), ref,
-						"illegal property value\n");
+					tree_error_at_ref(to_tree(dt), ref, "%s\n",
+							errmsg);
+					errout = true;
 				}
 
-				/* tree_error_at_node(to_tree(sdt), cd->npp,
-					"property was defined at %s\n",
-					dn_fullname(cd->npp, namebuf, sizeof(namebuf))); */
-
 				if ((prop = dt_get_property(sdt, cd->npp, "constraint", 0)) &&
-				    (ref = dt_get_ref(sdt, prop, 0)))
+				    (ref = dt_get_ref(sdt, prop, 0))) {
 					tree_error_at_ref(to_tree(sdt), ref,
 						"constraint that fails was defined here\n");
+					errout = true;
+				}
+
+				if (errout)
+					errmsg = "";
+
+				tree_error_at_node(to_tree(sdt), cd->npp,
+					"%s%sproperty was defined at %s\n",
+					errmsg, errmsg ? ": " : "",
+					dn_fullname(cd->npp, namebuf, sizeof(namebuf)));
+
 			} else {
+				dump_constraints(dt, np, snp);
+
 				tree_error_at_node(to_tree(dt), np,
 					"node %s has failed verification (code=%lld)\n",
 					dn_fullname(np, namebuf, sizeof(namebuf)),
 					(long long)vmret);
 
+				tree_error_at_node(to_tree(sdt), snp,
+					"verification node @%s\n",
+					dn_fullname(snp, namebuf, sizeof(namebuf)));
 			}
 		}
 	}

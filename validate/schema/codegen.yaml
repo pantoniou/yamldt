@@ -87,12 +87,16 @@ property:
   check:
     prolog: |+
       /* for ${PROPERTY_NAME} from ${RULE_NAME} rule */
-      if (badtype)
-          return -3000 - ${PROPERTY_INDEX};
       if (!(
     epilog: |+
       ))
           return -1000 - ${PROPERTY_INDEX};
+    badtype-prolog: |+
+      if (badtype)
+          return -3000 - ${PROPERTY_INDEX};
+
+    badtype-epilog: |+
+
     types:
       int:
         prolog: |+
@@ -172,4 +176,3 @@ property:
         epilog: |+
           skip_${PROPERTY_INDEX}:
             do { } while(0); /* fix goto that requires a statement */
-

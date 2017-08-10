@@ -734,7 +734,6 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	struct yaml_dt_state *sdt;
 	struct yaml_dt_config cfg;
 	char *argv[2];
-	char **alloc_argv = NULL;
 	int i, err;
 
 	sdt = malloc(sizeof(*sdt));
@@ -750,10 +749,10 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 		cfg.input_file = argv;
 		cfg.input_file_count = 1;
 	} else {
-		alloc_argv = str_to_argv("", input);
-		assert(alloc_argv);
-		cfg.input_file = alloc_argv + 1;
-		for (i = 0; alloc_argv[i + 1]; i++)
+		dt->alloc_argv = str_to_argv("", input);
+		assert(dt->alloc_argv);
+		cfg.input_file = dt->alloc_argv + 1;
+		for (i = 0; dt->alloc_argv[i + 1]; i++)
 			;
 		cfg.input_file_count = i;
 	}
@@ -1660,6 +1659,18 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 	va_end(ap);
 }
 
+void dt_info(struct yaml_dt_state *dt, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (dt->cfg.silent)
+		return;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+}
+
 int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 {
 	struct tree *t = to_tree(dt);
@@ -1673,6 +1684,10 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 	const char *p;
 	const char *xtag = NULL;
 	const char *tag = NULL;
+
+	/* already resolved? */
+	if (to_dt_ref(ref)->is_resolved)
+		return 0;
 
 	prop = ref->prop;
 	assert(prop);
@@ -1845,6 +1860,27 @@ int dt_get_rcount(struct yaml_dt_state *dt, struct node *np,
 	return rindex;
 }
 
+const char *
+dt_ref_string(struct yaml_dt_state *dt, struct ref *ref)
+{
+	if (!to_dt_ref(ref)->is_resolved)
+		dt_resolve_ref(dt, ref);
+
+	if (!to_dt_ref(ref)->is_resolved) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"Failed to resolve\n");
+		return NULL;
+	}
+
+	/* everything is a string, but warn if not evaluated as such */
+	if (strcmp(to_dt_ref(ref)->tag, "!str"))
+		dt_warning_at(dt, &to_dt_ref(ref)->m,
+			"Retrieving as !str (%s)\n", to_dt_ref(ref)->tag);
+
+	return ref->data;
+}
+
 const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
 			  const char *name, int pindex, int rindex)
 {
@@ -1861,24 +1897,34 @@ const char *dt_get_string(struct yaml_dt_state *dt, struct node *np,
 	if (!ref)
 		return NULL;
 
+	return dt_ref_string(dt, ref);
+}
+
+unsigned long long dt_ref_int(struct yaml_dt_state *dt, struct ref *ref,
+			      int *error)
+{
 	if (!to_dt_ref(ref)->is_resolved)
 		dt_resolve_ref(dt, ref);
 
 	if (!to_dt_ref(ref)->is_resolved) {
 		if (dt->error_on_failed_get)
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"Failed to resolve with getting %s property\n",
-			name);
-		return NULL;
+				"resolve failed\n");
+		return -1ULL;
 	}
 
-	/* everything is a string, but warn if not evaluated as such */
-	if (strcmp(to_dt_ref(ref)->tag, "!str"))
-		dt_warning_at(dt, &to_dt_ref(ref)->m,
-			"Retrieving as !str (%s) at %s property\n",
-			to_dt_ref(ref)->tag, name);
+	/* can't retreive a non int tag */
+	if (!is_int_tag(to_dt_ref(ref)->tag) || !to_dt_ref(ref)->is_int) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"not !int (%s) ref\n", to_dt_ref(ref)->tag);
+		return -1ULL;
+	}
 
-	return ref->data;
+	if (error)
+		*error = 0;
+
+	return to_dt_ref(ref)->val;
 }
 
 unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
@@ -1900,31 +1946,31 @@ unsigned long long dt_get_int(struct yaml_dt_state *dt, struct node *np,
 	if (!ref)
 		return -1ULL;
 
+	return dt_ref_int(dt, ref, error);
+}
+
+int dt_ref_bool(struct yaml_dt_state *dt, struct ref *ref)
+{
 	if (!to_dt_ref(ref)->is_resolved)
 		dt_resolve_ref(dt, ref);
 
 	if (!to_dt_ref(ref)->is_resolved) {
 		if (dt->error_on_failed_get)
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"resolve failed ref #%d of %s#%d\n",
-					rindex, name, pindex);
-		return -1ULL;
+				"resolve failed\n");
+		return -1;
 	}
 
 	/* can't retreive a non int tag */
-	if (!is_int_tag(to_dt_ref(ref)->tag) || !to_dt_ref(ref)->is_int) {
+	if (strcmp(to_dt_ref(ref)->tag, "!bool") || !to_dt_ref(ref)->is_bool) {
 		if (dt->error_on_failed_get)
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"not !int (%s) ref #%d of %s#%d\n",
-					to_dt_ref(ref)->tag, rindex,
-					name, pindex);
-		return -1ULL;
+				"not !bool (%s) ref\n",
+					to_dt_ref(ref)->tag);
+		return -1;
 	}
 
-	if (error)
-		*error = 0;
-
-	return to_dt_ref(ref)->val;
+	return to_dt_ref(ref)->val ? 1 : 0;
 }
 
 int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
@@ -1943,28 +1989,26 @@ int dt_get_bool(struct yaml_dt_state *dt, struct node *np,
 	if (!ref)
 		return -1;
 
+	return dt_ref_bool(dt, ref);
+}
+
+const void *dt_ref_binary(struct yaml_dt_state *dt, struct ref *ref,
+			  size_t *binary_size)
+{
 	if (!to_dt_ref(ref)->is_resolved)
 		dt_resolve_ref(dt, ref);
 
 	if (!to_dt_ref(ref)->is_resolved) {
 		if (dt->error_on_failed_get)
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"resolve failed ref #%d of %s#%d\n",
-					rindex, name, pindex);
-		return -1;
+				"Failed to resolve\n");
+		return NULL;
 	}
 
-	/* can't retreive a non int tag */
-	if (strcmp(to_dt_ref(ref)->tag, "!bool") || !to_dt_ref(ref)->is_bool) {
-		if (dt->error_on_failed_get)
-			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"not !bool (%s) ref #%d of %s#%d\n",
-					to_dt_ref(ref)->tag, rindex,
-					name, pindex);
-		return -1;
-	}
+	if (binary_size)
+		*binary_size = to_dt_ref(ref)->binary_size;
 
-	return to_dt_ref(ref)->val ? 1 : 0;
+	return to_dt_ref(ref)->binary;
 }
 
 const void *dt_get_binary(struct yaml_dt_state *dt, struct node *np,
@@ -1984,21 +2028,28 @@ const void *dt_get_binary(struct yaml_dt_state *dt, struct node *np,
 	if (!ref)
 		return NULL;
 
+	return dt_ref_binary(dt, ref, binary_size);
+}
+
+struct node *dt_ref_noderef(struct yaml_dt_state *dt, struct ref *ref)
+{
 	if (!to_dt_ref(ref)->is_resolved)
 		dt_resolve_ref(dt, ref);
 
 	if (!to_dt_ref(ref)->is_resolved) {
 		if (dt->error_on_failed_get)
 			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"Failed to resolve with getting %s property\n",
-			name);
+				"resolve failed\n");
 		return NULL;
 	}
 
-	if (binary_size)
-		*binary_size = to_dt_ref(ref)->binary_size;
-
-	return to_dt_ref(ref)->binary;
+	if (!to_dt_ref(ref)->npref) {
+		if (dt->error_on_failed_get)
+			dt_error_at(dt, &to_dt_ref(ref)->m,
+				"Invalid node reference\n");
+		return NULL;
+	}
+	return to_dt_ref(ref)->npref;
 }
 
 struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
@@ -2017,23 +2068,5 @@ struct node *dt_get_noderef(struct yaml_dt_state *dt, struct node *np,
 	if (!ref)
 		return NULL;
 
-	if (!to_dt_ref(ref)->is_resolved)
-		dt_resolve_ref(dt, ref);
-
-	if (!to_dt_ref(ref)->is_resolved) {
-		if (dt->error_on_failed_get)
-			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"resolve failed ref #%d of %s#%d\n",
-					rindex, name, pindex);
-		return NULL;
-	}
-
-	if (!to_dt_ref(ref)->npref) {
-		if (dt->error_on_failed_get)
-			dt_error_at(dt, &to_dt_ref(ref)->m,
-				"Invalid node reference ref #%d of %s#%d\n",
-					rindex, name, pindex);
-		return NULL;
-	}
-	return to_dt_ref(ref)->npref;
+	return dt_ref_noderef(dt, ref);
 }

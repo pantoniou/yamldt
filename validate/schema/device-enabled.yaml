@@ -3,6 +3,9 @@
 device-enabled:
   title: Contraint for enabled devices
 
+  class: constraint
+  virtual: true
+
   properties:
     status: &device-status-enabled
       category: optional
@@ -10,3 +13,4 @@ device-enabled:
       description: Marks device state as enabled
       constraint: |
         !exists || streq(v, "okay") || streq(v, "ok")
+
