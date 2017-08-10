@@ -315,8 +315,8 @@ int main(int argc, char *argv[])
 	err = dt_parse(dt);
 
 	if (!err) {
-		dt_checker_check(dt);
 		dt_emitter_emit(dt);
+		dt_checker_check(dt);
 	}
 	dt_cleanup(dt, dt->error_flag);
 
