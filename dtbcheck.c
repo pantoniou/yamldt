@@ -1003,7 +1003,6 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	if (!dtbchk->sdt)
 		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
 
-
 	err = prepare_schema(dt);
 	if (err)
 		dt_fatal(dt, "Failed to prepare schema\n");

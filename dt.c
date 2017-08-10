@@ -745,7 +745,7 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	cfg.color = dt->cfg.color;
 	cfg.output_file = output ? output : "/dev/null";
 
-	if (!strchr(input, ' ')) {
+	if (!strchr(input, ' ') && !strchr(input, '\n')) {
 		argv[0] = (char *)input;
 		argv[1] = NULL;
 		cfg.input_file = argv;
@@ -1748,6 +1748,7 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 			break;
 
 		to_dt_ref(ref)->npref = np;
+		to_dt_ref(ref)->is_resolved = true;
 		break;
 
 	case r_scalar:
@@ -1806,14 +1807,13 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 			to_dt_ref(ref)->is_builtin_tag = true;
 		} else
 			to_dt_ref(ref)->is_builtin_tag = false;
+		to_dt_ref(ref)->is_resolved = true;
 		break;
 
 	default:
 		/* nothing */
 		break;
 	}
-
-	to_dt_ref(ref)->is_resolved = true;
 
 	return 0;
 }

@@ -57,10 +57,10 @@ int select(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 0;
+        return -3000 - 2;
     
     if (!exists)
-        return -2000 - 0;
+        return -2000 - 2;
     
     /* for compatible from device-compatible rule */
     if (!(
@@ -100,7 +100,7 @@ int select(struct node *np)
         anystreq(v,    "w25q128") ||
         anystreq(v,    "w25q256")
     ))
-        return -1000 - 0;
+        return -1000 - 2;
     
     
     }
@@ -111,17 +111,17 @@ int select(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 1;
+        return -3000 - 3;
     
     if (!exists)
-        goto skip_1;
+        goto skip_3;
     
     /* for status from device-compatible rule */
     if (!(
         !exists || streq(v, "okay") || streq(v, "ok")
     ))
-        return -1000 - 1;
-    skip_1:
+        return -1000 - 3;
+    skip_3:
       do { } while(0); /* fix goto that requires a statement */
     
     }

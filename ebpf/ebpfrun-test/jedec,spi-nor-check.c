@@ -57,10 +57,10 @@ int check(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 2;
+        return -3000 - 4;
     
     if (!exists)
-        return -2000 - 2;
+        return -2000 - 4;
     
     
     
@@ -72,10 +72,10 @@ int check(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 3;
+        return -3000 - 5;
     
     if (!exists)
-        return -2000 - 3;
+        return -2000 - 5;
     
     /* for compatible from jedec,spi-nor rule */
     if (!(
@@ -115,7 +115,7 @@ int check(struct node *np)
         anystreq(v,    "w25q128") ||
         anystreq(v,    "w25q256")
     ))
-        return -1000 - 3;
+        return -1000 - 5;
     
     
     }
@@ -126,70 +126,38 @@ int check(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 5;
+        return -3000 - 7;
     
     if (!exists)
-        return -2000 - 5;
+        return -2000 - 7;
     
     /* for spi-max-frequency from jedec,spi-nor rule */
     if (!(
         v > 0 && v < 100000000
     ))
-        return -1000 - 5;
+        return -1000 - 7;
     
     
     }
     {
     uint64_t flags;
-    const bool v = get_bool(np, "m25p,fast-read", &flags);
+    const char *v = get_str(np, "m25p,fast-read", &flags);
     const bool badtype = !!(flags & BADTYPE);
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 7;
+        return -3000 - 9;
     
     if (!exists)
-        goto skip_7;
+        goto skip_9;
     
-    skip_7:
+    skip_9:
       do { } while(0); /* fix goto that requires a statement */
     
     }
     {
     uint64_t flags;
-    const bool v = get_bool(np, "spi-cpol", &flags);
-    const bool badtype = !!(flags & BADTYPE);
-    const bool exists = !!(flags & EXISTS);
-    
-    if (badtype)
-        return -3000 - 11;
-    
-    if (!exists)
-        goto skip_11;
-    
-    skip_11:
-      do { } while(0); /* fix goto that requires a statement */
-    
-    }
-    {
-    uint64_t flags;
-    const bool v = get_bool(np, "spi-cpha", &flags);
-    const bool badtype = !!(flags & BADTYPE);
-    const bool exists = !!(flags & EXISTS);
-    
-    if (badtype)
-        return -3000 - 12;
-    
-    if (!exists)
-        goto skip_12;
-    
-    skip_12:
-      do { } while(0); /* fix goto that requires a statement */
-    
-    }
-    {
-    uint64_t flags;
-    const bool v = get_bool(np, "spi-cs-high", &flags);
+    const char *v = get_str(np, "spi-cpol", &flags);
     const bool badtype = !!(flags & BADTYPE);
     const bool exists = !!(flags & EXISTS);
     
@@ -205,7 +173,7 @@ int check(struct node *np)
     }
     {
     uint64_t flags;
-    const bool v = get_bool(np, "spi-3wire", &flags);
+    const char *v = get_str(np, "spi-cpha", &flags);
     const bool badtype = !!(flags & BADTYPE);
     const bool exists = !!(flags & EXISTS);
     
@@ -221,7 +189,7 @@ int check(struct node *np)
     }
     {
     uint64_t flags;
-    const bool v = get_bool(np, "spi-lsb-first", &flags);
+    const char *v = get_str(np, "spi-cs-high", &flags);
     const bool badtype = !!(flags & BADTYPE);
     const bool exists = !!(flags & EXISTS);
     
@@ -237,7 +205,7 @@ int check(struct node *np)
     }
     {
     uint64_t flags;
-    const int64_t v = get_int(np, "spi-tx-bus-width", &flags);
+    const char *v = get_str(np, "spi-3wire", &flags);
     const bool badtype = !!(flags & BADTYPE);
     const bool exists = !!(flags & EXISTS);
     
@@ -247,12 +215,44 @@ int check(struct node *np)
     if (!exists)
         goto skip_16;
     
+    skip_16:
+      do { } while(0); /* fix goto that requires a statement */
+    
+    }
+    {
+    uint64_t flags;
+    const char *v = get_str(np, "spi-lsb-first", &flags);
+    const bool badtype = !!(flags & BADTYPE);
+    const bool exists = !!(flags & EXISTS);
+    
+    if (badtype)
+        return -3000 - 17;
+    
+    if (!exists)
+        goto skip_17;
+    
+    skip_17:
+      do { } while(0); /* fix goto that requires a statement */
+    
+    }
+    {
+    uint64_t flags;
+    const int64_t v = get_int(np, "spi-tx-bus-width", &flags);
+    const bool badtype = !!(flags & BADTYPE);
+    const bool exists = !!(flags & EXISTS);
+    
+    if (badtype)
+        return -3000 - 18;
+    
+    if (!exists)
+        goto skip_18;
+    
     /* for spi-tx-bus-width from spi-slave rule */
     if (!(
         v == 1 || v == 2 || v == 4
     ))
-        return -1000 - 16;
-    skip_16:
+        return -1000 - 18;
+    skip_18:
       do { } while(0); /* fix goto that requires a statement */
     
     }
@@ -263,17 +263,17 @@ int check(struct node *np)
     const bool exists = !!(flags & EXISTS);
     
     if (badtype)
-        return -3000 - 18;
+        return -3000 - 20;
     
     if (!exists)
-        goto skip_18;
+        goto skip_20;
     
     /* for spi-rx-bus-width from spi-slave rule */
     if (!(
         v == 1 || v == 2 || v == 4
     ))
-        return -1000 - 18;
-    skip_18:
+        return -1000 - 20;
+    skip_20:
       do { } while(0); /* fix goto that requires a statement */
     
     }

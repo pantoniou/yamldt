@@ -9,7 +9,7 @@ jedec,spi-nor:
   maintainer:
     name: Unknown
 
-  inherits: *spi_slave
+  inherits: *spi-slave
 
   properties:
     reg:
@@ -80,12 +80,21 @@ jedec,spi-nor:
         Refer to your chips' datasheet to check if this is supported
         by your chip.
 
-  example: |
-    flash: m25p80@0 {
-            #address-cells = <1>;
-            #size-cells = <1>;
-            compatible = "spansion,m25p80", "jedec,spi-nor";
-            reg = <0>;
-            spi-max-frequency = <40000000>;
-            m25p,fast-read;
-    };
+  example:
+    dts: |
+      flash: m25p80@0 {
+          #address-cells = <1>;
+          #size-cells = <1>;
+          compatible = "spansion,m25p80", "jedec,spi-nor";
+          reg = <0>;
+          spi-max-frequency = <40000000>;
+          m25p,fast-read;
+      };
+    yaml: |
+      m25p80@0: &flash
+        "#address-cells": 1
+        "#size-cells": 1
+        compatible: [ "spansion,m25p80", "jedec,spi-nor" ]
+        reg: 0;
+        spi-max-frequency: 40000000
+        m25p,fast-read: true

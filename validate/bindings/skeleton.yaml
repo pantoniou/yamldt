@@ -1,138 +1,194 @@
 %YAML 1.1
 ---
-version: 1
+# The name of the binding is first
+# The anchor is put there for use by others
+skeleton: &skeleton
 
-id: skel-device
+  version: 1
 
-title: Skeleton Device
+  id: skel-device
 
-maintainer:
-    -   name: Skeleton Person <skel@kernel.org>
+  title: >
+    Skeleton Device
 
-description: >
+  maintainer:
+    name: Skeleton Person <skel@kernel.org>
+
+  description: >
     The Skeleton Device binding represents the SK11 device produced by
     the Skeleton Corporation. The binding can also support compatible
     clones made by second source vendors.
 
-# This binding inherits property characteristics from the generic
-# spi-slave binding
+  # The class is an optional property that declares this
+  # binding as part of a larger set
+  # Multiple definitions are possible
+  class: [ device, spi-device ]
 
-inherits:
-    -   id: spi-slave
+  # This binding inherits property characteristics from the generic
+  # spi-slave binding
+  # Note that the notation is standard yaml reference
+  inherits: *spi-slave
 
-properties:
+  # virtual bindings do not generate checkers
+  virtual: true
 
-# The compatible property is a reserved name. The type is always "string"
-# and should not be repeated device binding.
+  # each property is defined by each name
+  properties:
 
-    -   name: "compatible"
-        constraint: |
-            "skel,sk11" || "faux,fx11" , BASE("skel,sk11")
-        description: FX11 is a clone of the original SK11 device
+    # The compatible property is a reserved name. The type is always "string"
+    # and should not be repeated device binding.
+    compatible:
+      category: required        # required property
+      type: strseq              # is a sequence of strings
 
-# The reg property is a reserved name. The type is always "int" and
-# should not be repeated in a device binding. Constraints are defined
-# only in the context of the parent node's address, size, and ranges
-# cells. The description is inherited from the spi-slave binding.
+      description: >
+        FX11 is a clone of the original SK11 device
 
-    -   name: "reg"
+      # v is always the name of the value of the property
+      # np is passed to the checker and is the current
+      # node pointer. We can access properties and call
+      # methods that operate on them.
+      # There can be multiple constraints, just put them
+      # into a sequence.
+      # Note that the BASE("skel,sk11") form from the previous
+      # binding will have to be reworked.
+      constraint: |
+        anystreq(v, "skel,sk11") ||
+        anystreq(v, "faux,fx11")
 
-# spi-max-frequency needs the device-specific constraint to be supplied
+    # The reg property is a reserved name. The type is always "int" and
+    # should not be repeated in a device binding. Constraints are defined
+    # only in the context of the parent node's address, size, and ranges
+    # cells. The description is inherited from the spi-slave binding.
+    # Note that if inheriting from a base binding this declaration may
+    # be omitted.
+    reg:
+      category: required        # required property
+      type: intseq              # is a sequence of integers
 
-    -   name: "spi-max-frequency"
-        constraint: |
-            if (compatible == "skel,sk11") c <= 10000000 else c <= 1000000
+    # spi-max-frequency needs the device-specific constraint to be supplied
+    spi-max-frequency:
+      # this constraint is dependent on the compatible property
+      # property containing "skel,sk11"
+      constraint: |
+        v <= anystreq(get_strseq(np, "compatible"), "skel,sk11") ? 10000000 : 1000000
 
-# This property overrides the generic binding description with
-# a device specific description in order to mention the chip's
-# h/w cfg strapping pins.
+    # This property overrides the generic binding description with
+    # a device specific description in order to mention the chip's
+    # h/w cfg strapping pins.
+    spi-cs-high:
+      description: >
+        Set if skeleton device configuration pins are set for chip
+        select polarity high
 
-    -   name: "spi-cs-high"
-        description: >
-            Set if skeleton device configuration pins are set for chip
-            select polarity high
+    # Device specific properties don't inherit characteristic from a generic
+    # binding so category, type, constraint, and description must be specified
+    # if needed.
+    skel,deprecated1:
+      # note that the category may be declare more than one option
+      category: [ deprecated, optional ]
+      type: int
+      constraint: |
+        v >= 100000 && v <= 200000
+      description: >
+        First of two deprecated properties.
 
-# Device specific properties don't inherit characteristic from a generic
-# binding so category, type, constraint, and description must be specified
-# if needed.
+    # There are no constraints for properties of empty type
+    skel,deprecated2:
+      category: deprecated
+      type: empty
+      description: >
+        Second of two deprecated properties.
 
-    -   name: "skel,deprecated1"
-        category: deprecated
-        type: int
-        constraint: |
-            (c >= 100000) && (c <= 200000)
-        description: >
-            First of two deprecated properties.
+    # This example could be auto-generated rather than explicitly included
+    # in the yaml source.
+    # Note that the YAML example must be validated against this binding
+    # to be an accepted entry
+    example:
 
-# There are no constraints for properties of empty type
+      dts: |
+        sk11@0 {
+            compatible = "skel,sk11";
+            reg = <0>;
+            spi-max-frequency = <1000000>;
+            spi-cs-high;
+        };
 
-    -   name: "skel,deprecated2"
-        category: deprecated
-        type: empty
-        description: >
-            Second of two deprecated properties.
-
-# This example could be auto-generated rather than explicitly included
-# in the yaml source.
-
-example:
-    -   dts: |
-            sk11@0 {
-                compatible = "skel,sk11";
-                reg = <0>;
-                spi-max-frequency = <1000000>;
-                spi-cs-high;
-            };
+      yaml: |
+        sk11@0:
+          compatible: "skel,sk11"
+          reg: 0
+          sip-max-frequency: 1000000
+          spi-cs-high: true
+        ---
 ...
 
 ---
-version: 1
+skel-mini: &skel-mini
 
-id: skel-mini
+  version: 1
 
-title: Skeleton Mini Device
+  title: Skeleton Mini Device
 
-maintainer:
-    -   name: Rogue Developer <rogue@gmail.com>
+  maintainer:
+    name: Rogue Developer <rogue@gmail.com>
 
-description: >
+  description: >
     The Skeleton Mini Device binding represents the SK47x series devices
     produced by the Skeleton Corporation.
 
-properties:
-    -   name: "compatible"
-        category: required
-        constraint: |
-            "skel,sk472" || skel,sk473" || "skel,sk474" , BASE("skel,sk472")
-        deprecated: "skel,sk47x"
-        description: >
-            SK472 is the original part in the family. SK473/4 are later releases
-            with minor register changes.
+  properties:
+    compatible:
+      category: required
+      # Note the deprecated_anystreq() test, it is successful
+      # but it may produce a warning about a deprecated value
+      # when it matches
+      constraint: |
+        anystrseq(v, "skel,sk472") ||
+        anystrseq(v, "skel,sk473") ||
+        anystrseq(v, "skel,sk474") ||
+        deprecated_anystreq(v, "skel,sk47x")
+      description: >
+        SK472 is the original part in the family. SK473/4 are later releases
+        with minor register changes.
 
-    -   name: "reg"
+      reg:
         category: required
         description: Address and size of Skeleton Mini register range.
 
-    -   name: "skel,sync-mode"
+      skel,sync-mode:
         category: optional
         type: empty
         description: Enable synchronous transfer mode
 
-example:
-    -   dts: |
-            sk472@beef0000 {
-                compatible = "skel,sk472";
-                reg = <0xbeef0000 0x100>;
-            };
-        description: >
-            Demonstrates an SK472 in normal mode.
+  example:
+    # note the multiple definitons; comments are preserved
+    dts: |
+      /* Demonstrates an SK472 in normal mode. */
+      sk472@beef0000 {
+          compatible = "skel,sk472";
+          reg = <0xbeef0000 0x100>;
+      };
 
-    -   dts: |
-            sk474@dead0000 {
-                compatible = "skel,sk474", "skel,sk472";
-                reg = <0xdead0000 0x100>;
-                skel,sync-mode;
-            };
-        description: >
-            Demonstrates an SK474 in synchronous mode.
+      /* Demonstrates an SK474 in synchronous mode. */
+      sk474@dead0000 {
+          compatible = "skel,sk474", "skel,sk472";
+          reg = <0xdead0000 0x100>;
+          skel,sync-mode;
+      };
+
+    # note the multiple definitons; comments are preserved
+    # even when they are using #
+    yaml: |
+      # Demonstrates an SK472 in normal mode.
+      sk472@beef0000:
+        compatible: "skel,sk472"
+        reg: [ 0xbeef0000,  0x100 ]
+      ---
+
+      # Demonstrates an SK474 in synchronous mode.
+      sk474@dead0000:
+        compatible: [ "skel,sk474", "skel,sk472" ]
+        reg: [ 0xdead0000, 0x100 ]
+        skel,sync-mode: true
 ...

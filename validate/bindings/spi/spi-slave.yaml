@@ -1,85 +1,93 @@
 %YAML 1.1
 ---
-version: 1
+spi-slave: &spi-slave
+  version: 1
 
-id: spi-slave
+  title: SPI Slave Devices
 
-title: SPI Slave Devices
+  maintainer:
+    name: Mark Brown <broonie@kernel.org>
 
-maintainer:
-    -   name: Mark Brown <broonie@kernel.org>
+  inherits: *device-compatible
 
-description: >
+  class: spi-slave
+  virtual: true
+
+  description: >
     SPI (Serial Peripheral Interface) slave bus devices are children of
-    of a SPI master bus device.
-properties:
-    -   name: "reg"
-        category: required
-        type: int
-        description: chip select address of device
+    a SPI master bus device.
 
-    -   name: "compatible"
-        category: required
-        type: string
-        description: compatible strings
+  # constraint: |+
+  #  class_of(parent(n), "spi")
 
-    -   name: "spi-max-frequency"
-        category: required
-        type: int
-        description: Maximum SPI clocking speed of device in Hz
+  properties:
+    reg:
+      category: required
+      type: int
+      description: chip select address of device
 
-    -   name: "spi-cpol"
-        category: optional
-        type: empty
-        description: >
-            Empty property indicating device requires
-            inverse clock polarity (CPOL) mode
+    compatible:
+      category: required
+      type: strseq
+      description: compatible strings
 
-    -   name: "spi-cpha"
-        category: optional
-        type: empty
-        description: >
-            Empty property indicating device requires
-            shifted clock phase (CPHA) mode
+    spi-max-frequency:
+      category: required
+      type: int
+      description: Maximum SPI clocking speed of device in Hz
 
-    -   name: "spi-cs-high"
-        category: optional
-        type: empty
-        description: >
-            Empty property indicating device requires
-            chip select active high
+    spi-cpol:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        inverse clock polarity (CPOL) mode
 
-    -   name: "spi-3wire"
-        category: optional
-        type: empty
-        description: >
-            Empty property indicating device requires
-            3-wire mode.
+    spi-cpha:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        shifted clock phase (CPHA) mode
 
-    -   name: "spi-lsb-first"
-        category: optional
-        type: empty
-        description: >
-            Empty property indicating device requires
-            LSB first mode.
+    spi-cs-high:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        chip select active high
 
-    -   name: "spi-tx-bus-width"
-        category: optional
-        type: int
-        constraint: 1 || 2 || 4
-        description: >
-            The bus width(number of data wires) that
-            used for MOSI. Defaults to 1 if not present.
+    spi-3wire:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        3-wire mode.
 
-    -   name: "spi-rx-bus-width"
-        category: optional
-        type: int
-        constraint: 1 || 2 || 4
-        description: >
-            The bus width(number of data wires) that
-            used for MISO. Defaults to 1 if not present.
+    spi-lsb-first:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        LSB first mode.
 
-notes: >
+    spi-tx-bus-width:
+      category: optional
+      type: int
+      constraint: v == 1 || v == 2 || v == 4
+      description: >
+        The bus width(number of data wires) that
+        used for MOSI. Defaults to 1 if not present.
+
+    spi-rx-bus-width:
+      category: optional
+      type: int
+      constraint: v == 1 || v == 2 || v == 4
+      description: >
+        The bus width(number of data wires) that
+        used for MISO. Defaults to 1 if not present.
+
+  notes: >
     Some SPI controllers and devices support Dual and Quad SPI transfer mode.
     It allows data in the SPI system to be transferred in 2 wires(DUAL) or
     4 wires(QUAD).
@@ -89,20 +97,29 @@ notes: >
     If a gpio chipselect is used for the SPI slave the gpio number will be
     passed via the SPI master node cs-gpios property.
 
-examples:
-    -   dts: |
-            spi@f00 {
-                ...
-                ethernet-switch@0 {
-                    compatible = "micrel,ks8995m";
-                    spi-max-frequency = <1000000>;
-                    reg = <0>;
-                };
+  example:
+    dts: |
+      spi@f00 {
+          ethernet-switch@0 {
+              compatible = "micrel,ks8995m";
+              spi-max-frequency = <1000000>;
+              reg = <0>;
+          };
 
-                codec@1 {
-                    compatible = "ti,tlv320aic26";
-                    spi-max-frequency = <100000>;
-                    reg = <1>;
-                };
-            };
-...
+          codec@1 {
+              compatible = "ti,tlv320aic26";
+              spi-max-frequency = <100000>;
+              reg = <1>;
+          };
+      };
+    yaml: |
+      spi@f00:
+        ethernet-switch@0:
+          compatible: "micrel,ks8995m"
+          spi-max-frequency: 1000000
+          reg: 0
+
+        codec@1:
+          compatible: "ti,tlv320aic26"
+          spi-max-frequency: 100000
+          reg: 1
