@@ -1579,8 +1579,8 @@ static void get_error_location(struct yaml_dt_state *dt,
 		}
 		filebuf[filebufsize - 1] = '\0';
 
-		lastline++;
 	}
+	lastline++;
 
 	/* convert to presentation */
 	*linep = lastline;
