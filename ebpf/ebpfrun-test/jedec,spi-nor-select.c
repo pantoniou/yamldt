@@ -13,22 +13,25 @@ struct node;
 struct property;
 struct ref;
 
+/* flags when getting */
+#define EXISTS 1
+#define BADTYPE 2
 static int (*callback)(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) =
         (void *) 1;
 
 static int (*bpf_printf)(const char *fmt, ...) =
         (void *) 2;
 
-static int64_t (*get_int)(struct node *np, const char *name, bool *existsp) = 
+static int64_t (*get_int)(struct node *np, const char *name, uint64_t *flagsp) = 
         (void *) 3;
 
-static bool (*get_bool)(struct node *np, const char *name, bool *existsp) = 
+static bool (*get_bool)(struct node *np, const char *name, uint64_t *flagsp) = 
         (void *) 4;
 
-static const char *(*get_str)(struct node *np, const char *name, bool *existsp) = 
+static const char *(*get_str)(struct node *np, const char *name, uint64_t *flagsp) = 
         (void *) 5;
 
-static const char **(*get_strseq)(struct node *np, const char *name, bool *existsp) = 
+static const char **(*get_strseq)(struct node *np, const char *name, uint64_t *flagsp) = 
         (void *) 6;
 
 static bool (*streq)(const char *str1, const char *str2) =
@@ -40,21 +43,26 @@ static bool (*anystreq)(const char **strv, const char *str2) =
 static struct node *(*get_parent)(struct node *np) =
         (void *) 9;
 
-static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, bool *existsp) =
+static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, uint64_t *flagsp) =
         (void *) 10;
 
 /* prolog for jedec,spi-nor */
 int select(struct node *np)
 {
-    bool exists;
 
     {
-    const char **v = get_strseq(np, "compatible", &exists);
+    uint64_t flags;
+    const char **v = get_strseq(np, "compatible", &flags);
+    const bool badtype = !!(flags & BADTYPE);
+    const bool exists = !!(flags & EXISTS);
+    
+    if (badtype)
+        return -3000 - 0;
     
     if (!exists)
-        return -1;
+        return -2000 - 0;
     
-    /* for compatible from jedec,spi-nor rule */
+    /* for compatible from device-compatible rule */
     if (!(
         anystreq(v,  "at25df321a") ||
         anystreq(v,  "at25df641") ||
@@ -92,11 +100,18 @@ int select(struct node *np)
         anystreq(v,    "w25q128") ||
         anystreq(v,    "w25q256")
     ))
-      return -1000 - 0;
+        return -1000 - 0;
+    
     
     }
     {
-    const char *v = get_str(np, "status", &exists);
+    uint64_t flags;
+    const char *v = get_str(np, "status", &flags);
+    const bool badtype = !!(flags & BADTYPE);
+    const bool exists = !!(flags & EXISTS);
+    
+    if (badtype)
+        return -3000 - 1;
     
     if (!exists)
         goto skip_1;
@@ -105,7 +120,7 @@ int select(struct node *np)
     if (!(
         !exists || streq(v, "okay") || streq(v, "ok")
     ))
-      return -1000 - 1;
+        return -1000 - 1;
     skip_1:
       do { } while(0); /* fix goto that requires a statement */
     
