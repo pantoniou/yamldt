@@ -1,7 +1,11 @@
 TOPDIR ?= ../..
 
 YAMLSO := am33xx.o.yaml am33xx-clocks.o.yaml am335x-bone-common.o.yaml \
-	  am335x-boneblack-common.o.yaml am335x-boneblack.o.yaml
+	  am335x-boneblack-common.o.yaml am335x-boneblack.o.yaml \
+	  rule-check.o.yaml
+
+YAMLSS := am33xx.yaml am33xx-clocks.yaml am335x-bone-common.yaml \
+	  am335x-boneblack-common.yaml am335x-boneblack.yaml rule-check.yaml
 
 YAMLS  := am335x-boneblack.pure.yaml
 DTBS   := $(addsuffix .dtb, $(basename $(YAMLS)))
@@ -19,6 +23,8 @@ FDTDUMPS   := $(addsuffix .fdtdump, $(basename $(ALLDTBS)))
 
 DIFFS      := $(addsuffix .diff, $(basename $(YAMLS)))
 
+CPPYAMLS  := $(addsuffix .cpp.yaml, $(basename $(YAMLSS)))
+
 CPP ?= cpp
 CPPFLAGS ?= -I ./ -I $(TOPDIR)/port \
 	 -I $(TOPDIR)/include \
@@ -29,6 +35,7 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
+YAMLDTFLAGS_VALIDATE ?= -T -g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/
 YAMLDTFLAGS ?=
 FDTDUMPFLAGS ?=
 YDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.o.Yd
@@ -37,6 +44,9 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 %.o.yaml: %.yaml
 	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
 		$(YAMLDT) $(YAMLDTFLAGS) -y -c - -o $@
+
+%.cpp.yaml: %.yaml
+	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< >$@
 
 %.dtb: %.yaml
 	$(YAMLDT) $(YAMLDTFLAGS) -C $< -o $@
@@ -57,16 +67,22 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 %.diff: %.dtc.fdtdump %.fdtdump
 	-cmp -s $^ || (diff -u $^ | tee $@)
 
-.PHONY: all clean distclean check
+.PHONY: all clean distclean check validate
 
 all: $(DTBS) $(DTSS)
 
 clean:
-	rm -f $(YDEPS) $(DDEPS) $(YAMLSO) $(ALLDTBS) $(FDTDUMPS) $(DIFFS)
+	rm -f $(YDEPS) $(DDEPS) $(YAMLSO) $(ALLDTBS) $(FDTDUMPS) $(DIFFS) \
+		am335x-boneblack-rules.pure.yaml *.[ch] *.ebpf *.cpp.yaml
 
 check: $(DTCDTBS) $(DTBS) $(DTSS) $(DIFFS)
 
+validate: am335x-boneblack-rules.pure.yaml
+
 am335x-boneblack.pure.yaml: $(YAMLSO)
 	$(YAMLDT) $(YAMLDTFLAGS) -y $^ -o $@
+
+am335x-boneblack-rules.pure.yaml: $(CPPYAMLS) rule-check.cpp.yaml
+	$(YAMLDT) $(YAMLDTFLAGS) $(YAMLDTFLAGS_VALIDATE) -y $^ -o $@
 
 -include $(YDEPS) $(DDEPS)
