@@ -39,6 +39,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <errno.h>
 #include <ctype.h>
 #include <sys/types.h>
@@ -727,6 +728,53 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	return 0;
 }
 
+void files_in_dir_with_suffix(const char *name, const char *suffix, char **bufp, char *end)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char path[PATH_MAX];
+	int slen, len;
+
+	dir = opendir(name);
+	if (!dir)
+		return;
+
+	slen = strlen(suffix);
+	while ((entry = readdir(dir)) != NULL) {
+
+		snprintf(path, sizeof(path), "%s/%s", name,
+				entry->d_name);
+		len = strlen(path);
+
+		if (entry->d_type != DT_DIR) {
+			/* no spaces in filenames */
+			if (strchr(entry->d_name, ' '))
+				continue;
+
+			/* limit reached */
+			if (len < slen ||
+				memcmp(path + len - slen, suffix, slen))
+				continue;
+
+			if (*bufp + len + 2 > end)
+				return;
+
+			memcpy(*bufp, path, len);
+			*bufp += len;
+			(*bufp)[0] = ' ';
+			(*bufp)[1] = '\0';
+			*bufp += 1;
+		} else {
+			if (strcmp(entry->d_name,  ".") == 0 ||
+				strcmp(entry->d_name, "..") == 0)
+				continue;
+			files_in_dir_with_suffix(path, suffix, bufp, end);
+		}
+	}
+	closedir(dir);
+}
+
+
 struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 		const char *input, const char *output,
 		const char *name)
@@ -734,6 +782,9 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	struct yaml_dt_state *sdt;
 	struct yaml_dt_config cfg;
 	char *argv[2];
+	char dirname[PATH_MAX];
+	char dirbuf[128 * 1024];	/* 128K limit on filenames */
+	char *p;
 	int i, err;
 
 	sdt = malloc(sizeof(*sdt));
@@ -745,7 +796,30 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	cfg.color = dt->cfg.color;
 	cfg.output_file = output ? output : "/dev/null";
 
-	if (!strchr(input, ' ') && !strchr(input, '\n')) {
+	/* directory mode */
+	i = strlen(input);
+	if (i > 0 && input[i-1] == '/') {
+		strncpy(dirname, input, sizeof(dirname));
+		dirname[sizeof(dirname) - 1] = '\0';
+		dirname[i - 1] = '\0';
+		dirbuf[0] = '\0';
+		p = dirbuf;
+		files_in_dir_with_suffix(dirname, ".yaml", &p, dirbuf + sizeof(dirbuf));
+
+		if (strlen(dirbuf) == 0) {
+			fprintf(stderr, "directory %s contains no yaml files\n",
+					dirname);
+			return NULL;
+		}
+
+		dt->alloc_argv = str_to_argv("", dirbuf);
+		assert(dt->alloc_argv);
+		cfg.input_file = dt->alloc_argv + 1;
+		for (i = 0; dt->alloc_argv[i + 1]; i++)
+			;
+		cfg.input_file_count = i;
+
+	} else if (!strchr(input, ' ') && !strchr(input, '\n')) {
 		argv[0] = (char *)input;
 		argv[1] = NULL;
 		cfg.input_file = argv;
