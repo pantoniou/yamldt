@@ -52,16 +52,23 @@ else
 fi
 
 AC_CHECK_HEADERS([elf.h], [has_ELF_H=true], [has_ELF_H=true])
+AC_CHECK_HEADERS([libelf.h], [has_LIBELF_H=true], [has_LIBELF_H=true])
 
-# libelf
-LIBELF_REQUIRED_VERSION=0.8
-PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
-
-if $PKG_CONFIG --atleast-version "0.8" libelf ; then
-	AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
-	have_libelf=true
+# libelf (we only need the headers)
+# On debian/ubuntu libelf is not in pkg-config so...
+if test x$has_LIBELF_H = xtrue; then
+       AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
+       AC_ARG_VAR([LIBELF_CFLAGS], "")
+       AC_ARG_VAR([LIBELF_LIBS], "")
 else
-	have_libelf=false
+	LIBELF_REQUIRED_VERSION=0.8
+	PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
+	if $PKG_CONFIG --atleast-version "0.8" libelf ; then
+		AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
+		have_libelf=true
+	else
+		have_libelf=false
+	fi
 fi
 AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
 
