@@ -53,23 +53,17 @@ fi
 
 AC_CHECK_HEADERS([elf.h], [has_ELF_H=true], [has_ELF_H=true])
 
-if test x$has_ELF_H = xtrue; then
-	AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
-	AC_ARG_VAR([LIBELF_CFLAGS], "")
-	AC_ARG_VAR([LIBELF_LIBS], "")
-else
-	# libelf
-	LIBELF_REQUIRED_VERSION=0.8
-	PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
+# libelf
+LIBELF_REQUIRED_VERSION=0.8
+PKG_CHECK_MODULES(LIBELF, libelf >= $LIBELF_REQUIRED_VERSION,[])
 
-	if $PKG_CONFIG --atleast-version "0.8" libelf ; then
-		AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
-		have_libelf=true
-	else
-		have_libelf=false
-	fi
-	AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
+if $PKG_CONFIG --atleast-version "0.8" libelf ; then
+	AC_DEFINE([HAVE_LIBELF_H], [], [Have libelf])
+	have_libelf=true
+else
+	have_libelf=false
 fi
+AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
 
 AC_MSG_CHECKING([for ebpf compiler])
 # eBPF compiler available?
