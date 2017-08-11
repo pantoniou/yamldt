@@ -132,7 +132,7 @@ property:
         prolog: |+
           {
           uint64_t flags;
-          const char *v = get_str(np, "${PROPERTY_NAME}", &flags);
+          const bool v = get_bool(np, "${PROPERTY_NAME}", &flags);
           const bool badtype = !!(flags & BADTYPE);
           const bool exists = !!(flags & EXISTS);
 
