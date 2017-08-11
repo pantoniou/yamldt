@@ -572,7 +572,7 @@ static void free_constraint(struct yaml_dt_state *dt, struct constraint_desc *cd
 
 static void collect_constraint_prop(struct yaml_dt_state *dt,
 		struct node **npstack, int top, int stacksz,
-		enum constraint_type type, enum constraint_type subtype,
+		enum constraint_type type, enum constraint_subtype subtype,
 		struct list_head *clist, int *idxp, struct node *npp,
 		const char *propname)
 {
