@@ -640,8 +640,7 @@ int dt_checker_check(struct yaml_dt_state *dt)
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker)
 {
-	int i, ret, len;
-	char *s;
+	int i, ret;
 
 	memset(dt, 0, sizeof(*dt));
 	INIT_LIST_HEAD(&dt->children);
@@ -652,27 +651,6 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	}
 
 	memcpy(&dt->cfg, cfg, sizeof(*cfg));
-
-	if (dt->cfg.compiler && dt->cfg.cflags && dt->cfg.compiler_tags) {
-		s = strchr(cfg->compiler_tags, ',');
-		if (!s) {
-			fprintf(stderr, "compiler tags are bogus: %s\n",
-					cfg->compiler_tags);
-			return -1;
-		}
-
-		len = s - cfg->compiler_tags;
-		dt->input_compiler_tag = malloc(len + 1);
-		assert(dt->input_compiler_tag);
-		memcpy(dt->input_compiler_tag, cfg->compiler_tags, len);
-		dt->input_compiler_tag[len] = '\0';
-
-		len = strlen(++s);
-		dt->output_compiler_tag = malloc(len + 1);
-		assert(dt->output_compiler_tag);
-		memcpy(dt->output_compiler_tag, s, len);
-		dt->output_compiler_tag[len] = '\0';
-	}
 
 	INIT_LIST_HEAD(&dt->inputs);
 

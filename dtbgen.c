@@ -285,7 +285,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	char *refname;
 	int refnamelen;
 	void *output_data = NULL;
-	size_t output_size = 0;
 	int err;
 
 	prop = ref->prop;
@@ -393,20 +392,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			data = NULL;
 			size = 0;
 			is_delete = true;
-		} else if (!strcmp(tag, "!filter")) {
-			dt_debug(dt, "Compiling...\n");
-
-			err = compile(ref->data, ref->len,
-					dt->cfg.compiler, dt->cfg.cflags,
-					&output_data, &output_size);
-			if (err) {
-				tree_error_at_ref(to_tree(dt), ref,
-					"Failed to compile %s:\n%s %s\n%s\n",
-					tag, dt->cfg.compiler, dt->cfg.cflags, refname);
-				return;
-			}
-			data = output_data;
-			size = output_size;
 		} else {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,

@@ -42,9 +42,6 @@
 
 extern struct yaml_dt_emitter yaml_emitter;
 
-void yaml_flatten_node(struct tree *t, FILE *fp, bool object,
-		       const char *compiler, const char *cflags,
-		       const char *input_compiler_tag,
-		       const char *output_compiler_tag);
+void yaml_flatten_node(struct tree *t, FILE *fp, bool object);
 
 #endif

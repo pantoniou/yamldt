@@ -113,9 +113,6 @@ struct yaml_dt_config {
 	bool silent;
 	bool late;
 	int color;
-	const char *compiler;
-	const char *cflags;
-	const char *compiler_tags;
 	bool save_temps;
 
 	/* for dtb & yaml */

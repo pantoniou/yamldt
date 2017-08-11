@@ -65,25 +65,17 @@
 #include "nullcheck.h"
 #include "dtbcheck.h"
 
-#define DEFAULT_COMPILER "clang-5.0"
-#define DEFAULT_CFLAGS "-x c -ffreestanding -target bpf -O2 -c -o - -"
-#define DEFAULT_TAGS "!filter,!ebpf"
-
 static struct option opts[] = {
 	{ "output",	 	required_argument, 0, 'o' },
 	{ "debug",	 	no_argument,	   0, 'd' },
 	{ "late-resolve",	no_argument,       0, 'l' },
-	{ "compile-only",	no_argument,	   0, 'c' },
-	{ "compiler",		required_argument, 0, 'O' },
-	{ "cflags",		required_argument, 0, 'f' },
-	{ "compile-tags",	required_argument, 0, 't' },
+	{ "",			no_argument,	   0, 'c' },
 	{ "compatible",		no_argument,	   0, 'C' },
 	{ "yaml",		no_argument,	   0, 'y' },
 	{ "dts",		no_argument,	   0, 's' },
 	{ "schema",		required_argument, 0, 'S' },
-	{ "schema-save",	required_argument, 0, 'i' },
 	{ "codegen",		required_argument, 0, 'g' },
-	{ "save-temps",		no_argument, 	   0, 'T' },
+	{ "save-temps",		no_argument, 	   0,  0 },
 	{ "silent",		no_argument,	   0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "help",	 	no_argument, 	   0, 'h' },
@@ -95,27 +87,20 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 {
 	printf(
 "yamldt [options] <input-file> [<input-file>...]\n"
-" common options are:\n"
-"   -o, --output	Output file\n"
-"   -d, --debug		Debug messages\n"
-"   -h, --help		Help\n"
-"   -v, --version	Display version\n"
-"   -O, --compiler      Compiler to use for !filter tag\n"
-"                       (default: " DEFAULT_COMPILER ")\n"
-"   -f, --cflags        CFLAGS when compiling\n"
-"                       (default: " DEFAULT_CFLAGS ")\n"
-"   -t, --compile-tags  Tags to use for compiler input/output markers\n"
-"                       (default: " DEFAULT_TAGS ")\n"
-"   -T, --save-temps    Save temporary files\n"
+" options are:\n"
+"   -o, --output        Output file\n"
+"   -d, --debug         Debug messages\n"
 "   -c                  Don't resolve references (object mode)\n"
 "   -C, --compatible    Compatible mode\n"
 "   -s, --dts           DTS mode\n"
 "   -y, --yaml          YAML mode\n"
-"   -S, --schema        Use schema file\n"
-"   -i, --schema-save   Save intermediate schema\n"
+"   -S, --schema        Use schema (all yaml files in dir/)\n"
 "   -g, --codegen       Code generator configuration file\n"
+"       --save-temps    Save temporary files\n"
 "       --silent        Be really silent\n"
 "       --color         [auto|off|on]\n"
+"   -h, --help          Help\n"
+"   -v, --version       Display version\n"
 		);
 }
 
@@ -150,9 +135,6 @@ int main(int argc, char *argv[])
 	option_index = -1;
 	optind = 0;
 	opterr = 0;	/* do not print error for invalid option */
-	cfg->compiler = DEFAULT_COMPILER;
-	cfg->cflags = DEFAULT_CFLAGS;
-	cfg->compiler_tags = DEFAULT_TAGS;
 	cfg->color = -1;
 
 	/* try to find output file argument */
@@ -216,10 +198,12 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dlTvCcysS:i:g:h?", opts, &option_index)) != -1) {
+			"o:dlcvCysS:g:h?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
+			if (!s)
+				continue;
 			if (!strcmp(s, "silent")) {
 				cfg->silent = true;
 				continue;
@@ -231,6 +215,10 @@ int main(int argc, char *argv[])
 					cfg->color = 1;
 				else
 					cfg->color = 0;
+				continue;
+			}
+			if (!strcmp(s, "save-temps")) {
+				cfg->save_temps = true;
 				continue;
 			}
 		}
@@ -245,28 +233,9 @@ int main(int argc, char *argv[])
 		case 'l':
 			cfg->late = true;
 			break;
-		case 'T':
-			cfg->save_temps = true;
-			break;
-		case 'O':
-			cfg->compiler = optarg;
-			break;
-		case 'f':
-			cfg->cflags = optarg;
-			break;
-		case 't':
-			/* must be seperated by comma */
-			if (!strchr(optarg, ',')) {
-				fprintf(stderr, "compiler tags must be seperated by ,\n");
-				return EXIT_FAILURE;
-			}
-			cfg->compiler_tags = optarg;
-			break;
-
 		case 'c':
 			cfg->object = true;
 			break;
-
 		case 'C':
 			cfg->compatible = true;
 			break;
@@ -278,9 +247,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'S':
 			cfg->schema = optarg;
-			break;
-		case 'i':
-			cfg->schema_save = optarg;
 			break;
 		case 'g':
 			cfg->codegen = optarg;

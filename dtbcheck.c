@@ -108,7 +108,6 @@ struct constraint_desc {
 struct dtb_check_state {
 	/* copy from config */
 	const char *schema;
-	const char *schema_save;
 	const char *codegen;
 	bool save_temps;
 
@@ -939,7 +938,6 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	memset(dtbchk, 0, sizeof(*dtbchk));
 
 	dtbchk->schema = dt->cfg.schema;
-	dtbchk->schema_save = dt->cfg.schema_save;
 	dtbchk->codegen = dt->cfg.codegen;
 	dtbchk->save_temps = dt->cfg.save_temps;
 
@@ -999,7 +997,8 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 
 	/* schema is parsed after codegen */
 	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema,
-			dtbchk->schema_save, "schema");
+			dtbchk->save_temps ? "schema.yaml" : NULL,
+			"schema");
 	if (!dtbchk->sdt)
 		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
 
@@ -1007,12 +1006,11 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	if (err)
 		dt_fatal(dt, "Failed to prepare schema\n");
 
-	if (dtbchk->schema_save)
+	if (dtbchk->save_temps)
 		dt_emitter_emit(dtbchk->sdt);
 
 	dt_debug(dt, "DTB checker configuration:\n");
 	dt_debug(dt, " schema      = %s\n", dtbchk->schema);
-	dt_debug(dt, " schema-save = %s\n", dtbchk->schema_save ? : "<NONE>");
 	dt_debug(dt, " codegen     = %s\n", dtbchk->codegen ? : "<NONE>");
 	dt_debug(dt, "-----------------\n");
 	dt_debug(dt, " input-tag   = %s\n", dtbchk->input_tag);
