@@ -6,6 +6,8 @@
 #define _GNU_SOURCE
 #include <getopt.h>
 
+#include <stdio.h>
+
 /* maximum buffer for c2str */
 #define C2STR_BUF_MAX	5
 
@@ -34,5 +36,9 @@ char **str_to_argv(const char *binary, const char *str);
 int compile(const char *text, size_t size,
 	    const char *compiler, const char *flags,
 	    void **output, size_t *output_size);
+
+#if defined(__APPLE__) && (_POSIX_C_SOURCE < 200809L)
+FILE *open_memstream(char **ptr, size_t *sizeloc);
+#endif
 
 #endif
