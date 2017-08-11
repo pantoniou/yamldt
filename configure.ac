@@ -51,12 +51,12 @@ else
 	AC_MSG_RESULT([not found])
 fi
 
-AC_CHECK_HEADERS([elf.h], [has_ELF_H=true], [has_ELF_H=true])
-AC_CHECK_HEADERS([libelf.h], [has_LIBELF_H=true], [has_LIBELF_H=true])
+AC_CHECK_HEADERS([elf.h], [has_ELF_H=true], [has_ELF_H=false])
+AC_CHECK_HEADERS([libelf.h], [has_LIBELF_H=true], [has_LIBELF_H=false])
 
 # libelf (we only need the headers)
 # On debian/ubuntu libelf is not in pkg-config so...
-if test x$has_LIBELF_H = xtrue; then
+if test x$has_LIBELF_H = xtrue ; then
        AM_CONDITIONAL([HAVE_LIBELF], [test x$have_libelf = xtrue])
        AC_ARG_VAR([LIBELF_CFLAGS], "")
        AC_ARG_VAR([LIBELF_LIBS], "")
