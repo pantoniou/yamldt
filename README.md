@@ -1,14 +1,15 @@
 # yamldt
 
-A YAML to DT blob generator/compiler, utilizing a YAML schema that
-is functionaly equivalent to DTS and supports all DTS features.
+A YAML to DT blob generator/compiler and validator, utilizing a YAML schema
+that is functionaly equivalent to DTS and supports all DTS features.
+
+Validation is performed against another YAML schema that defines properties
+and constraints which a checker uses generating small code fragments that
+are compiled to ebpf and executed for the specific validation of each
+node that the rule selects in the output tree.
 
 `yamldl` parses a device tree description (source) file in YAML format
 and outputs a (bit-exact if the -C option is used) device tree blob.
-
-Using the -y option it is also capable to generate a raw YAML file
-that is appriate to use with standard YAML parsing tools like
-schema checkers.
 
 ## Rationale
 
@@ -40,34 +41,339 @@ data, which is IMHO crucial for thorough validation and checking
 against device tree bindings (when they will be converted to a
 machine readable format, preferably YAML).
 
-For example that will allow automatic binding (i.e. type) checking
-and type promotion using something similar to the following:
+yamldt implements a schema checker partly based on an RFC posted
+on the mainline list some years ago by Rob Herring.
+
+## Validation
+
+`yamldt` is capable to perform validation of DT constructs using
+a C code based eBPF checker. eBPF code fragments are assembled that
+can perform type checking of properties, enforce arbitrary value
+constraints while fully supporting inheritance.
+
+As an example, let's see how the validation of a given fragment
+works using on a jedec,spi-nor node:
 
 ```yaml
-foo:
- compatible: "corp,foo"
- status: "okay"
- thingamagic: 12
+m25p80@0:
+  compatible: "s25fl256s1"
+  spi-max-frequency: 76800000
+  reg: 0
+  spi-tx-bus-width: 1
+  spi-rx-bus-width: 4
+  "#address-cells": 1
+  "#size-cells": 1
 ```
 
-If the binding for "corp,foo" contains an entry
+The binding for this is:
 
 ```yaml
-title: Corp FOO
+%YAML 1.1
+---
+jedec,spi-nor:
+  version: 1
 
-id: "corp,foo"
+  title: >
+    SPI NOR flash: ST M25Pxx (and similar) serial flash chips
 
-properties:
-  thingamagic:
-   required: true
-   type: int64
+  maintainer:
+    name: Unknown
+
+  inherits: *spi-slave
+
+  properties:
+    reg:
+      category: required
+      type: int
+      description: chip select address of device
+
+    compatible: &jedec-spi-nor-compatible
+      category: required
+      type: strseq
+      description: >
+        May include a device-specific string consisting of the
+        manufacturer and name of the chip. A list of supported chip
+        names follows.
+        Must also include "jedec,spi-nor" for any SPI NOR flash that can
+        be identified by the JEDEC READ ID opcode (0x9F).
+      constraint: |
+        anystreq(v, "at25df321a") ||
+        anystreq(v,  "at25df641") ||
+        anystreq(v, "at26df081a") ||
+        anystreq(v,   "mr25h256") ||
+        anystreq(v,    "mr25h10") ||
+        anystreq(v,    "mr25h40") ||
+        anystreq(v, "mx25l4005a") ||
+        anystreq(v, "mx25l1606e") ||
+        anystreq(v, "mx25l6405d") ||
+        anystreq(v,"mx25l12805d") ||
+        anystreq(v,"mx25l25635e") ||
+        anystreq(v,    "n25q064") ||
+        anystreq(v, "n25q128a11") ||
+        anystreq(v, "n25q128a13") ||
+        anystreq(v,   "n25q512a") ||
+        anystreq(v, "s25fl256s1") ||
+        anystreq(v,  "s25fl512s") ||
+        anystreq(v, "s25sl12801") ||
+        anystreq(v,  "s25fl008k") ||
+        anystreq(v,  "s25fl064k") ||
+        anystreq(v,"sst25vf040b") ||
+        anystreq(v,     "m25p40") ||
+        anystreq(v,     "m25p80") ||
+        anystreq(v,     "m25p16") ||
+        anystreq(v,     "m25p32") ||
+        anystreq(v,     "m25p64") ||
+        anystreq(v,    "m25p128") ||
+        anystreq(v,     "w25x80") ||
+        anystreq(v,     "w25x32") ||
+        anystreq(v,     "w25q32") ||
+        anystreq(v,     "w25q64") ||
+        anystreq(v,   "w25q32dw") ||
+        anystreq(v,   "w25q80bl") ||
+        anystreq(v,    "w25q128") ||
+        anystreq(v,    "w25q256")
+
+    spi-max-frequency:
+      category: required
+      type: int
+      description: Maximum frequency of the SPI bus the chip can operate at
+      constraint: |
+        v > 0 && v < 100000000
+
+    m25p,fast-read:
+      category: optional
+      type: bool
+      description: >
+        Use the "fast read" opcode to read data from the chip instead
+        of the usual "read" opcode. This opcode is not supported by
+        all chips and support for it can not be detected at runtime.
+        Refer to your chips' datasheet to check if this is supported
+        by your chip.
+
+  example:
+    dts: |
+      flash: m25p80@0 {
+          #address-cells = <1>;
+          #size-cells = <1>;
+          compatible = "spansion,m25p80", "jedec,spi-nor";
+          reg = <0>;
+          spi-max-frequency = <40000000>;
+          m25p,fast-read;
+      };
+    yaml: |
+      m25p80@0: &flash
+        "#address-cells": 1
+        "#size-cells": 1
+        compatible: [ "spansion,m25p80", "jedec,spi-nor" ]
+        reg: 0;
+        spi-max-frequency: 40000000
+        m25p,fast-read: true
 ```
 
-A warning (or an automatic promotion of the type) may be generated.
+Note the constraint rule that matches on any compatible on the
+given list. This binding inherits from spi-slave `inherits: *spi-slave`
 
-In a similar manner warnings (or errors) may be generated for mismatched
-references to nodes that are not valid, in a generic manner that is
-part of the design rule check cycle of a system design.
+`*spi-slave` is standard YAML reference notation which points to
+the spi-slave binding, pasted here for convenience:
+
+```yaml
+%YAML 1.1
+---
+spi-slave: &spi-slave
+  version: 1
+
+  title: SPI Slave Devices
+
+  maintainer:
+    name: Mark Brown <broonie@kernel.org>
+
+  inherits: *device-compatible
+
+  class: spi-slave
+  virtual: true
+
+  description: >
+    SPI (Serial Peripheral Interface) slave bus devices are children of
+    a SPI master bus device.
+
+  # constraint: |+
+  #  class_of(parent(n), "spi")
+
+  properties:
+    reg:
+      category: required
+      type: int
+      description: chip select address of device
+
+    compatible:
+      category: required
+      type: strseq
+      description: compatible strings
+
+    spi-max-frequency:
+      category: required
+      type: int
+      description: Maximum SPI clocking speed of device in Hz
+
+    spi-cpol:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        inverse clock polarity (CPOL) mode
+
+    spi-cpha:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        shifted clock phase (CPHA) mode
+
+    spi-cs-high:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        chip select active high
+
+    spi-3wire:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        3-wire mode.
+
+    spi-lsb-first:
+      category: optional
+      type: bool
+      description: >
+        Boolean property indicating device requires
+        LSB first mode.
+
+    spi-tx-bus-width:
+      category: optional
+      type: int
+      constraint: v == 1 || v == 2 || v == 4
+      description: >
+        The bus width(number of data wires) that
+        used for MOSI. Defaults to 1 if not present.
+
+    spi-rx-bus-width:
+      category: optional
+      type: int
+      constraint: v == 1 || v == 2 || v == 4
+      description: >
+        The bus width(number of data wires) that
+        used for MISO. Defaults to 1 if not present.
+
+  notes: >
+    Some SPI controllers and devices support Dual and Quad SPI transfer mode.
+    It allows data in the SPI system to be transferred in 2 wires(DUAL) or
+    4 wires(QUAD).
+    Now the value that spi-tx-bus-width and spi-rx-bus-width can receive is
+    only 1(SINGLE), 2(DUAL) and 4(QUAD). Dual/Quad mode is not allowed when
+    3-wire mode is used.
+    If a gpio chipselect is used for the SPI slave the gpio number will be
+    passed via the SPI master node cs-gpios property.
+
+  example:
+    dts: |
+      spi@f00 {
+          ethernet-switch@0 {
+              compatible = "micrel,ks8995m";
+              spi-max-frequency = <1000000>;
+              reg = <0>;
+          };
+
+          codec@1 {
+              compatible = "ti,tlv320aic26";
+              spi-max-frequency = <100000>;
+              reg = <1>;
+          };
+      };
+    yaml: |
+      spi@f00:
+        ethernet-switch@0:
+          compatible: "micrel,ks8995m"
+          spi-max-frequency: 1000000
+          reg: 0
+
+        codec@1:
+          compatible: "ti,tlv320aic26"
+          spi-max-frequency: 100000
+          reg: 1
+```
+
+Note the `&spi-slave` anchor, this is what it's used to refer to
+other parts of the schema.
+
+The SPI slave binding defines a number of properties that all
+inherited bindings include.
+
+This in turn inherits from `device-compatible` which is this:
+
+```yaml
+%YAML 1.1
+---
+device-compatible: &device-compatible
+  title: Contraint for devices with compatible properties
+  # select node for checking when the compatible constraint and
+  # the device status enable constraint are met.
+  selected: [ "compatible", *device-status-enabled ]
+
+  class: constraint
+  virtual: true
+```
+
+Note that device-compatible is a binding that all devices
+defined with the DT schema will inherit from.
+
+It simply defines a `selected` rule. The checker uses it
+as part of the `select` method which will generate in order
+to find out whether a node should be checked against a rule.
+
+The `selected` rule defines two constraints. The first one
+is the name of a variable in a derived binding that all
+it's constraints has to satisfy; in this case it's the
+jedec,spi-nor compatible constraint in the binding above.
+The select constraint is a reference to the
+`device-status-enabled` constrainst defined at:
+
+```yaml
+%YAML 1.1
+---
+device-enabled:
+  title: Contraint for enabled devices
+
+  class: constraint
+  virtual: true
+
+  properties:
+    status: &device-status-enabled
+      category: optional
+      type: str
+      description: Marks device state as enabled
+      constraint: |
+        !exists || streq(v, "okay") || streq(v, "ok")
+```
+
+The `device-enabled` constraint checks where the node is
+enabled in DT parlance.
+
+Taking those two constraints together we generate the enable
+method filter which triggers on an enable device node that
+matches any of the compatible strings defined in the jedec,spi-nor
+binding.
+
+The check method will be generated by collecting all the
+property constraints (category, type and explicit value constraints).
+
+Note how a variable v is used a the current property value. The
+generated methods will provide it to the constraint all primed
+up and ready to use.
+
+Note that custom, manually written select and check methods
+are possible but their usage is not recommended for simple type.
 
 ## Installation
 
@@ -81,6 +387,9 @@ look in the `port/` directory
 You can pass a CPP processed file to `yamldt` and everything works
 as expected.
 
+The bundled validator requires a working ebpf compiler and libelf.
+Known good working clang versions with ebpf support are 4.0 and higher.
+
 # Usage
 
 The `yamldt` options available are:
@@ -88,15 +397,19 @@ The `yamldt` options available are:
 ```
 yamldt [options] <input-file>
  options are:
-   -o, --output         Output DTB or YAML file
-   -d, --debug		Debug messages
-   -y, --yaml           Generate YAML output
-   -C, --compatible	Bit exact compatibility mode
-   -l, --late-resolve	Late resolution mode
-   -c, --object	Object mode
-   -s, --dts		DTS output instead of DTB
-   -h, --help		Help
-   -v, --version	Display version
+   -o, --output        Output file
+   -d, --debug         Debug messages
+   -c                  Don't resolve references (object mode)
+   -C, --compatible    Compatible mode
+   -s, --dts           DTS mode
+   -y, --yaml          YAML mode
+   -S, --schema        Use schema (all yaml files in dir/)
+   -g, --codegen       Code generator configuration file
+       --save-temps    Save temporary files
+       --silent        Be really silent
+       --color         [auto|off|on]
+   -h, --help          Help
+   -v, --version       Display version
 ```
 
 The `-C/--compatible` option generates a bit exact DTB file.
@@ -109,6 +422,25 @@ The `-c/--object` option generates an YAML object file that can be
 used in linking similar to the way C sources and object files work.
 
 The `-s/--dts` option selects a DTS output format instead of DTB.
+
+The `-y/--yaml` option output a _pure_ YAML format file. A _pure_
+YAML file is one that is containing no comments and integer values
+have been calculated if possible. It is guaranteed to be a valid
+YAML file suitable for use by other external tools.
+
+The `-S/--schema` option is going to use the given file(s) as
+input for the checker. As an extension if given a directory name
+with a terminating slash (i.e. dir/) it will recursively collect
+and use all YAML files within.
+
+The `-g/--codegen` option is going to use the given YAML file(s)
+(or dir/ as in the schema option) as input for the code generator.
+
+The `--save-temps` option will save all intermediate files/blobs.
+
+The `--silent` option will supress all informational messages.
+
+`--color` controls color output in the terminal.
 
 Automatic suffix detection does what you expect (i.e. an output file
 ending in .dtb is selecting the DTB generation option, .yaml the yaml
@@ -175,7 +507,13 @@ all arches to both YAML and dtb format. The generated YAML file
 is compiled again with `yamldt` using the compatible option to a
 different dtb file.
 
-The resulting dtb files are bit-exact.
+The resulting dtb files are bit-exact because the `-C` option is used.
+
+Run `make check` to run the test suite.
+Run `make validate` to run the test suite and perform schema
+validation checks. It is recommended to use the `--keep-going`
+flag to continue checking even in the presence of validation
+errors.
 
 # Workflow
 
@@ -1139,3 +1477,92 @@ fixedregulator0: &vmmcsd_fixed
   clocks: [ *clk_32768_ck, *clkdiv32k_ick ]
   clock-names: [ "ext-clk", "int-clk" ]
 ```
+
+# Validation example
+
+For this example we're going to use port/am335x-boneblack-dev/
+An extra rule-check.yaml file has been added where validation
+tests can be performed.
+
+That file contains a single jedec,spi-nor device and when we validate:
+
+```yaml
+*spi0:
+  m25p80@0:
+    compatible: "s25fl256s1"
+    spi-max-frequency: 76800000
+    reg: 0
+    spi-tx-bus-width: 1
+    spi-rx-bus-width: 4
+    "#address-cells": 1
+    "#size-cells": 1
+```
+
+This is a valid device node so running validate..
+
+```
+$ make validate
+cc -E -MT am33xx.cpp.yaml -MMD -MP -MF am33xx.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ am33xx.yaml >am33xx.cpp.yaml
+cc -E -MT am33xx-clocks.cpp.yaml -MMD -MP -MF am33xx-clocks.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ am33xx-clocks.yaml >am33xx-clocks.cpp.yaml
+cc -E -MT am335x-bone-common.cpp.yaml -MMD -MP -MF am335x-bone-common.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ am335x-bone-common.yaml >am335x-bone-common.cpp.yaml
+cc -E -MT am335x-boneblack-common.cpp.yaml -MMD -MP -MF am335x-boneblack-common.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ am335x-boneblack-common.yaml >am335x-boneblack-common.cpp.yaml
+cc -E -MT am335x-boneblack.cpp.yaml -MMD -MP -MF am335x-boneblack.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ am335x-boneblack.yaml >am335x-boneblack.cpp.yaml
+cc -E -MT rule-check.cpp.yaml -MMD -MP -MF rule-check.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ rule-check.yaml >rule-check.cpp.yaml
+../../yamldt  -g ../../validate/schema/codegen.yaml -S ../../validate/bindings/ -y am33xx.cpp.yaml am33xx-clocks.cpp.yaml am335x-bone-common.cpp.yaml am335x-boneblack-common.cpp.yaml am335x-boneblack.cpp.yaml rule-check.cpp.yaml -o am335x-boneblack-rules.pure.yaml
+jedec,spi-nor: /ocp/spi@48030000/m25p80@0 OK
+```
+Note the last line, it means that the node was checked and it was found OK.
+
+Editing the rule-check.yaml file, let's introduce a couple of errors;
+Commenting out the reg property `# reg: 0`
+
+```
+$ make validate
+cc -E -MT rule-check.cpp.yaml -MMD -MP -MF rule-check.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ rule-check.yaml >rule-check.cpp.yaml
+../../yamldt  -g ../../validate/schema/codegen.yaml -S ../../validate/bindings/ -y am33xx.cpp.yaml am33xx-clocks.cpp.yaml am335x-bone-common.cpp.yaml am335x-boneblack-common.cpp.yaml am335x-boneblack.cpp.yaml rule-check.cpp.yaml -o am335x-boneblack-rules.pure.yaml
+jedec,spi-nor: /ocp/spi@48030000/m25p80@0 FAIL (-2004)
+../../validate/bindings/jedec,spi-nor.yaml:15:5: error: missing property: property was defined at /jedec,spi-nor/properties/reg
+     reg:
+     ^~~~
+```
+
+Note the descriptive error and the pointer to the missing property in the schema.
+
+Making another error, assign a string to the reg property `reg: "string"`
+
+```
+$ make validate
+$ make validate
+cc -E -MT rule-check.cpp.yaml -MMD -MP -MF rule-check.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ rule-check.yaml >rule-check.cpp.yaml
+../../yamldt  -g ../../validate/schema/codegen.yaml -S ../../validate/bindings/ -y am33xx.cpp.yaml am33xx-clocks.cpp.yaml am335x-bone-common.cpp.yaml am335x-boneblack-common.cpp.yaml am335x-boneblack.cpp.yaml rule-check.cpp.yaml -o am335x-boneblack-rules.pure.yaml
+jedec,spi-nor: /ocp/spi@48030000/m25p80@0 FAIL (-3004)
+rule-check.yaml:8:10: error: bad property type
+     reg: "string"
+          ^~~~~~~~
+../../validate/bindings/jedec,spi-nor.yaml:15:5: error: property was defined at /jedec,spi-nor/properties/reg
+     reg:
+     ^~~~
+```
+
+Note the message about the type error and the pointer to the place where the reg property was defined.
+
+Finally, let's make an error that violates a constraint
+
+Change the `spi-tx-bus-width` value to 3
+
+```
+$ make validate
+cc -E -MT rule-check.cpp.yaml -MMD -MP -MF rule-check.o.Yd -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input -nostdinc -undef -x assembler-with-cpp -D__DTS__ -D__YAML__ rule-check.yaml >rule-check.cpp.yaml
+../../yamldt  -g ../../validate/schema/codegen.yaml -S ../../validate/bindings/ -y am33xx.cpp.yaml am33xx-clocks.cpp.yaml am335x-bone-common.cpp.yaml am335x-boneblack-common.cpp.yaml am335x-boneblack.cpp.yaml rule-check.cpp.yaml -o am335x-boneblack-rules.pure.yaml
+jedec,spi-nor: /ocp/spi@48030000/m25p80@0 FAIL (-1018)
+rule-check.yaml:9:23: error: constraint rule failed
+     spi-tx-bus-width: 3
+                       ^
+../../validate/bindings/spi/spi-slave.yaml:77:19: error: constraint that fails was defined here
+       constraint: v == 1 || v == 2 || v == 4
+                   ^~~~~~~~~~~~~~~~~~~~~~~~~~
+../../validate/bindings/spi/spi-slave.yaml:74:5: error: property was defined at /spi-slave/properties/spi-tx-bus-width
+     spi-tx-bus-width:
+```
+
+Note how the offending value was highlighted, the offending constraint and property definition were listed too.
