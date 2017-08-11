@@ -1160,11 +1160,12 @@ static void check_node_single(struct yaml_dt_state *dt,
 				}
 
 				if (errout)
-					errmsg = "";
+					errmsg = NULL;
 
 				tree_error_at_node(to_tree(sdt), cd->npp,
 					"%s%sproperty was defined at %s\n",
-					errmsg, errmsg ? ": " : "",
+					errmsg ? errmsg : "",
+					errmsg ? ": " : "",
 					dn_fullname(cd->npp, namebuf, sizeof(namebuf)));
 
 			} else {
