@@ -1,7 +1,7 @@
 # Makefile for yamldl test-suite
 TOPDIR := $(realpath .)/..
 
-TOPTARGETS := all clean check
+TOPTARGETS := all clean check validate
 
 SUBDIRS := $(wildcard */.)
 

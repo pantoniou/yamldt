@@ -9,6 +9,7 @@ AC_REVISION([VERSION_NUMBER])
 AC_CONFIG_SRCDIR([yamldt.c])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+AM_EXTRA_RECURSIVE_TARGETS([validate])
 
 # enable maintainer mode by default
 AM_MAINTAINER_MODE([enable])

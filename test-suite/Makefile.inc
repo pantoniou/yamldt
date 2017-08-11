@@ -11,7 +11,12 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
-YAMLDTFLAGS ?= -C
+
+# pass extra validate flags
+YAMLDTFLAGS ?= -C \
+	$(if $(findstring validate, $(MAKECMDGOALS)), \
+		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
+
 FDTDUMPFLAGS ?=
 
 DIFFS    := $(addsuffix .diff, $(basename $(BOARDS)))
@@ -48,3 +53,5 @@ check: $(DIFFS)
 
 clean:
 	rm -f $(DIFFS) $(DTBS) $(YAMLDTBS) $(FDTDUMPS) $(CPPS) $(YAMLS)
+
+validate: check

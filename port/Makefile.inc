@@ -12,7 +12,12 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
-YAMLDTFLAGS ?= -C
+
+# pass extra validate flags
+YAMLDTFLAGS ?= -C \
+	$(if $(findstring validate, $(MAKECMDGOALS)), \
+		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
+
 FDTDUMPFLAGS ?=
 YDEPFLAGS = -MT $@ -MMD -MP -MF $*.Yd
 DDEPFLAGS = -MT $@ -MMD -MP -MF $*.Dd
@@ -43,7 +48,7 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 %.fdtdump: %.dtb
 	$(FDTDUMP) $(FDTDUMPFLAGS) 2>/dev/null $< >$@
 
-.PHONY: clean distclean check
+.PHONY: clean distclean check validate .FORCE
 
 all: $(DTBS)
 
@@ -51,6 +56,9 @@ clean:
 	rm -f $(DTBS) $(FDTDUMPS) $(CPPS) $(YDEPS) \
 	      $(DTCDTBS) $(DDEPS)
 
-check: $(DIFFS) $(DTCFDTDUMPS) $(CPPS)
+# always rebuild the final DTBS to check
+$(DTBS): .FORCE
+
+.FORCE:
 
 -include $(YDEPS) $(DDEPS)

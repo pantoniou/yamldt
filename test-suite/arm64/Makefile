@@ -1,6 +1,6 @@
 TOPDIR ?= $(realpath .)/../..
 
-TOPTARGETS := all clean check
+TOPTARGETS := all clean check validate
 
 SUBDIRS := $(wildcard */.)
 
