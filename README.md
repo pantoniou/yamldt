@@ -19,8 +19,11 @@ YAML is a human-readable data serialization language, and is expressive
 enough to cover all DTS source features.
 
 Simple YAML file are just key value pairs that are very easy to parse, even
-without using a formal YAML parser. For instance YAML in restricted
-environments may simple be appending a few lines of text in a given YAML file.
+without using a formal YAML parser. YAML streams are containing documents
+separated by the --- marker. This model is a good fit for DT since one may
+simply append few lines of text in a given YAML stream to modify it.
+In restricted environments you may for instance avoid having to edit a
+large configuration blob but just appending your changes to the stream.
 
 The parsers of YAML are very mature, as it has been released in 2001.
 It is in wide-spread use and schema validation tools are available.
@@ -37,7 +40,7 @@ Data in YAML can easily be converted to/form other format that a
 particular tool that we may use in the future understands.
 
 More importantly YAML offers (an optional) type information for each
-data, which is IMHO crucial for thorough validation and checking
+property item, which is IMHO crucial for thorough validation and checking
 against device tree bindings (when they will be converted to a
 machine readable format, preferably YAML).
 
@@ -328,9 +331,9 @@ device-compatible: &device-compatible
 Note that device-compatible is a binding that all devices
 defined with the DT schema will inherit from.
 
-It simply defines a `selected` rule. The checker uses it
-as part of the `select` method which will generate in order
-to find out whether a node should be checked against a rule.
+The `selected` property will be used to generate a select()
+method that will be used to to find out whether a node should be
+checked against a given rule.
 
 The `selected` rule defines two constraints. The first one
 is the name of a variable in a derived binding that all
