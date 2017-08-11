@@ -1586,15 +1586,6 @@ static void get_error_location(struct yaml_dt_state *dt,
 	*linep = lastline;
 }
 
-#define RED "\x1b[31;1m"
-#define GREEN "\x1b[32;1m"
-#define YELLOW "\x1b[33;1m"
-#define BLUE "\x1b[34;1m"
-#define MAGENTA "\x1b[35;1m"
-#define CYAN "\x1b[36;1m"
-#define WHITE "\x1b[37;1m"
-#define RESET "\x1b[0m"
-
 void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
@@ -1605,7 +1596,8 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 	size_t line, column, end_line, end_column;
 	const char *emph = "", *kind = "", *marker = "", *reset = "";
 
-	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) || dt->cfg.color == 1) {
+	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) ||
+	     dt->cfg.color == 1) {
 		emph = WHITE;
 		kind = RED;
 		marker = GREEN;

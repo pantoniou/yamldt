@@ -1057,7 +1057,7 @@ static struct constraint_desc *lookup_constraint_by_ret(struct yaml_dt_state *dt
 		*errmsg = "bad property type";
 	} else if (ret < -2000) {	/* exist check */
 		idx = -(ret + 2000);
-		*errmsg = "property does not exist";
+		*errmsg = "missing property";
 	} else if (ret < -1000) { 	/* property check */
 		idx = -(ret + 1000);
 		*errmsg = "constraint rule failed";
@@ -1114,6 +1114,16 @@ static void check_node_single(struct yaml_dt_state *dt,
 	struct ref *ref;
 	const char *errmsg;
 	bool errout;
+	const char *good = "", *bad = "", *emph = "", *marker = "", *reset = "";
+
+	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) ||
+	     dt->cfg.color == 1) {
+		good = GREEN;
+		bad = RED;
+		emph = WHITE;
+		marker = YELLOW;
+		reset = RESET;
+	}
 
 	dt_debug(dt, "%s: against %s - running select\n",
 			dn_fullname(np, namebuf, sizeof(namebuf)),
@@ -1135,13 +1145,15 @@ static void check_node_single(struct yaml_dt_state *dt,
 			dt_fatal(dt, "exec failed with code %d (%s)\n",
 					err, strerror(-err));
 		if (vmret == 0)
-			dt_info(dt, "node %s is correct against %s\n",
-				dn_fullname(np, namebuf, sizeof(namebuf)),
-				snp->name);
+			dt_info(dt, "%s%s:%s %s%s%s %sOK%s\n",
+				marker, snp->name, reset,
+				emph, dn_fullname(np, namebuf, sizeof(namebuf)),
+				reset, good, reset);
 		else {
-			dt_info(dt, "node %s is not correct against %s (%lld)\n",
-				dn_fullname(np, namebuf, sizeof(namebuf)),
-				snp->name, (long long)vmret);
+			dt_info(dt, "%s%s:%s %s%s%s %sFAIL (%lld)%s\n",
+				marker, snp->name, reset,
+				emph, dn_fullname(np, namebuf, sizeof(namebuf)),
+				reset, bad, (long long)vmret, reset);
 			cd = lookup_constraint_by_ret(dt, np, snp, vmret, &errmsg);
 			if (cd) {
 				errout = false;
