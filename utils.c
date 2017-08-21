@@ -557,14 +557,14 @@ static int memstream_grow(struct memstream *ms, size_t minsize)
 	char *newcontents;
 
 	newcap = ms->capacity * 2;
-	while (newcap <= minsize)
+	while (newcap <= minsize + 1)
 		newcap *= 2;
 	newcontents = realloc(ms->contents, newcap);
 	if (!newcontents)
 		return -1;
 	ms->contents = newcontents;
 	memset(ms->contents + ms->capacity, 0, newcap - ms->capacity);
-	ms->capacity= newcap;
+	ms->capacity = newcap;
 	*ms->ptr = ms->contents;
 	return 0;
 }
@@ -591,8 +591,9 @@ static int memstream_write(void *cookie, const char *buf, int count)
 		return -1;
 	memcpy(ms->contents + ms->position, buf, count);
 	ms->position += count;
+	ms->contents[ms->position] = '\0';
 	if (ms->size < ms->position)
-		*ms->sizeloc = ms->size= ms->position;
+		*ms->sizeloc = ms->size = ms->position;
 
 	return count;
 }
@@ -620,7 +621,7 @@ static fpos_t memstream_seek(void *cookie, fpos_t offset, int whence)
 		return -1;
 	ms->position = pos;
 	if (ms->size < ms->position)
-		*ms->sizeloc = ms->size= ms->position;
+		*ms->sizeloc = ms->size = ms->position;
 	return pos;
 }
 
@@ -675,3 +676,26 @@ err_out:
 }
 
 #endif /* __APPLE__ && _POSIX_C_SOURCE < 200809L */
+
+int acc_add(struct acc_state *acc, char c)
+{
+	char *new_buf;
+	size_t new_alloc;
+
+	if (acc->size >= acc->alloc) {
+		new_alloc = acc->alloc;
+		if (new_alloc == 0)
+			new_alloc = 128;	/* start at 128 bytes */
+		else
+			new_alloc *= 2;
+		/* space for +1 */
+		new_buf = realloc(acc->buf, new_alloc + 1);
+		if (!new_buf)
+			return -1;
+		acc->buf = new_buf;
+		acc->alloc = new_alloc + 1;
+	}
+	acc->buf[acc->size++] = c;
+	acc->buf[acc->size] = '\0';
+	return 0;
+}

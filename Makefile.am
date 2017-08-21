@@ -6,7 +6,7 @@ include_HEADERS =
 
 AM_YFLAGS = -d
 
-bin_PROGRAMS = yamldt intexpr
+bin_PROGRAMS = yamldt intexpr dts2yaml
 
 yamldt_CFLAGS = $(LIBYAML_CFLAGS) $(LIBELF_CFLAGS) 
 yamldt_SOURCES = yamldt.c \
@@ -32,9 +32,15 @@ intexpr_SOURCES = intexpr.c \
 		  syexpr.c syexpr.h \
 		  utils.c utils.h 
 
+dts2yaml_SOURCES = dts2yaml.c \
+		   dtsparser.c dtsparser.h \
+		   syexpr.c syexpr.h \
+		   utils.c utils.h 
+
 AM_MAKEFLAGS = DTC=@DTC@ \
 	       YAMLDT=@abs_top_builddir@/yamldt \
 	       EBPFRUN=@abs_top_builddir@/ebpfrun \
+	       DTS2YAML=@abs_top_builddir@/dts2yaml \
 	       EBPFCC=@EBPFCC@ \
 	       TOPDIR=@abs_top_srcdir@
 

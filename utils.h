@@ -51,4 +51,45 @@ FILE *open_memstream(char **ptr, size_t *sizeloc);
 #define WHITE "\x1b[37;1m"
 #define RESET "\x1b[0m"
 
+/* accumulator */
+
+struct acc_state {
+	char *buf;
+	size_t alloc;
+	size_t size;
+};
+
+static inline void acc_reset(struct acc_state *acc)
+{
+	acc->size = 0;
+}
+
+static inline size_t acc_get_size(struct acc_state *acc)
+{
+	return acc->size;
+}
+
+static inline const char *acc_get(struct acc_state *acc)
+{
+	/* return empty string if empty */
+	if (!acc->buf || !acc->size)
+		return "";
+	return acc->buf;
+}
+
+static inline void acc_setup(struct acc_state *acc)
+{
+	acc->buf = NULL;
+	acc->alloc = 0;
+	acc->size = 0;
+}
+
+static inline void acc_cleanup(struct acc_state *acc)
+{
+	if (acc->buf)
+		free(acc->buf);
+}
+
+int acc_add(struct acc_state *acc, char c);
+
 #endif
