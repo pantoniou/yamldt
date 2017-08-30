@@ -158,8 +158,20 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 	/* yes, I'm paranoid */
 	assert(ULLONG_MAX >= UINT64_MAX);
 
-	if (is_hex)
+	/* silently convert hex values to unsigned form */
+	if (is_hex) {
 		is_unsigned = true;
+		if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32"))
+			tag = "!uint";
+		else if (!strcmp(tag,  "!int8"))
+			tag = "!uint8";
+		else if (!strcmp(tag,  "!int16"))
+			tag = "!uint16";
+		else if (!strcmp(tag,  "!int32"))
+			tag = "!uint32";
+		else if (!strcmp(tag,  "!int64"))
+			tag = "!uint64";
+	}
 
 	sval = (long long)val;
 	sval_overflow = is_unsigned && val > ULLONG_MAX;
