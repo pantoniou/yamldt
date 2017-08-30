@@ -8,19 +8,6 @@
 #ifndef _DT_BINDINGS_PINCTRL_OMAP_H
 #define _DT_BINDINGS_PINCTRL_OMAP_H
 
-#ifndef _S
-/* yaml version (with , separator) */
-#ifdef __YAML__
-#define _SS	[
-#define _S	,
-#define _SE	]
-#else
-#define _SS	/* nothing */
-#define _S	/* nothing */
-#define _SE	/* nothing */
-#endif
-#endif
-
 /* 34xx mux mode options for each pin. See TRM for options */
 #define MUX_MODE0	0
 #define MUX_MODE1	1
@@ -68,15 +55,15 @@
  */
 #define OMAP_IOPAD_OFFSET(pa, offset)	(((pa) & 0xffff) - (offset))
 
-#define OMAP2420_CORE_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x0030) _S (val) _SE
-#define OMAP2430_CORE_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x2030) _S (val) _SE
-#define OMAP3_CORE1_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x2030) _S (val) _SE
-#define OMAP3430_CORE2_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x25d8) _S (val) _SE
-#define OMAP3630_CORE2_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x25a0) _S (val) _SE
-#define OMAP3_WKUP_IOPAD(pa, val)	_SS OMAP_IOPAD_OFFSET((pa), 0x2a00) _S (val) _SE
-#define DM814X_IOPAD(pa, val)		_SS OMAP_IOPAD_OFFSET((pa), 0x0800) _S (val) _SE
-#define DM816X_IOPAD(pa, val)		_SS OMAP_IOPAD_OFFSET((pa), 0x0800) _S (val) _SE
-#define AM33XX_IOPAD(pa, val)		_SS OMAP_IOPAD_OFFSET((pa), 0x0800) _S (val) _SE
+#define OMAP2420_CORE_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x0030) (val)
+#define OMAP2430_CORE_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x2030) (val)
+#define OMAP3_CORE1_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x2030) (val)
+#define OMAP3430_CORE2_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x25d8) (val)
+#define OMAP3630_CORE2_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x25a0) (val)
+#define OMAP3_WKUP_IOPAD(pa, val)	OMAP_IOPAD_OFFSET((pa), 0x2a00) (val)
+#define DM814X_IOPAD(pa, val)		OMAP_IOPAD_OFFSET((pa), 0x0800) (val)
+#define DM816X_IOPAD(pa, val)		OMAP_IOPAD_OFFSET((pa), 0x0800) (val)
+#define AM33XX_IOPAD(pa, val)		OMAP_IOPAD_OFFSET((pa), 0x0800) (val)
 
 /*
  * Macros to allow using the offset from the padconf physical address
@@ -84,8 +71,8 @@
  */
 #define OMAP_PADCONF_OFFSET(offset, base_offset)	((offset) - (base_offset))
 
-#define OMAP4_IOPAD(offset, val)	OMAP_PADCONF_OFFSET((offset), 0x0040) _S (val)
-#define OMAP5_IOPAD(offset, val)	OMAP_PADCONF_OFFSET((offset), 0x0040) _S (val)
+#define OMAP4_IOPAD(offset, val)	OMAP_PADCONF_OFFSET((offset), 0x0040) (val)
+#define OMAP5_IOPAD(offset, val)	OMAP_PADCONF_OFFSET((offset), 0x0040) (val)
 
 /*
  * Define some commonly used pins configured by the boards.
