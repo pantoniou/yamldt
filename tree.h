@@ -64,6 +64,7 @@ struct node {
 	struct list_head properties;
 	struct list_head labels;
 	char *name;
+	bool is_delete : 1;	/* set to true it is signals deletion */
 };
 
 struct label {

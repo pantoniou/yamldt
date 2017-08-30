@@ -441,6 +441,32 @@ static int d2y_emit(struct dts_state *ds, int depth,
 	case det_preproc:
 		d2y_emit_preproc(d2y, data->preproc->contents);
 		break;
+	case det_del_node:
+		switch (data->del_node->atom) {
+		case dea_name:
+			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+			fprintf(d2y->outfp, "%s: ~\n", data->del_node->contents);
+			break;
+		case dea_ref:
+		case dea_pathref:
+			if (depth > 0)
+				break;
+			fprintf(d2y->outfp, "%s%s: ~\n",
+					data->del_node->atom == dea_ref ? '*': "",
+					data->del_node->contents);
+			break;
+		default:
+			break;
+		}
+		break;
+	case det_del_prop:
+		/* only handle delete names */
+		if (data->del_node->atom == dea_name) {
+			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+			fprintf(d2y->outfp, "%s", data->del_prop->contents);
+			fprintf(d2y->outfp, ": ~\n");
+		}
+		break;
 	case det_include:
 		len = strlen(data->include->contents);
 		filename = alloca(len + 1);

@@ -178,6 +178,8 @@ struct dts_emit_data {
 		const struct dts_emit_item *preproc;
 		const struct dts_emit_item *include;
 		const struct dts_emit_item *memreserves[2];
+		const struct dts_emit_item *del_node;
+		const struct dts_emit_item *del_prop;
 		struct {
 			const struct dts_emit_item *label;
 			const struct dts_emit_item *name;

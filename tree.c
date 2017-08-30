@@ -496,6 +496,13 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 	bool found;
 	char namebuf[2][NODE_FULLNAME_MAX];
 
+	if (np->is_delete) {
+		tree_debug(t, "deleting node @%s\n",
+			dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
+		node_free(t, npref);
+		return;
+	}
+
 	/* add label to noderef */
 	list_for_each_entry_safe(l, ln, &np->labels, node)
 		label_add(t, npref, l->label);

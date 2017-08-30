@@ -534,12 +534,28 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 
 	switch (type) {
 	case det_incbin:
-	case det_del_node:
-	case det_del_prop:
 	case det_plugin:
 		/* TODO */
 		reset_item_list(ds);
 		return 0;
+	case det_del_node:
+		list_for_each_entry(li, &ds->items, node) {
+			if (li->item.atom != dea_comment) {
+				d.del_node = &li->item;
+				break;
+			}
+		}
+		assert(d.del_node);
+		break;
+	case det_del_prop:
+		list_for_each_entry(li, &ds->items, node) {
+			if (li->item.atom != dea_comment) {
+				d.del_prop = &li->item;
+				break;
+			}
+		}
+		assert(d.del_prop);
+		break;
 	case det_include:
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom == dea_string) {
@@ -957,7 +973,8 @@ static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
 		dts_debug(ds, "pop node: depth %d\n",
 					ds->depth);
 		if (ds->node_empty) {
-			dts_emit(ds, det_node_empty);
+			if (ds->depth > 0)
+				dts_emit(ds, det_node_empty);
 			ds->node_empty = false;
 		}
 		if (ds->depth == 0)
@@ -1770,6 +1787,8 @@ static int node_del(struct dts_state *ds, char c)
 static int node_del_ref(struct dts_state *ds, char c)
 {
 	const char *buf;
+	struct dts_emit_list_item *li;
+	int ret;
 
 	/* if first character is left bracket then it's a path ref */
 	if (get_accumulator_size(ds) == 0 && c == '{') {
@@ -1779,7 +1798,13 @@ static int node_del_ref(struct dts_state *ds, char c)
 	if (isspace(c) || c == ';') {
 		buf = get_accumulator(ds);
 		dts_debug(ds, "node-del ref &%s\n", buf);
+		li = item_from_accumulator(ds, dea_ref);
+		if (!li)
+			return -1;
 		reset_accumulator(ds);
+		ret = dts_emit(ds, det_del_node);
+		if (ret)
+			return ret;
 		if (c == ';')
 			goto_state(ds, s_nodes_and_properties);
 		else
@@ -1797,11 +1822,19 @@ static int node_del_ref(struct dts_state *ds, char c)
 static int node_del_pathref(struct dts_state *ds, char c)
 {
 	const char *buf;
+	struct dts_emit_list_item *li;
+	int ret;
 
 	if (c == '}') {
 		buf = get_accumulator(ds);
 		dts_debug(ds, "node-del pathref &{%s}\n", buf);
+		li = item_from_accumulator(ds, dea_pathref);
+		if (!li)
+			return -1;
 		reset_accumulator(ds);
+		ret = dts_emit(ds, det_del_node);
+		if (ret)
+			return ret;
 		goto_state(ds, s_semicolon);
 		return 0;
 	}
@@ -1817,11 +1850,19 @@ static int node_del_pathref(struct dts_state *ds, char c)
 static int node_del_name(struct dts_state *ds, char c)
 {
 	const char *buf;
+	struct dts_emit_list_item *li;
+	int ret;
 
 	if (isspace(c) || c == ';') {
 		buf = get_accumulator(ds);
 		dts_debug(ds, "node-del name %s\n", buf);
+		li = item_from_accumulator(ds, dea_name);
+		if (!li)
+			return -1;
 		reset_accumulator(ds);
+		ret = dts_emit(ds, det_del_node);
+		if (ret)
+			return ret;
 		if (c == ';') {
 			goto_state(ds, s_nodes_and_properties);
 		} else
@@ -1855,11 +1896,19 @@ static int prop_del(struct dts_state *ds, char c)
 static int prop_del_name(struct dts_state *ds, char c)
 {
 	const char *buf;
+	struct dts_emit_list_item *li;
+	int ret;
 
 	if (isspace(c) || c == ';') {
 		buf = get_accumulator(ds);
 		dts_debug(ds, "prop-del name %s\n", buf);
+		li = item_from_accumulator(ds, dea_name);
+		if (!li)
+			return -1;
 		reset_accumulator(ds);
+		ret = dts_emit(ds, det_del_prop);
+		if (ret)
+			return ret;
 		if (c == ';') {
 			goto_state(ds, s_nodes_and_properties);
 		} else

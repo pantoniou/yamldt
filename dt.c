@@ -902,6 +902,8 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 	char namebuf[NODE_FULLNAME_MAX];
 	struct node *np;
 	struct property *prop;
+	struct ref *ref, *refn;
+	int nrefs, nnulls;
 
 	if (!dt)
 		return;
@@ -924,19 +926,55 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 				prop->name[0] ? prop->name : "-",
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 		prop_del(to_tree(dt), prop);
-	} else if (!dt->current_prop_existed) {
 
-		dt_debug(dt, "appending property %s at %s\n",
-				prop->name[0] ? prop->name : "-",
-				dn_fullname(np, namebuf, sizeof(namebuf)));
+	} else {
 
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
+		/* detect whether it's a delete property */
+		nrefs = nnulls = 0;
+		list_for_each_entry_safe(ref, refn, &prop->refs, node) {
+			nrefs++;
+			if ((!ref->xtag || !strcmp(ref->xtag, "!null")) &&
+			((ref->len == 4 && !memcmp(ref->data, "null", 4)) ||
+			(ref->len == 1 && *(char *)ref->data == '~')) )
+				nnulls++;
+		}
 
-	} else
-		dt_debug(dt, "dangling property %s at %s\n",
-				prop->name[0] ? prop->name : "-",
-				dn_fullname(np, namebuf, sizeof(namebuf)));
+		if (nrefs == nnulls)
+			prop->is_delete = true;
+
+		if (!dt->current_prop_existed) {
+
+			if (prop->is_delete && !dt->current_np_ref) {
+
+				dt_debug(dt, "Deleting property %s at %s\n",
+						prop->name,
+						dn_fullname(np, namebuf, sizeof(namebuf)));
+
+				prop_del(to_tree(dt), prop);
+
+			} else {
+				dt_debug(dt, "appending property %s at %s\n",
+						prop->name[0] ? prop->name : "-",
+						dn_fullname(np, namebuf, sizeof(namebuf)));
+
+				prop->np = np;
+				list_add_tail(&prop->node, &np->properties);
+			}
+
+		} else {
+			if (prop->is_delete) {
+				dt_debug(dt, "Deleting property %s at %s\n",
+						prop->name,
+						dn_fullname(np, namebuf, sizeof(namebuf)));
+
+				prop_del(to_tree(dt), prop);
+
+			} else
+				dt_debug(dt, "updating property %s at %s\n",
+					prop->name[0] ? prop->name : "-",
+					dn_fullname(np, namebuf, sizeof(namebuf)));
+		}
+	}
 
 	dt->current_prop_existed = false;
 
@@ -1269,6 +1307,13 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		}
 
 		if (!prop) {
+
+			len = strlen(dt->map_key);
+			if (dt->map_key &&
+			    ((dt->map_key[0] == '/' && dt->map_key[len - 1] != '/') ||
+				dt->map_key[0] == '*'))
+				dt_fatal(dt, "Illegal sequence context\n");
+
 			found_existing = false;
 			assert(np);
 			list_for_each_entry(prop, &np->properties, node) {
@@ -1387,6 +1432,40 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			}
 
 		} else {
+
+			len = strlen(dt->map_key);
+			if ((dt->map_key[0] == '/' && dt->map_key[len - 1] != '/') ||
+			     dt->map_key[0] == '*') {
+				if (dt->depth != 1)
+					dt_fatal(dt, "Bare references not allowed on non root level\n");
+				if (!dt->current_np_ref)
+					dt_fatal(dt, "ref in scalar context\n");
+
+				if (strcmp(s, "null") && strcmp(s, "~"))
+					dt_fatal(dt, "only null values allowed\n");
+
+				/* the only valid content is NULL */
+				np = node_alloc(to_tree(dt), dt->map_key, NULL);
+				np->is_delete = true;
+
+				/* mark as the last alias */
+				to_dt_node(np)->m = dt->last_alias_mark;
+
+				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
+
+				dt_debug(dt, "adding delete ref %s\n", dt->map_key);
+
+				if (dt->map_key)
+					free(dt->map_key);
+				dt->map_key = NULL;
+
+				dt_debug(dt, "* out of ref context\n");
+				dt->current_np = tree_root(to_tree(dt));
+				dt->current_np_ref = false;
+
+				break;
+			}
+
 			if (!prop) {
 				found_existing = false;
 				if (dt->map_key) {

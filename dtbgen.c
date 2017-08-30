@@ -277,7 +277,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	fdt64_t val64;
 	const void *data = NULL;
 	int size = 0;
-	bool is_delete = false;
 	bool append_0 = false;
 	fdt32_t phandlet = 0;
 	char namebuf[NODE_FULLNAME_MAX];
@@ -392,7 +391,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!null")) {
 			data = NULL;
 			size = 0;
-			is_delete = true;
+			fprintf(stderr, "tag=!null\n");
 		} else {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,
@@ -411,11 +410,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	to_dtb_ref(ref)->offset = dtbprop->size;
 
 	prop_append(prop, data, size, append_0);
-
-	if (is_delete)
-		prop->is_delete = is_delete;
-	else if (dtbprop->size > 0)
-		prop->is_delete = false;
 
 	if (output_data)
 		free(output_data);
