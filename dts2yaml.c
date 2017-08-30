@@ -452,7 +452,7 @@ static int d2y_emit(struct dts_state *ds, int depth,
 			if (depth > 0)
 				break;
 			fprintf(d2y->outfp, "%s%s: ~\n",
-					data->del_node->atom == dea_ref ? '*': "",
+					data->del_node->atom == dea_ref ? "*" : "",
 					data->del_node->contents);
 			break;
 		default:
