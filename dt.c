@@ -1839,8 +1839,8 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 			to_dt_ref(ref)->is_builtin_tag = true;
 		} else if (!strcmp(tag, "!bool")) {
 
-			if (!(len == 4 && !memcmp(p,  "true", 4)) ||
-			     (len == 5 && !memcmp(p, "false", 5)) )
+			if (!((len == 4 && !memcmp(p,  "true", 4)) ||
+			      (len == 5 && !memcmp(p, "false", 5))) )
 				return -EINVAL;
 
 			to_dt_ref(ref)->is_bool = true;
