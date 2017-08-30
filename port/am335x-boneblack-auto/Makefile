@@ -62,6 +62,8 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 
 all: $(DTBS)
 
+check: $(DTCDTBS) $(DTBS) $(DIFFS)
+
 $(YAMLS) :$(YAMLIS)
 
 clean:
