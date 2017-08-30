@@ -123,7 +123,6 @@ static void ref_output_single(struct tree *t, FILE *fp,
 	unsigned long long val = 0;
 	const char *xtag = NULL;
 	const char *tag = NULL;
-	char namebuf[NODE_FULLNAME_MAX];
 	char *refname;
 	int refnamelen;
 	const char *s, *e;
@@ -147,7 +146,8 @@ static void ref_output_single(struct tree *t, FILE *fp,
 	if (err != 0) {
 		if (ref->type == r_anchor || ref->type == r_path) {
 			tree_error_at_ref(to_tree(dt), ref,
-				"Can't resolve reference to label %s\n",
+				"Can't resolve reference to %s %s\n",
+				refname[0] == '/' ? "path" : "label",
 				refname);
 			return;
 		}
@@ -178,14 +178,21 @@ static void ref_output_single(struct tree *t, FILE *fp,
 			break;
 		}
 
+		/* empty list; pathref to node with no label */
+		if (list_empty(&np->labels)) {
+			tree_error_at_ref(to_tree(dt), ref,
+				"Can't resolve reference to %s %s\n",
+				refname[0] == '/' ? "path" : "label",
+				refname);
+			break;
+		}
+
 		/* if not the first label, switch it to the first */
 		l = list_first_entry(&np->labels, struct label, node);
 		if (strlen(l->label) != ref->len ||
 		    memcmp(l->label, ref->data, ref->len)) {
-			strncat(namebuf, ref->data, sizeof(namebuf) - 1);
-			namebuf[sizeof(namebuf) - 1] = '\0';
 			tree_debug(t, "Switching label %s to label %s\n",
-				    namebuf, l->label);
+				    refname, l->label);
 		}
 
 		if (ref->type == r_anchor)
@@ -252,6 +259,58 @@ static void ref_output_single(struct tree *t, FILE *fp,
 		/* nothing */
 		break;
 	}
+}
+
+void __yaml_assign_temp_labels(struct tree *t, struct node *np, int *next)
+{
+	struct node *npref, *child;
+	struct property *prop;
+	struct ref *ref;
+	const char *p;
+	int len;
+	char namebuf[128];	/* enough for temp__<n>__ */
+
+	/* for each ref, verify that a label exists */
+	/* if it doesn't create one temporary */
+	list_for_each_entry(prop, &np->properties, node) {
+		list_for_each_entry(ref, &prop->refs, node) {
+			if (ref->type != r_anchor)
+				continue;
+
+			len = ref->len;
+			p = ref->data;
+
+			if (len > 0 && *p == '/')
+				npref = node_lookup_by_path(t, ref->data, ref->len);
+			else
+				npref = node_lookup_by_label(t, ref->data, ref->len);
+
+			/* we don't care about unresolved here */
+			if (!npref)
+				continue;
+
+			/* there is one, we're OK */
+			if (!list_empty(&npref->labels))
+				continue;
+
+			/* add a temporary label name */
+			memset(namebuf, 0, sizeof(namebuf));
+			snprintf(namebuf, sizeof(namebuf) - 1, "temp__%d__", (*next)++);
+			namebuf[sizeof(namebuf) - 1] = '\0';
+
+			label_add(t, npref, namebuf);
+		}
+	}
+
+	list_for_each_entry(child, &np->children, node)
+		__yaml_assign_temp_labels(t, child, next);
+}
+
+void yaml_assign_temp_labels(struct tree *t)
+{
+	int next = 0;
+
+	__yaml_assign_temp_labels(t, tree_root(t), &next);
 }
 
 void __yaml_flatten_node(struct tree *t, FILE *fp,
@@ -362,6 +421,7 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 int yaml_emit(struct yaml_dt_state *dt)
 {
 	tree_apply_ref_nodes(to_tree(dt), dt->cfg.object);
+	yaml_assign_temp_labels(to_tree(dt));
 	yaml_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
 
 	return 0;

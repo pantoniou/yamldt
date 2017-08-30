@@ -594,6 +594,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 				break;
 			case dea_ref:
 			case dea_name:
+			case dea_pathref:
 				/* impossible but verify */
 				assert(!d.pn.name);
 				d.pn.name = &li->item;
@@ -1052,23 +1053,25 @@ static int node_ref(struct dts_state *ds, char c)
 		goto_state(ds, s_node_pathref);
 		return 0;
 	}
-	if (isspace(c)) {
-		goto_state(ds, s_refnode_start);
-		return 0;
-	}
-	if (c == '{') {
+	if (isspace(c) || c == '{') {
+
 		buf = get_accumulator(ds);
 		dts_debug(ds, "ref node: &%s depth %d\n", buf, ds->depth);
 		li = item_from_accumulator(ds, dea_ref);
 		if (!li)
 			return -1;
-		ret = dts_emit(ds, det_node);
-		if (ret)
-			return ret;
 		reset_accumulator(ds);
-		ds->depth++;
-		ds->node_empty = true;
-		goto_state(ds, s_nodes_and_properties);
+
+		if (c == '{') {
+			ret = dts_emit(ds, det_node);
+			if (ret)
+				return ret;
+			ds->depth++;
+			ds->node_empty = true;
+			goto_state(ds, s_nodes_and_properties);
+		} else
+			goto_state(ds, s_refnode_start);
+
 		return 0;
 	}
 	if (islabelc(c, get_accumulator_size(ds) == 0)) {
@@ -1081,9 +1084,8 @@ static int node_ref(struct dts_state *ds, char c)
 
 static int node_pathref(struct dts_state *ds, char c)
 {
-	const char *buf;
 	struct dts_emit_list_item *li;
-	int ret;
+	const char *buf;
 
 	if (c == '}') {
 		buf = get_accumulator(ds);
@@ -1091,11 +1093,8 @@ static int node_pathref(struct dts_state *ds, char c)
 		li = item_from_accumulator(ds, dea_pathref);
 		if (!li)
 			return -1;
-		ret = dts_emit(ds, det_node);
-		if (ret)
-			return ret;
 		reset_accumulator(ds);
-		goto_state(ds, s_nodes_and_properties_marker);
+		goto_state(ds, s_refnode_start);
 		return 0;
 	}
 
@@ -1109,23 +1108,15 @@ static int node_pathref(struct dts_state *ds, char c)
 
 static int refnode_start(struct dts_state *ds, char c)
 {
-	const char *buf;
-	struct dts_emit_list_item *li;
 	int ret;
 
 	if (isspace(c))
 		return 0;
 
 	if (c == '{') {
-		buf = get_accumulator(ds);
-		dts_debug(ds, "ref node: &%s depth %d\n", buf, ds->depth);
-		li = item_from_accumulator(ds, dea_ref);
-		if (!li)
-			return -1;
 		ret = dts_emit(ds, det_node);
 		if (ret)
 			return ret;
-		reset_accumulator(ds);
 		ds->depth++;
 		ds->node_empty = true;
 		goto_state(ds, s_nodes_and_properties);
@@ -1789,9 +1780,9 @@ static int node_del_ref(struct dts_state *ds, char c)
 		buf = get_accumulator(ds);
 		dts_debug(ds, "node-del ref &%s\n", buf);
 		reset_accumulator(ds);
-		if (c == ';') {
+		if (c == ';')
 			goto_state(ds, s_nodes_and_properties);
-		} else
+		else
 			goto_state(ds, s_semicolon);
 		return 0;
 	}

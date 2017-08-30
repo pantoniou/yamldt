@@ -474,16 +474,11 @@ static int d2y_emit(struct dts_state *ds, int depth,
 		if (is_root)	/* do not output anything for root */
 			break;
 		fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
-		if (data->pn.name->atom != dea_name)
+		if (data->pn.name->atom == dea_ref)
 			fprintf(d2y->outfp, "*");
-		if (data->pn.name->atom == dea_pathref)
-			fprintf(d2y->outfp, "{");
 
-		/* do not output / */
+		/* both name && pathref get printed out */
 		fprintf(d2y->outfp, "%s", data->pn.name->contents);
-
-		if (data->pn.name->atom == dea_pathref)
-			fprintf(d2y->outfp, "}");
 
 		fprintf(d2y->outfp, ":");
 		if (data->pn.label)

@@ -1005,7 +1005,11 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 			xtag = tag;
 
 			/* everything scalar but pathref */
-			rt = tag && !strcmp(tag, "!pathref") ? r_path : r_scalar;
+			rt = r_scalar;	/* default scalar */
+			if (tag && !strcmp(tag, "!pathref"))
+				rt = r_path;
+			else if (tag && !strcmp(tag, "!anchor"))
+				rt = r_anchor;
 
 			break;
 		case YAML_SINGLE_QUOTED_SCALAR_STYLE:
@@ -1802,7 +1806,13 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 	switch (ref->type) {
 	case r_anchor:
 	case r_path:
-		np = node_lookup_by_label(t, ref->data, ref->len);
+		len = ref->len;
+		p = ref->data;
+
+		if (len > 0 && *p == '/')
+			np = node_lookup_by_path(t, ref->data, ref->len);
+		else
+			np = node_lookup_by_label(t, ref->data, ref->len);
 		if (!np && !dt->cfg.object)
 			return -ENOENT;	/* not found */
 

@@ -309,7 +309,8 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	if (err != 0) {
 		if (ref->type == r_anchor || ref->type == r_path) {
 			tree_error_at_ref(to_tree(dt), ref,
-				"Can't resolve reference to label %s\n",
+				"Can't resolve reference to %s %s\n",
+				refname[0] == '/' ? "path" : "label",
 				refname);
 			return;
 		}
@@ -457,7 +458,10 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 			if (!((flags & RF_PHANDLES) && ref->type == r_anchor))
 				continue;
 
-			np = node_lookup_by_label(to_tree(dt), ref->data, ref->len);
+			if (ref->len > 0 && *(char *)ref->data == '/')
+				np = node_lookup_by_path(to_tree(dt), ref->data, ref->len);
+			else
+				np = node_lookup_by_label(to_tree(dt), ref->data, ref->len);
 
 			if (!np && !dtb->object) {
 				refnamelen = ref->len > sizeof(refname) ? sizeof(refname) : ref->len;
@@ -465,7 +469,8 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 				refname[refnamelen] = '\0';
 
 				tree_error_at_ref(to_tree(dt), ref,
-					"can't resolve reference to label %s\n",
+					"can't resolve reference to %s %s\n",
+					refname[0] == '/' ? "path" : "label",
 					refname);
 
 				continue;
@@ -1648,6 +1653,9 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			if (reft->type == r_anchor || !strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('&', fp);
 
+			if (reft->type == r_anchor && reft->len > 0 && *(char *)reft->data == '/')
+				fputc('{', fp);
+
 			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
 
@@ -1659,6 +1667,9 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 
 			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
+
+			if (reft->type == r_anchor && reft->len > 0 && *(char *)reft->data == '/')
+				fputc('}', fp);
 
 			if ((!strcmp(stag, "!str") || !strcmp(stag, "!pathref")) &&
 			    (i + 1) < count)
