@@ -172,6 +172,11 @@ void node_free(struct tree *t, struct node *np);
 
 struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len);
+struct node *node_lookup_by_path(struct tree *t,
+		const char *path, int len);
+/* leading * ref, leading / path */
+struct node *node_lookup(struct tree *t, const char *key, int len);
+
 struct node *node_get_child_by_name(struct tree *t,
 			    struct node *np, const char *name,
 			    int index);

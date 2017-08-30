@@ -1087,6 +1087,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	char *label;
 	char namebuf[NODE_FULLNAME_MAX];
 	int len;
+	const char *s;
 
 	assert(!dt->current_event);
 	dt->current_event = event;
@@ -1336,29 +1337,50 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		np = dt->current_np;
 		prop = dt->current_prop;
 
-		if (!dt->map_key && !dt->bare_seq) {
-			len = event->data.scalar.length;
+		s = (char *)event->data.scalar.value;
+		len = event->data.scalar.length;
 
+		if (!dt->map_key && !dt->bare_seq) {
 			if (!np) {
-				/* in case of a corrput file, make sure the output is sane */
+				/* in case of a corrupt file, make sure the output is sane */
 				if (len > 40)
 					len = 40;
 				if (len > sizeof(namebuf) - 1)
 					len = sizeof(namebuf) - 1;
 
-				memcpy(namebuf, event->data.scalar.value, len);
+				memcpy(namebuf, s, len);
 				namebuf[len] = '\0';
 				dt_fatal(dt, "Unexpected scalar %s (is this a YAML input file?)\n",
 						namebuf);
 			}
 
 			/* TODO check event->data.scalar.style */
+
 			dt->map_key = malloc(len + 1);
 			assert(dt->map_key);
-			memcpy(dt->map_key, event->data.scalar.value, len);
+			memcpy(dt->map_key, s, len);
 			dt->map_key[len] = '\0';
 
-			dt->last_map_mark = dt->current_mark;
+			/*
+			 * due to the weird /memreserve/ stuff, there must not be
+			 * a terminating /
+			 */
+			if (len > 1 && s[0] == '/' && s[len-1] != '/' ) {
+				/* path reference key (path alias) */
+
+				if (dt->depth != 1)
+					dt_fatal(dt, "Bare references not allowed on non root level\n");
+				if (dt->current_np_ref)
+					dt_fatal(dt, "Can't do more than one level of ref\n");
+				dt->current_np_ref = true;
+
+				dt->last_alias_mark = dt->current_mark;
+
+				dt_debug(dt, "next up is a ref to %s\n", dt->map_key);
+			} else {
+				/* normal map key */
+				dt->last_map_mark = dt->current_mark;
+			}
 
 		} else {
 			if (!prop) {

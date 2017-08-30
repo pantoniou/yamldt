@@ -872,8 +872,6 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 	struct list_head *ref_nodes = tree_ref_nodes(to_tree(dt));
 	struct property *prop;
 	struct ref *ref;
-	const char *label;
-	int labellen;
 	char namebuf[32];
 	int next_frag = 1;
 
@@ -914,11 +912,7 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 	ref_nodes = tree_ref_nodes(to_tree(dt));
 	list_for_each_entry_safe(np, npn, ref_nodes, node) {
 
-		/* lookup for node (skip *) */
-		label = np->name + 1;
-		labellen = strlen(label);
-
-		npref = node_lookup_by_label(to_tree(dt), label, labellen);
+		npref = node_lookup(to_tree(dt), np->name, -1);
 		/* if it is found, no need to do anything */
 		if (npref)
 			continue;
@@ -928,11 +922,18 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 		ov->parent = root;
 		list_add_tail(&ov->node, &ov->parent->children);
 
-		prop = prop_alloc(to_tree(dt), "target");
+		if (np->name[0] == '*') {
+			prop = prop_alloc(to_tree(dt), "target");
+			ref = ref_alloc(to_tree(dt), r_anchor, np->name + 1,
+					strlen(np->name) - 1, "!anchor");
+		} else {
+			prop = prop_alloc(to_tree(dt), "target-path");
+			ref = ref_alloc(to_tree(dt), r_scalar, np->name,
+					strlen(np->name), "!str");
+		}
 		prop->np = ov;
 		list_add_tail(&prop->node, &ov->properties);
 
-		ref = ref_alloc(to_tree(dt), r_anchor, label, labellen, "!anchor");
 		ref->prop = prop;
 		list_add_tail(&ref->node, &prop->refs);
 

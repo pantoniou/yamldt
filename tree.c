@@ -251,6 +251,77 @@ struct node *node_get_child_by_name(struct tree *t,
 	return NULL;
 }
 
+struct node *node_lookup_by_path(struct tree *t,
+		const char *path, int len)
+{
+	const char *s, *name;
+	struct node *np, *child;
+	int namelen;
+	bool found;
+
+	if (!t || !path)
+		return NULL;
+
+	if (len < 0)
+		len = strlen(path);
+
+	if (!len || *path != '/')
+		return NULL;
+
+	/* skip over '/' */
+	path++;
+	len--;
+
+	np = t->root;
+	while (len > 0) {
+
+		name = path;
+		s = memchr(path, '/', len);
+		namelen = !s ? len : (s - path);
+
+		found = false;
+		list_for_each_entry(child, &np->children, node) {
+			if (strlen(child->name) == namelen &&
+			    !memcmp(child->name, name, namelen)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return false;
+
+		np = child;
+		len -= namelen;
+		path += namelen;
+		while (len > 0 && *path == '/') {
+			len--;
+			path++;
+		}
+	}
+
+	return np;
+}
+
+struct node *node_lookup(struct tree *t, const char *key, int len)
+{
+	if (!t || !key)
+		return NULL;
+
+	if (len < 0)
+		len = strlen(key);
+
+	if (!len)
+		return NULL;
+
+	if (*key == '*')
+		return node_lookup_by_label(t, key + 1, len - 1);
+
+	if (*key == '/')
+		return node_lookup_by_path(t, key, len);
+
+	return NULL;
+}
+
 struct property *prop_get_by_name(struct tree *t,
 		struct node *np, const char *name,
 		int index)
@@ -514,13 +585,17 @@ void tree_apply_ref_nodes(struct tree *t, bool object)
 
 	list_for_each_entry_safe(np, npn, ref_nodes, node) {
 
-		npref = node_lookup_by_label(t, np->name + 1,
-					     strlen(np->name + 1));
-
-		if (!npref && !object)
-			tree_error_at_node(t, np,
-				"reference to unknown label %s\n",
-				np->name + 1);
+		npref = node_lookup(t, np->name, -1);
+		if (!npref && !object) {
+			if (np->name[0] == '*')
+				tree_error_at_node(t, np,
+					"reference to unknown label %s\n",
+					np->name + 1);
+			else
+				tree_error_at_node(t, np,
+					"reference to unknown path %s\n",
+					np->name);
+		}
 
 		if (npref)
 			tree_apply_ref_node(t, npref, np);
