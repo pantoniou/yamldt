@@ -1,7 +1,7 @@
 /*
- * dts2yaml.c - Convert DTC to YAML filter
+ * dts2yaml.c - Convert DTS to YAML
  *
- * Converts DTC to YAML
+ * Converts DTS to YAML
  *
  * (C) Copyright Pantelis Antoniou <pantelis.antoniou@konsulko.com>
  *
@@ -576,6 +576,7 @@ int main(int argc, char *argv[])
 	const char *s;
 	const char *filename = NULL;
 	const char *outfilename = NULL;
+	const char *thisoutfilename;
 	bool debug = false;
 	bool silent = false;
 	int tabs = 8;
@@ -583,6 +584,8 @@ int main(int argc, char *argv[])
 	int color = -1;
 	struct d2y_state d2y_state, *d2y = &d2y_state;
 	struct dts_state *ds = to_ds(d2y);
+	int i, count;
+	char tmp[PATH_MAX];
 
 	while ((cc = getopt_long(argc, argv,
 			"o:t:s:hd?", opts, &option_index)) != -1) {
@@ -634,71 +637,105 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (optind < argc)
-		filename = argv[optind];
-	else
-		filename = NULL;
-
-	if (!filename || (!strcmp(filename, "<stdin>") ||
-			 !strcmp(filename, "-")))
-		filename = "<stdin>";
-
-	if (!outfilename || (!strcmp(outfilename, "<stdout>") ||
-			    !strcmp(outfilename, "-")))
-		outfilename = "<stdout>";
-
-	memset(d2y, 0, sizeof(*d2y));
-	d2y->filename = filename;
-	d2y->outfilename = outfilename;
-	d2y->debug = debug;
-	d2y->color = color;
-	d2y->silent = silent;
-	d2y->shift = shift;
-
-	ret = dts_setup(ds, filename, tabs, &d2y_ops);
-	if (ret) {
-		fprintf(stderr, "Failed to setup dts parser on %s\n",
-				filename);
+	if (optind >= argc) {
+		fprintf(stderr, "no input file(s)\n");
 		return EXIT_FAILURE;
 	}
 
-	if (d2y->filename && strcmp(d2y->filename, "<stdin>")) {
-		dts_debug(ds, "opening %s for DTS parsing\n", d2y->filename);
-		d2y->fp = fopen(d2y->filename, "ra");
-		if (!d2y->fp) {
-			ret = -1;
-			dts_error(ds, "Can't open %s\n", d2y->filename);
-			goto out_err;
+	count = argc - optind;
+	for (i = 0; i < count; i++) {
+
+		filename = argv[optind + i];
+
+		if (!strcmp(filename, "<stdin>") || !strcmp(filename, "-"))
+			filename = "<stdin>";
+
+		if (outfilename) {
+			thisoutfilename = outfilename;
+			if ((!strcmp(outfilename, "<stdout>") ||
+			     !strcmp(outfilename, "-")))
+				thisoutfilename = "<stdout>";
+		} else {
+			if (strlen(filename) >= sizeof(tmp)) {
+				fprintf(stderr, "file name too large %s\n",
+						filename);
+				return EXIT_FAILURE;
+			}
+			s = strrchr(filename, '.');
+			if (!s || (strcmp(s, ".dts") && strcmp(s, ".dtsi"))) {
+				fprintf(stderr, "invalid file extension on %s\n",
+						filename);
+				return EXIT_FAILURE;
+			}
+			memcpy(tmp, filename, s - filename);
+			strcpy(tmp + (s - filename),
+					!strcmp(s, ".dts") ? ".yaml" : ".yamli");
+			thisoutfilename = tmp;
 		}
-	} else
-		d2y->fp = stdin;
 
-	dts_debug(ds, "opened %s for DTS parsing\n", d2y->filename);
+		memset(d2y, 0, sizeof(*d2y));
+		d2y->filename = filename;
+		d2y->outfilename = thisoutfilename;
+		d2y->debug = debug;
+		d2y->color = color;
+		d2y->silent = silent;
+		d2y->shift = shift;
 
-	if (d2y->outfilename && strcmp(d2y->outfilename, "<stdout>")) {
-		dts_debug(ds, "opening %s for YAML output\n", d2y->outfilename);
-		d2y->outfp = fopen(d2y->outfilename, "wa");
-		if (!d2y->outfp) {
-			ret = -1;
-			dts_error(ds, "Can't open %s\n", d2y->outfilename);
-			goto out_err;
+		ret = dts_setup(ds, filename, tabs, &d2y_ops);
+		if (ret) {
+			fprintf(stderr, "Failed to setup dts parser on %s\n",
+					filename);
+			return EXIT_FAILURE;
 		}
-	} else
-		d2y->outfp = stdout;
 
-	ret = 0;
-	while ((c = getc(d2y->fp)) != EOF) {
-		ret = dts_feed(ds, c);
-		if (ret < 0) 
+		if (strcmp(d2y->filename, "<stdin>")) {
+			dts_debug(ds, "opening %s for DTS parsing\n", d2y->filename);
+			d2y->fp = fopen(d2y->filename, "ra");
+			if (!d2y->fp) {
+				ret = -1;
+				dts_error(ds, "Can't open %s\n", d2y->filename);
+				goto out_err;
+			}
+		} else
+			d2y->fp = stdin;
+
+		dts_debug(ds, "opened %s for DTS parsing\n", d2y->filename);
+
+		if (strcmp(d2y->outfilename, "<stdout>")) {
+			dts_debug(ds, "opening %s for YAML output\n", d2y->outfilename);
+			d2y->outfp = fopen(d2y->outfilename, "wa");
+			if (!d2y->outfp) {
+				ret = -1;
+				dts_error(ds, "Can't open %s\n", d2y->outfilename);
+				goto out_err;
+			}
+		} else
+			d2y->outfp = stdout;
+
+		dts_debug(ds, "opened %s for YAML output\n", d2y->filename);
+
+		ret = 0;
+		while ((c = getc(d2y->fp)) != EOF) {
+			ret = dts_feed(ds, c);
+			if (ret < 0) 
+				break;
+		}
+
+		if (c == EOF)
+			dts_debug(ds, "EOF on %s\n", d2y->filename);
+
+		fclose(d2y->outfp);
+		fclose(d2y->fp);
+
+	out_err:
+		if (ret && strcmp(d2y->outfilename, "<stdout>"))
+			unlink(d2y->outfilename);
+
+		dts_cleanup(ds);
+
+		if (ret)
 			break;
 	}
-
-	dts_debug(ds, "EOF on %s\n", d2y->filename);
-
-	fclose(d2y->outfp);
-	fclose(d2y->fp);
-out_err:
-	dts_cleanup(ds);
 
 	return ret ? EXIT_FAILURE : 0;
 }

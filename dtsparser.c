@@ -1288,6 +1288,10 @@ static int slash_directive(struct dts_state *ds, char c)
 			goto_state(ds, s_headers);
 			break;
 		}
+		if (!strcmp(buf, "/include/")) {
+			goto_state(ds, s_include);
+			break;
+		}
 		dts_error(ds, "Expected /dts-v1/ got %s\n", buf);
 		ret = -1;
 		break;
@@ -1757,7 +1761,7 @@ static int include_arg(struct dts_state *ds, char c)
 		ret = dts_emit(ds, det_include);
 		if (ret)
 			return ret;
-		goto_state(ds, s_nodes_and_properties);
+		goto_state(ds, ds->pre_slash_fs);
 		break;
 	}
 	return 0;
