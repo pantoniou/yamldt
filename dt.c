@@ -983,6 +983,87 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 	dt->map_key = NULL;
 }
 
+static bool detect_and_split_int_array_ref(struct yaml_dt_state *dt, struct ref *ref)
+{
+	struct ref *refn;
+	const char *s, *e, *se;
+	int nest;
+	unsigned long long val;
+	bool is_hex, is_unsigned;
+	int ret, i, count;
+	const char **items;
+	int *sizes;
+	struct property *prop;
+
+	/* don't try for too large items */
+	if (ref->len > 1024)
+		return false;
+
+	s = ref->data;
+	e = ref->data + ref->len;
+
+	/* worse case allocation */
+	items = alloca(sizeof(*items) * (ref->len + 1));
+	sizes = alloca(sizeof(*items) * (ref->len + 1));
+
+	count = 0;
+	while (s < e) {
+		while (isspace(*s))
+			s++;
+		if (*s == '(') {
+			nest = 0;
+			se = s;
+			while (*se) {
+				if (*se == '(')
+					nest++;
+				else if (*se == ')') {
+					nest--;
+					if (nest == 0) {
+						se++;
+						break;
+					}
+				}
+				se++;
+			}
+			/* not a valid () expr */
+			if (nest)
+				return false;
+		} else {
+			se = s;
+			while (*se && !isspace(*se))
+				se++;
+		}
+
+		ret = parse_int(s, se - s, &val, &is_unsigned, &is_hex);
+		if (ret)
+			return false;
+
+		items[count] = s;
+		sizes[count] = se - s;
+
+		s = se;
+		count++;
+	}
+
+	if (count <= 1)
+		return false;
+
+	prop = ref->prop;
+
+	/* TODO adjust position markers */
+	for (i = 0; i < count; i++) {
+		refn = ref_alloc(to_tree(dt), r_scalar, items[i], sizes[i], NULL);
+		refn->prop = prop;
+		list_add_tail(&refn->node, &prop->refs);
+	}
+
+	dt_debug(dt, "array used as scalar converted to scalar seq\n");
+
+	ref_free(to_tree(dt), ref);
+
+	return true;
+}
+
 static void append_to_current_property(struct yaml_dt_state *dt,
 		yaml_event_t *event)
 {
@@ -1071,27 +1152,31 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 	} else
 		dt_fatal(dt, "Illegal type to append\n");
 
-	if (ref_label && ref_label_len > 0) {
+	if (!ref_label || ref_label_len <= 0)
+		return;
 
-		ref = ref_alloc(to_tree(dt), rt, ref_label,
-				ref_label_len, xtag);
+	ref = ref_alloc(to_tree(dt), rt, ref_label,
+			ref_label_len, xtag);
 
-		/* 60 bytes for a display purposes should be enough */
-		refnamelen = ref->len > 60 ? 60 : ref->len;
-		refname = alloca(refnamelen + 1);
-		memcpy(refname, ref->data, refnamelen);
-		refname[refnamelen] = '\0';
+	/* 60 bytes for a display purposes should be enough */
+	refnamelen = ref->len > 60 ? 60 : ref->len;
+	refname = alloca(refnamelen + 1);
+	memcpy(refname, ref->data, refnamelen);
+	refname[refnamelen] = '\0';
 
-		dt_debug(dt, "new ref \"%s%s\" @%s%s%s\n",
-			refname, ref->len > refnamelen ? "..." : "",
-			dn_fullname(np, namebuf, sizeof(namebuf)),
-			np != tree_root(to_tree(dt)) ? "/" : "",
-			prop->name[0] ? prop->name : "-");
+	dt_debug(dt, "new ref \"%s%s\" @%s%s%s\n",
+		refname, ref->len > refnamelen ? "..." : "",
+		dn_fullname(np, namebuf, sizeof(namebuf)),
+		np != tree_root(to_tree(dt)) ? "/" : "",
+		prop->name[0] ? prop->name : "-");
 
-		/* add the reference to the list */
-		ref->prop = prop;
-		list_add_tail(&ref->node, &prop->refs);
-	}
+	/* add the reference to the list */
+	ref->prop = prop;
+	list_add_tail(&ref->node, &prop->refs);
+
+	if (event->data.scalar.style == YAML_PLAIN_SCALAR_STYLE &&
+	    rt == r_scalar && !xtag)
+		detect_and_split_int_array_ref(dt, ref);
 }
 
 static struct property *
