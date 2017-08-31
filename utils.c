@@ -693,7 +693,7 @@ int acc_add(struct acc_state *acc, char c)
 		if (!new_buf)
 			return -1;
 		acc->buf = new_buf;
-		acc->alloc = new_alloc + 1;
+		acc->alloc = new_alloc;
 	}
 	acc->buf[acc->size++] = c;
 	acc->buf[acc->size] = '\0';
