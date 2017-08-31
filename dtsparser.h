@@ -45,6 +45,9 @@ enum file_state {
 	s_in_c_comment,
 	s_in_cpp_comment,
 	s_preproc,
+	s_hash,
+	s_backslash,
+	s_backslash_space,
 	s_nodes_and_properties,
 	s_nodes_and_properties_marker,
 	s_node_ref,
@@ -200,8 +203,10 @@ struct dts_state {
 	enum file_state fs;
 	enum file_state pre_slash_fs;
 	enum file_state pre_preproc_fs;
+	enum file_state pre_backslash_fs;
 	bool start_root;
 	bool refroot;
+	bool found_preproc;
 	int depth;
 	bool node_empty;
 	char last_c;
@@ -268,7 +273,7 @@ int dts_setup(struct dts_state *ds, const char *filename, int tabs,
 		const struct dts_ops *ops);
 void dts_cleanup(struct dts_state *ds);
 
-int dts_feed(struct dts_state *ds, char c);
+int dts_feed(struct dts_state *ds, int c);
 const char *dts_get_filename(struct dts_state *ds);
 const char *dts_get_state(struct dts_state *ds);
 int dts_get_line(struct dts_state *ds);

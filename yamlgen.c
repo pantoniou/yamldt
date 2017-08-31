@@ -213,9 +213,9 @@ static void ref_output_single(struct tree *t, FILE *fp,
 			if (to_dt_ref(ref)->is_hex) {
 				if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8"))
 					fprintf(fp, "0x%llx", val & 0xff);
-				if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16"))
+				else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16"))
 					fprintf(fp, "0x%llx", val & 0xffff);
-				if (!strcmp(tag, "!int32") || !strcmp(tag, "!uint32"))
+				else if (!strcmp(tag, "!int32") || !strcmp(tag, "!uint32"))
 					fprintf(fp, "0x%llx", val & 0xffffffff);
 				else
 					fprintf(fp, "0x%llx", val);

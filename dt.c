@@ -149,8 +149,8 @@ static const char *is_int_tag(const char *tag)
 	return NULL;
 }
 
-static bool int_val_in_range(const char *tag, unsigned long long val, bool is_unsigned,
-			     bool is_hex)
+static bool int_val_in_range(const char *tag, unsigned long long val,
+			     bool is_unsigned, bool is_hex)
 {
 	long long sval;
 	bool sval_overflow;
@@ -194,7 +194,7 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 		return  (is_unsigned && val  <= INT16_MAX) ||
 		       (!is_unsigned && sval >= INT16_MIN && sval <= INT16_MAX);
 
-	if (!strcmp(tag, "!uint8"))
+	if (!strcmp(tag, "!uint16"))
 		return val <= UINT16_MAX;
 
 	if (!strcmp(tag, "!int32"))
@@ -215,6 +215,25 @@ static bool int_val_in_range(const char *tag, unsigned long long val, bool is_un
 	return false;
 }
 
+static bool uint_val_in_range(const char *tag, unsigned long long val,
+				      bool is_hex)
+{
+	if ((long long)val < 0)
+		return false;
+
+	if (!strcmp(tag,  "!int") || !strcmp(tag,  "!int32"))
+		tag = "!uint";
+	else if (!strcmp(tag,  "!int8"))
+		tag = "!uint8";
+	else if (!strcmp(tag,  "!int16"))
+		tag = "!uint16";
+	else if (!strcmp(tag,  "!int32"))
+		tag = "!uint32";
+	else if (!strcmp(tag,  "!int64"))
+		tag = "!uint64";
+
+	return int_val_in_range(tag, val, true, is_hex);
+}
 
 static void dt_print_at_msg(struct yaml_dt_state *dt,
 			    const struct dt_yaml_mark *m,
@@ -1164,7 +1183,8 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 	} else
 		dt_fatal(dt, "Illegal type to append\n");
 
-	if (!ref_label || ref_label_len <= 0)
+	/* ref_label_len can be zero for an empty string */
+	if (!ref_label || ref_label_len < 0)
 		return;
 
 	ref = ref_alloc(to_tree(dt), rt, ref_label,
@@ -1311,9 +1331,13 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			if (label) {
 				np = node_lookup_by_label(to_tree(dt), label,
 						strlen(label));
-				if (np)
-					dt_fatal(dt, "Node %s with duplicate label %s\n",
+				if (np) {
+					dt_warning_at(dt, &dt->last_map_mark,
+							"Node %s with duplicate label %s\n",
 							dt->map_key, label);
+					label = NULL;
+					np = NULL;
+				}
 			}
 
 			np = node_alloc(to_tree(dt), dt->map_key, label);
@@ -2010,9 +2034,12 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 		len = ref->len;
 		p = ref->data;
 
-		/* try to parse as an int anyway */
-		ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
-		is_int = ret == 0;
+		if (len > 0) {
+			/* try to parse as an int anyway */
+			ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
+			is_int = ret == 0;
+		} else
+			is_int = false;
 
 		/* TODO type checking/conversion here */
 		if (!tag && is_int)
@@ -2033,8 +2060,12 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 		if (is_int_tag(tag)) {
 			if (!is_int)
 				return -EINVAL;
-			if (!int_val_in_range(tag, val, is_unsigned, is_hex))
-				return -ERANGE;
+			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
+				if (!uint_val_in_range(tag, val, is_hex))
+					return -ERANGE;
+				dt_warning_at(dt, &to_dt_ref(ref)->m,
+					"treating as unsigned\n");
+			}
 
 			to_dt_ref(ref)->is_int = true;
 			to_dt_ref(ref)->is_hex = is_hex;

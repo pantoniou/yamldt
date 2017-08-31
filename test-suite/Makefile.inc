@@ -53,5 +53,6 @@ check: $(DIFFS)
 
 clean:
 	rm -f $(DIFFS) $(DTBS) $(YAMLDTBS) $(FDTDUMPS) $(CPPS) $(YAMLS)
+	rm -f *.yamli
 
 validate: check

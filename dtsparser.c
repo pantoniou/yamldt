@@ -57,7 +57,7 @@ static inline bool isexprc(char c)
 	return c == '+' || c == '-' || c == '*' || c == '/' || c == '~' ||
 	       c == '!' || c == '^' || c == '%' || c == '<' || c == '>' ||
 	       c == '^' || c == '=' || c == '&' || c == '|' ||
-	       isxdigit(c) || c == 'x';
+	       isxdigit(c) || c == 'x' || c == 'X';
 }
 
 static inline bool ispropnodec(char c)
@@ -87,12 +87,28 @@ static inline bool isescc(char c)
 	       c == 'f' || c == 'r';
 }
 
-static inline bool state_with_comments_or_preproc(enum file_state fs)
+static inline bool state_with_comments(enum file_state fs)
 {
 	return fs != s_slash && fs != s_slash_directive &&
 	       fs != s_string && fs != s_item_char &&
 	       fs != s_in_c_comment && fs != s_in_cpp_comment &&
-	       fs != s_include_arg;
+	       fs != s_include_arg &&
+	       fs != s_backslash && fs != s_backslash_space;
+}
+
+static inline bool state_with_preproc(enum file_state fs)
+{
+	return state_with_comments(fs) && fs != s_hash && fs != s_preproc;
+}
+
+static inline bool is_valid_final_state(enum file_state fs)
+{
+	return fs == s_start || fs == s_nodes_and_properties;
+}
+
+static inline bool is_valid_preproc_state(enum file_state fs)
+{
+	return fs == s_start || fs == s_headers || fs == s_nodes_and_properties;
 }
 
 static const char *states_txt[] = {
@@ -103,6 +119,9 @@ static const char *states_txt[] = {
 	[s_in_c_comment]		= "in_c_comment",
 	[s_in_cpp_comment]		= "in_cpp_comment",
 	[s_preproc]			= "preproc",
+	[s_hash]			= "hash",
+	[s_backslash]			= "backslash",
+	[s_backslash_space]		= "backslash_space",
 	[s_nodes_and_properties]	= "nodes_and_properties",
 	[s_nodes_and_properties_marker]	= "nodes_and_properties_marker",
 	[s_node_ref]			= "node_ref",
@@ -226,21 +245,35 @@ static void goto_state(struct dts_state *ds, enum file_state fs)
 	ds->fs = fs;
 }
 
-static int handle_comment_and_preproc(struct dts_state *ds, char c)
+static int handle_comment(struct dts_state *ds, char c)
 {
 	if (c == '/') {
 		ds->pre_slash_fs = ds->fs;
 		goto_state(ds, s_slash);
 		return 1;
 	}
-	if (ds->col == 1 && c == '#') {
-		ds->pre_preproc_fs = ds->fs;
-		ds->fs = s_preproc;
-		reset_accumulator(ds);
-		accumulate(ds, '#');
+	if (c == '\\') {
+		ds->pre_backslash_fs = ds->fs;
+		goto_state(ds, s_backslash);
 		return 1;
 	}
 	return 0;
+}
+
+static int handle_preproc(struct dts_state *ds, char c)
+{
+	if (c != '#')
+		return 0;
+
+	if (!is_valid_preproc_state(ds->fs) || get_accumulator_size(ds))
+		return 0;
+
+	/* preproc or property name starting with # */
+	ds->pre_preproc_fs = ds->fs;
+	goto_state(ds, s_hash);
+	reset_accumulator(ds);
+	accumulate(ds, '#');
+	return 1;
 }
 
 static bool is_valid_int(const char *buf)
@@ -286,7 +319,7 @@ static int is_string_or_char_done(const char *buf, char c, char termc)
 				ret = 0;
 				break;
 			}
-			if (cc == 'x') {
+			if (cc == 'x' || cc == 'X') {
 				cc = NEXTC(s, tc);
 				if (!cc || !isxdigit(cc)) {
 					ret = !cc ? 0 : -1;
@@ -606,6 +639,8 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		d.pn.nr_labels = 0;
 		list_for_each_entry(li, &ds->items, node) {
 			switch (li->item.atom) {
+			case dea_comment:
+				break;
 			case dea_label:
 				d.pn.nr_labels++;
 				break;
@@ -752,8 +787,8 @@ static int headers(struct dts_state *ds, char c)
 		return 0;
 	}
 
-	accumulate(ds, c);
-	return 0;
+	goto_state(ds, s_nodes_and_properties);
+	return states[ds->fs](ds, (char)c);
 }
 
 static int memreserves(struct dts_state *ds, char c)
@@ -784,7 +819,8 @@ static int memreserves(struct dts_state *ds, char c)
 		return 0;
 	}
 
-	if (isxdigit(c) || (c == 'x' && !strcmp(get_accumulator(ds), "0"))) {
+	if (isxdigit(c) || ((c == 'x' || c == 'X') &&
+			    !strcmp(get_accumulator(ds), "0"))) {
 		accumulate(ds, c);
 		return 0;
 	}
@@ -936,7 +972,7 @@ static int preproc(struct dts_state *ds, char c)
 	struct dts_emit_list_item *li;
 	int ret;
 
-	if (c != '\n' || ds->last_c == '\\') {
+	if (c != '\n') {
 		accumulate(ds, c);
 		return 0;
 	}
@@ -949,8 +985,87 @@ static int preproc(struct dts_state *ds, char c)
 	if (ret)
 		return ret;
 	reset_accumulator(ds);
+
+	/* mark that we've found preprocessor directives so macros possible */
+	ds->found_preproc = true;
 	goto_state(ds, ds->pre_preproc_fs);
 	return 0;
+}
+
+static int hash(struct dts_state *ds, char c)
+{
+	/* those must be escaped */
+	static const char *preproc_commands[] = {
+		"if",
+		"ifdef",
+		"ifndef",
+		"else",
+		"elif",
+		"endif",
+		"define",
+		"include",
+		NULL,
+	};
+	const char *s;
+	const char **ss;
+	const char *buf;
+
+	if (isalpha(c)) {
+		accumulate(ds, c);
+		return 0;
+	}
+
+	buf = get_accumulator(ds);
+	dts_debug(ds, "hash: %s\n", buf);
+
+	if (get_accumulator_size(ds) == 0) {
+		accumulate(ds, c);
+		goto_state(ds, s_preproc);
+		return 0;
+	}
+
+	/* if a match, it's a preprocessor command */
+	ss = preproc_commands;
+	while ((s = *ss++)) {
+		if (!strcmp(s, buf + 1)) {
+			accumulate(ds, c);
+			goto_state(ds, s_preproc);
+			return 0;
+		}
+	}
+
+	/* nope it's something else; pass it along */
+	goto_state(ds, ds->pre_preproc_fs);
+	return states[ds->fs](ds, (char)c);
+}
+
+static int backslash(struct dts_state *ds, char c)
+{
+	if (c == '\n') {
+		goto_state(ds, s_backslash_space);
+		return 0;
+	}
+
+	/* and pass to old state */
+	goto_state(ds, ds->pre_backslash_fs);
+	return states[ds->fs](ds, (char)c);
+}
+
+static int backslash_space(struct dts_state *ds, char c)
+{
+	/* remove leading spaces (but not newlines) */
+	if (isspace(c) && c != '\n')
+		return 0;
+
+	/* continuation of backslash */
+	if (c == '\\') {
+		goto_state(ds, s_backslash);
+		return 0;
+	}
+
+	/* anything else pass to old state */
+	goto_state(ds, ds->pre_backslash_fs);
+	return states[ds->fs](ds, (char)c);
 }
 
 static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
@@ -1013,7 +1128,7 @@ static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
 		dts_debug(ds, "pop node: depth %d\n",
 					ds->depth);
 		if (ds->node_empty) {
-			if (ds->depth > 0)
+			if (ds->refroot || ds->depth > 0)
 				dts_emit(ds, det_node_empty);
 			ds->node_empty = false;
 		}
@@ -1335,6 +1450,10 @@ static int slash_directive(struct dts_state *ds, char c)
 			goto_state(ds, s_include);
 			break;
 		}
+		if (!strcmp(buf, "/memreserve/")) {
+			goto_state(ds, s_memreserves);
+			break;
+		}
 		dts_error(ds, "Expected /dts-v1/ got %s\n", buf);
 		ret = -1;
 		break;
@@ -1419,7 +1538,8 @@ static int property_bits(struct dts_state *ds, char c)
 	}
 
 	/* a number only */
-	if (isxdigit(c) || (c == 'x' && !strcmp(get_accumulator(ds), "0"))) {
+	if (isxdigit(c) || ((c == 'x' || c == 'X') &&
+			    !strcmp(get_accumulator(ds), "0"))) {
 		accumulate(ds, c);
 		return 0;
 	}
@@ -1461,6 +1581,7 @@ static int array(struct dts_state *ds, char c)
 		goto_state(ds, s_item_int);
 		return 0;
 	}
+	/* only do fancy macro stuff when preprocessor found */
 	if (ismacroc(c, true)) {
 		accumulate(ds, c);
 		goto_state(ds, s_item_macro);
@@ -1618,7 +1739,8 @@ static int item_expr(struct dts_state *ds, char c)
 				return -1;
 			reset_accumulator(ds);
 			goto_state(ds, s_array);
-		}
+		} else 
+			accumulate(ds, c);
 		return 0;
 	}
 
@@ -1628,12 +1750,8 @@ static int item_expr(struct dts_state *ds, char c)
 		return 0;
 	}
 
-	if (isspace(c) || isexprc(c)) {
-		accumulate(ds, c);
-		return 0;
-	}
-	dts_error(ds, "bad integer expression char '%c'\n", c);
-	return -1;
+	accumulate(ds, c);
+	return 0;
 }
 
 static int item_char(struct dts_state *ds, char c)
@@ -1686,7 +1804,8 @@ static int item_int(struct dts_state *ds, char c)
 		return 0;
 	}
 
-	if (isxdigit(c) || (c == 'x' && !strcmp(get_accumulator(ds), "0"))) {
+	if (isxdigit(c) || ((c == 'x' || c == 'X') &&
+			    !strcmp(get_accumulator(ds), "0"))) {
 		accumulate(ds, c);
 		return 0;
 	}
@@ -1978,6 +2097,9 @@ static int (*states[])(struct dts_state *ds, char c) = {
 	[s_in_c_comment]		= in_c_comment,
 	[s_in_cpp_comment]		= in_cpp_comment,
 	[s_preproc]			= preproc,
+	[s_hash]			= hash,
+	[s_backslash]			= backslash,
+	[s_backslash_space]		= backslash_space,
 	[s_nodes_and_properties]	= nodes_and_properties,
 	[s_nodes_and_properties_marker]	= nodes_and_properties_marker,
 	[s_node_ref]			= node_ref,
@@ -2045,7 +2167,7 @@ void dts_cleanup(struct dts_state *ds)
 	memset(ds, 0, sizeof(*ds));
 }
 
-int dts_feed(struct dts_state *ds, char c)
+int dts_feed(struct dts_state *ds, int c)
 {
 	int ret = 0;
 
@@ -2054,8 +2176,22 @@ int dts_feed(struct dts_state *ds, char c)
 		return -1;
 	}
 
-	if (state_with_comments_or_preproc(ds->fs))
-		ret = handle_comment_and_preproc(ds, c);
+	if (c == EOF) {
+		if (ds->depth != 0 || !is_valid_final_state(ds->fs)) {
+			dts_error(ds, "unexpected EOF on %s/%d\n",
+				dts_get_state(ds), ds->depth);
+			return -1;
+		}
+		dts_debug(ds, "end of file: %s\n", ds->filename);
+		return 0;
+	}
+
+	ret = 0;
+	if (state_with_comments(ds->fs))
+		ret = handle_comment(ds, c);
+
+	if (!ret && state_with_preproc(ds->fs))
+		ret = handle_preproc(ds, c);
 
 	if (!ret)
 		ret = states[ds->fs](ds, c);

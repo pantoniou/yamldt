@@ -52,19 +52,15 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 %.fdtdump: %.dtb
 	$(FDTDUMP) $(FDTDUMPFLAGS) 2>/dev/null $< >$@
 
+# will also generate all yamli included files
 %.yaml: %.dts
-	$(DTS2YAML) $(DTS2YAMLFLAGS) -o $@ $<
-
-%.yamli: %.dtsi
-	$(DTS2YAML) $(DTS2YAMLFLAGS) -o $@ $<
+	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $^
 
 .PHONY: clean distclean check validate .FORCE
 
 all: $(DTBS)
 
 check: $(DTCDTBS) $(DTBS) $(DIFFS)
-
-$(YAMLS) :$(YAMLIS)
 
 clean:
 	rm -f $(DTBS) $(FDTDUMPS) $(CPPS) $(YDEPS) \

@@ -56,15 +56,27 @@
 
 #include "dtsparser.h"
 
+struct d2y_include {
+	struct list_head node;
+	int depth;
+	bool dt_include;
+	bool generated;
+	bool error;
+	char *original;
+	char *filename;
+};
+
 struct d2y_state {
 	bool debug;
 	bool silent;
 	int color;
 	int shift;
+	int leading;
 	const char *filename;
 	const char *outfilename;
 	FILE *fp;
 	FILE *outfp;
+	struct list_head *includes;
 	struct dts_state ds;
 };
 
@@ -72,13 +84,15 @@ struct d2y_state {
 #define to_ds(_d2y)	(&(_d2y)->ds)
 
 static struct option opts[] = {
-	{ "output", 	required_argument, 0, 'o' },
-	{ "tabs",	required_argument, 0, 't' },
-	{ "shift",	required_argument, 0, 's' },
-	{ "color",	required_argument, 0,  0  },
-	{ "silent",	no_argument, 0, 0  },
-	{ "help",	no_argument, 0, 'h' },
-	{ "debug",	no_argument, 0, 'd' },
+	{ "output", 		required_argument, 0, 'o' },
+	{ "tabs",		required_argument, 0, 't' },
+	{ "shift",		required_argument, 0, 's' },
+	{ "color",		required_argument, 0,  0  },
+	{ "silent",		no_argument,       0, 0  },
+	{ "leading",		required_argument, 0, 'l'  },
+	{ "recursive",		no_argument,       0, 'r'  },
+	{ "help",		no_argument,       0, 'h' },
+	{ "debug",		no_argument,       0, 'd' },
 	{0, 0, 0, 0}
 };
 
@@ -89,9 +103,11 @@ static void help(void)
 		"   -o, --output        Output file\n"
 		"   -t, --tabs		Set tab size (default 8)\n"
 		"   -s, --shift		Shift when outputing YAML (default 2)\n"
+		"   -l, --leading	Leading space for output\n"
 		"   -d, --debug		Enable debug messages\n"
 		"       --silent        Be really silent\n"
 		"       --color         [auto|off|on]\n"
+		"   -r, --recursive     Generate DTS/DTSI included files\n"
 		"   -h, --help		Help\n"
 		"       --color         [auto|off|on]\n"
 		);
@@ -262,7 +278,7 @@ static void d2y_emit_comment_line(struct d2y_state *d2y,
 	const char **ss;
 	int len;
 
-	fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+	fprintf(d2y->outfp, "%*s", d2y->leading + depth * d2y->shift, "");
 	fprintf(d2y->outfp, "#");
 	if (!isspace(*line))
 		fprintf(d2y->outfp, " ");
@@ -355,15 +371,95 @@ static void d2y_emit_top_level_comment(struct d2y_state *d2y, int depth,
 	}
 }
 
-static void d2y_emit_preproc(struct d2y_state *d2y, const char *preproc)
+static int d2y_emit_include(struct d2y_state *d2y, int depth,
+			     char sep, const char *ifilename)
 {
-	const char *s, *e;
-	char *cmd, *filename, *ext;
+	struct dts_state *ds = to_ds(d2y);
+	char *filename, *ext;
 	char ileft, iright;
+	char tmp[PATH_MAX];
+	struct d2y_include *d2yi;
+	bool dt_include;
+
+	ileft = sep;
+	if (sep == '"')
+		iright = sep;
+	else
+		iright = '>';
+
+	filename = alloca(strlen(ifilename) + 1);
+	strcpy(filename, ifilename);
+
+	dt_include = false;
+
+	ext = strrchr(filename, '.');
+	if (ext) {
+		if (!strcmp(ext, ".dts")) {
+			*ext = '\0';
+			ext = ".yaml";
+			dt_include = true;
+		} else if (!strcmp(ext, ".dtsi")) {
+			*ext = '\0';
+			ext = ".yamli";
+			dt_include = true;
+		} else
+			ext = "";
+	} else
+		ext = "";
+
+	if (!depth)
+		snprintf(tmp, sizeof(tmp) - 1, "%s%s", filename, ext);
+	else
+		snprintf(tmp, sizeof(tmp) - 1, "%s@%d%s", filename,
+				depth * d2y->shift, ext);
+	tmp[sizeof(tmp) - 1] = '\0';
+
+	fprintf(d2y->outfp, "#include %c%s%c\n", ileft, tmp, iright);
+
+	/* generate include record? */
+	if (!d2y->includes)
+		return 0;
+
+	/* don't do anything if it's existing */
+	list_for_each_entry(d2yi, d2y->includes, node) {
+		if (!strcmp(tmp, d2yi->filename))
+			return 0;
+	}
+
+	d2yi = malloc(sizeof(*d2yi));
+	if (!d2y)
+		goto out_err;
+	memset(d2yi, 0, sizeof(*d2yi));
+	d2yi->filename = strdup(tmp);
+	if (!d2yi->filename)
+		goto out_err_filename;
+	d2yi->original = strdup(ifilename);
+	if (!d2yi->original)
+		goto out_err_original;
+	d2yi->depth = depth;
+	d2yi->dt_include = dt_include;
+	list_add_tail(&d2yi->node, d2y->includes);
+
+	return 0;
+out_err_original:
+	free(d2yi->filename);
+out_err_filename:
+	free(d2yi);
+out_err:
+	dts_error(ds, "out of memory\n");
+	return -1;
+}
+
+static int d2y_emit_preproc(struct d2y_state *d2y, int depth,
+			     const char *preproc)
+{
+	struct dts_state *ds = to_ds(d2y);
+	const char *s, *e;
+	char *cmd, *filename;
 
 	s = preproc;
 	if (*s++ != '#')
-		return;
+		return 0;
 	while (isspace(*s))
 		s++;
 	e = s;
@@ -378,40 +474,24 @@ static void d2y_emit_preproc(struct d2y_state *d2y, const char *preproc)
 		s++;
 
 	/* look into includes and try to convert them */
-	if (!strcmp(cmd, "include")) {
-		e = NULL;
-		if (*s == '"') {
-			e = strchr(s + 1, '"');
-			ileft = '"';
-			iright = '"';
-		} else if (*s == '<') {
-			e = strchr(s + 1, '>');
-			ileft = '<';
-			iright = '>';
-		}
-		if (!e)
-			return;
-		filename = alloca(e - (s + 1) + 1);
-		memcpy(filename, s + 1, e - (s + 1));
-		filename[e - (s + 1)] = '\0';
-
-		ext = strrchr(filename, '.');
-		if (ext) {
-			if (!strcmp(ext, ".dts")) {
-				*ext = '\0';
-				ext = ".yaml";
-			} else if (!strcmp(ext, ".dtsi")) {
-				*ext = '\0';
-				ext = ".yamli";
-			} else
-				ext = "";
-		} else
-			ext = "";
-
-		fprintf(d2y->outfp, "#include %c%s%s%c\n",
-				ileft, filename, ext, iright);
-	} else
+	if (strcmp(cmd, "include")) {
 		fprintf(d2y->outfp, "%s\n", preproc);
+		return 0;
+	}
+	e = NULL;
+	if (*s == '"')
+		e = strchr(s + 1, '"');
+	else if (*s == '<')
+		e = strchr(s + 1, '>');
+	if (!e) {
+		dts_error(ds, "bad include\n");
+		return -1;
+	}
+	filename = alloca(e - (s + 1) + 1);
+	memcpy(filename, s + 1, e - (s + 1));
+	filename[e - (s + 1)] = '\0';
+
+	return d2y_emit_include(d2y, depth, *s, filename);
 }
 
 static int d2y_emit(struct dts_state *ds, int depth,
@@ -421,8 +501,7 @@ static int d2y_emit(struct dts_state *ds, int depth,
 	const struct dts_property_item *pi;
 	const struct dts_emit_item *ei;
 	bool is_root;
-	int i, j, k, len;
-	char *filename, *ext;
+	int i, j, k, ret;
 
 	switch (type) {
 	case det_separator:
@@ -432,13 +511,15 @@ static int d2y_emit(struct dts_state *ds, int depth,
 		d2y_emit_top_level_comment(d2y, depth, data->comment->contents);
 		break;
 	case det_preproc:
-		d2y_emit_preproc(d2y, data->preproc->contents);
+		d2y_emit_preproc(d2y, depth, data->preproc->contents);
 		break;
 	case det_del_node:
 		switch (data->del_node->atom) {
 		case dea_name:
-			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
-			fprintf(d2y->outfp, "%s: ~\n", data->del_node->contents);
+			fprintf(d2y->outfp, "%*s",
+					d2y->leading + depth * d2y->shift, "");
+			fprintf(d2y->outfp, "%s: ~\n",
+					data->del_node->contents);
 			break;
 		case dea_ref:
 		case dea_pathref:
@@ -455,38 +536,25 @@ static int d2y_emit(struct dts_state *ds, int depth,
 	case det_del_prop:
 		/* only handle delete names */
 		if (data->del_node->atom == dea_name) {
-			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+			fprintf(d2y->outfp, "%*s",
+					d2y->leading + depth * d2y->shift, "");
 			fprintf(d2y->outfp, "%s", data->del_prop->contents);
 			fprintf(d2y->outfp, ": ~\n");
 		}
 		break;
+
 	case det_include:
 
-		if (depth != 0) {
-			dts_error(ds, "Only support includes at depth 0 (was %d)\n", depth);
+		if (data->include->atom != dea_string) {
+			dts_error(ds, "bad include atom\n");
 			return -1;
 		}
-		len = strlen(data->include->contents);
-		filename = alloca(len + 1);
-		strcpy(filename, data->include->contents);
 
-		ext = strrchr(filename, '.');
-		if (ext) {
-			if (!strcmp(ext, ".dts")) {
-				*ext = '\0';
-				ext = ".yaml";
-			} else if (!strcmp(ext, ".dtsi")) {
-				*ext = '\0';
-				ext = ".yamli";
-			} else
-				ext = "";
-		} else
-			ext = "";
-
-		/* convert DTS include to standard CPP include */
-		fprintf(d2y->outfp, "#include \"%s%s\"\n",
-				filename, ext);
+		ret = d2y_emit_include(d2y, depth, '"', data->include->contents);
+		if (ret)
+			return ret;
 		break;
+
 	case det_memreserve:
 		fprintf(d2y->outfp, "/memreserve/: [ %s, %s ]\n",
 			data->memreserves[0]->contents,
@@ -500,7 +568,8 @@ static int d2y_emit(struct dts_state *ds, int depth,
 
 		i = 0;
 		do {
-			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+			fprintf(d2y->outfp, "%*s",
+					d2y->leading + depth * d2y->shift, "");
 			if (data->pn.name->atom == dea_ref)
 				fprintf(d2y->outfp, "*");
 
@@ -524,11 +593,11 @@ static int d2y_emit(struct dts_state *ds, int depth,
 
 		break;
 	case det_node_empty:
-		fprintf(d2y->outfp, "%*s", (depth + 1) * d2y->shift, "");
+		fprintf(d2y->outfp, "%*s", d2y->leading + (depth + 1) * d2y->shift, "");
 		fprintf(d2y->outfp, "~: ~\n");
 		break;
 	case det_property:
-		fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+		fprintf(d2y->outfp, "%*s", d2y->leading + depth * d2y->shift, "");
 		if (!strchr(data->pn.name->contents, '#'))
 			fprintf(d2y->outfp, "%s", data->pn.name->contents);
 		else
@@ -582,25 +651,126 @@ static const struct dts_ops d2y_ops = {
 	.emit		= d2y_emit,
 };
 
+static int convert_one(const char *filename, const char *outfilename,
+		       bool debug, bool silent, int tabs, int shift, int color,
+		       int leading, struct list_head *includes)
+{
+	const char *thisoutfilename;
+	struct d2y_state d2y_state, *d2y = &d2y_state;
+	struct dts_state *ds = to_ds(d2y);
+	int ret, c;
+	char tmp[PATH_MAX];
+	const char *s;
+
+	memset(d2y, 0, sizeof(*d2y));
+
+	if (!strcmp(filename, "<stdin>") || !strcmp(filename, "-"))
+		filename = "<stdin>";
+
+	if (outfilename) {
+		thisoutfilename = outfilename;
+		if ((!strcmp(outfilename, "<stdout>") ||
+			!strcmp(outfilename, "-")))
+			thisoutfilename = "<stdout>";
+	} else {
+		if (strlen(filename) >= sizeof(tmp)) {
+			fprintf(stderr, "file name too large %s\n",
+					filename);
+			return -1;
+		}
+		s = strrchr(filename, '.');
+		if (!s || (strcmp(s, ".dts") && strcmp(s, ".dtsi"))) {
+			fprintf(stderr, "invalid file extension on %s\n",
+					filename);
+			return -1;
+		}
+		memcpy(tmp, filename, s - filename);
+		strcpy(tmp + (s - filename),
+				!strcmp(s, ".dts") ? ".yaml" : ".yamli");
+		thisoutfilename = tmp;
+	}
+
+	d2y->filename = filename;
+	d2y->outfilename = thisoutfilename;
+	d2y->debug = debug;
+	d2y->color = color;
+	d2y->silent = silent;
+	d2y->shift = shift;
+	d2y->leading = leading;
+	d2y->includes = includes;
+
+	ret = dts_setup(ds, filename, tabs, &d2y_ops);
+	if (ret) {
+		fprintf(stderr, "Failed to setup dts parser on %s\n",
+				filename);
+		return -1;
+	}
+
+	if (strcmp(d2y->filename, "<stdin>")) {
+		dts_debug(ds, "opening %s for DTS parsing\n", d2y->filename);
+		d2y->fp = fopen(d2y->filename, "ra");
+		if (!d2y->fp) {
+			ret = -1;
+			dts_error(ds, "Can't open %s\n", d2y->filename);
+			goto out_err;
+		}
+	} else
+		d2y->fp = stdin;
+
+	dts_debug(ds, "opened %s for DTS parsing\n", d2y->filename);
+
+	if (strcmp(d2y->outfilename, "<stdout>")) {
+		dts_debug(ds, "opening %s for YAML output\n", d2y->outfilename);
+		d2y->outfp = fopen(d2y->outfilename, "wa");
+		if (!d2y->outfp) {
+			ret = -1;
+			dts_error(ds, "Can't open %s\n", d2y->outfilename);
+			goto out_err;
+		}
+	} else
+		d2y->outfp = stdout;
+
+	dts_debug(ds, "opened %s for YAML output\n", d2y->filename);
+
+	ret = 0;
+	do {
+		c = getc(d2y->fp);
+		ret = dts_feed(ds, c);
+		if (ret < 0) 
+			break;
+	} while (c != EOF);
+
+	fclose(d2y->outfp);
+	fclose(d2y->fp);
+
+out_err:
+	if (ret && strcmp(d2y->outfilename, "<stdout>"))
+		unlink(d2y->outfilename);
+
+	dts_cleanup(ds);
+
+	return ret;
+}
+
 int main(int argc, char *argv[])
 {
-	int cc, c, option_index = 0, ret;
+	int cc, option_index = 0, ret, ret_sticky;
 	const char *s;
 	const char *filename = NULL;
 	const char *outfilename = NULL;
-	const char *thisoutfilename;
 	bool debug = false;
 	bool silent = false;
+	bool recursive = false;
 	int tabs = 8;
 	int shift = 2;
 	int color = -1;
-	struct d2y_state d2y_state, *d2y = &d2y_state;
-	struct dts_state *ds = to_ds(d2y);
+	int leading = 0;
 	int i, count;
-	char tmp[PATH_MAX];
+	struct d2y_include *d2yi, *d2yin;
+	struct list_head includes;
 
 	while ((cc = getopt_long(argc, argv,
-			"o:t:s:hd?", opts, &option_index)) != -1) {
+			"o:t:s:rl:hd?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -639,6 +809,16 @@ int main(int argc, char *argv[])
 				return EXIT_FAILURE;
 			}
 			break;
+		case 'r':
+			recursive = true;
+			break;
+		case 'l':
+			leading = atoi(optarg);
+			if (leading <= 0) {
+				fprintf(stderr, "illegal leading value %d\n", leading);
+				return EXIT_FAILURE;
+			}
+			break;
 		case 'd':
 			debug = true;
 			break;
@@ -654,100 +834,57 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	INIT_LIST_HEAD(&includes);
+
 	count = argc - optind;
+	ret_sticky = 0;
 	for (i = 0; i < count; i++) {
-
 		filename = argv[optind + i];
-
-		if (!strcmp(filename, "<stdin>") || !strcmp(filename, "-"))
-			filename = "<stdin>";
-
-		if (outfilename) {
-			thisoutfilename = outfilename;
-			if ((!strcmp(outfilename, "<stdout>") ||
-			     !strcmp(outfilename, "-")))
-				thisoutfilename = "<stdout>";
-		} else {
-			if (strlen(filename) >= sizeof(tmp)) {
-				fprintf(stderr, "file name too large %s\n",
-						filename);
-				return EXIT_FAILURE;
-			}
-			s = strrchr(filename, '.');
-			if (!s || (strcmp(s, ".dts") && strcmp(s, ".dtsi"))) {
-				fprintf(stderr, "invalid file extension on %s\n",
-						filename);
-				return EXIT_FAILURE;
-			}
-			memcpy(tmp, filename, s - filename);
-			strcpy(tmp + (s - filename),
-					!strcmp(s, ".dts") ? ".yaml" : ".yamli");
-			thisoutfilename = tmp;
-		}
-
-		memset(d2y, 0, sizeof(*d2y));
-		d2y->filename = filename;
-		d2y->outfilename = thisoutfilename;
-		d2y->debug = debug;
-		d2y->color = color;
-		d2y->silent = silent;
-		d2y->shift = shift;
-
-		ret = dts_setup(ds, filename, tabs, &d2y_ops);
+		ret = convert_one(filename, outfilename,
+				  debug, silent, tabs, shift, color,
+				  leading, &includes);
 		if (ret) {
-			fprintf(stderr, "Failed to setup dts parser on %s\n",
-					filename);
-			return EXIT_FAILURE;
+			fprintf(stderr, "Failed to convert %s\n", filename);
+			if (!ret_sticky)
+				ret_sticky = ret;
 		}
-
-		if (strcmp(d2y->filename, "<stdin>")) {
-			dts_debug(ds, "opening %s for DTS parsing\n", d2y->filename);
-			d2y->fp = fopen(d2y->filename, "ra");
-			if (!d2y->fp) {
-				ret = -1;
-				dts_error(ds, "Can't open %s\n", d2y->filename);
-				goto out_err;
-			}
-		} else
-			d2y->fp = stdin;
-
-		dts_debug(ds, "opened %s for DTS parsing\n", d2y->filename);
-
-		if (strcmp(d2y->outfilename, "<stdout>")) {
-			dts_debug(ds, "opening %s for YAML output\n", d2y->outfilename);
-			d2y->outfp = fopen(d2y->outfilename, "wa");
-			if (!d2y->outfp) {
-				ret = -1;
-				dts_error(ds, "Can't open %s\n", d2y->outfilename);
-				goto out_err;
-			}
-		} else
-			d2y->outfp = stdout;
-
-		dts_debug(ds, "opened %s for YAML output\n", d2y->filename);
-
-		ret = 0;
-		while ((c = getc(d2y->fp)) != EOF) {
-			ret = dts_feed(ds, c);
-			if (ret < 0) 
-				break;
-		}
-
-		if (c == EOF)
-			dts_debug(ds, "EOF on %s\n", d2y->filename);
-
-		fclose(d2y->outfp);
-		fclose(d2y->fp);
-
-	out_err:
-		if (ret && strcmp(d2y->outfilename, "<stdout>"))
-			unlink(d2y->outfilename);
-
-		dts_cleanup(ds);
-
-		if (ret)
-			break;
 	}
 
-	return ret ? EXIT_FAILURE : 0;
+	if (recursive) {
+		list_for_each_entry_safe(d2yi, d2yin, &includes, node) {
+			if (!d2yi->dt_include || d2yi->generated || d2yi->error)
+				continue;
+
+			ret = convert_one(d2yi->original, d2yi->filename,
+					debug, silent, tabs, shift, color,
+					leading + d2yi->depth * shift,
+					&includes);
+			if (ret) {
+				d2yi->error = true;
+				fprintf(stderr, "Failed to convert %s\n", filename);
+				if (!ret_sticky)
+					ret_sticky = ret;
+			} else
+				d2yi->generated = true;
+		}
+	}
+
+	list_for_each_entry_safe(d2yi, d2yin, &includes, node) {
+		if (recursive && debug) {
+			fprintf(stderr, "include: filename=%s original=%s depth=%d dt_include=%s generated=%s error=%s\n",
+					d2yi->filename,
+					d2yi->original,
+					d2yi->depth,
+					d2yi->dt_include ? "true" : "false",
+					d2yi->generated ? "true" : "false",
+					d2yi->error ? "true" : "false");
+		}
+
+		list_del(&d2yi->node);
+		free(d2yi->filename);
+		free(d2yi->original);
+		free(d2yi);
+	}
+
+	return ret_sticky ? EXIT_FAILURE : 0;
 }
