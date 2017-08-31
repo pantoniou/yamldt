@@ -212,6 +212,11 @@ static const char *get_comment_accumulator(struct dts_state *ds)
 	return acc_get(&ds->acc_comm);
 }
 
+static int get_comment_accumulator_size(struct dts_state *ds)
+{
+	return acc_get_size(&ds->acc_comm);
+}
+
 static void goto_state(struct dts_state *ds, enum file_state fs)
 {
 	if (fs != ds->fs)
@@ -526,7 +531,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 	struct list_head pi_list;
 
 	depth = ds->depth;
-	if (!ds->refroot && depth > 0)
+	if (!ds->refroot && ds->start_root && depth > 0)
 		depth--;
 
 	INIT_LIST_HEAD(&pi_list);
@@ -598,15 +603,11 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		}
 		break;
 	case det_node:
+		d.pn.nr_labels = 0;
 		list_for_each_entry(li, &ds->items, node) {
 			switch (li->item.atom) {
 			case dea_label:
-				if (d.pn.label) {
-					dts_error_at(ds, &li->item.loc,
-						  "duplicate node label\n");
-					return -1;
-				}
-				d.pn.label = &li->item;
+				d.pn.nr_labels++;
 				break;
 			case dea_ref:
 			case dea_name:
@@ -624,6 +625,21 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		}
 		/* impossible to get here with this NULL, but check */
 		assert(d.pn.name);
+
+		if (d.pn.nr_labels) {
+			d.pn.labels = malloc(sizeof(d.pn.labels[0]) * d.pn.nr_labels);
+			if (!d.pn.labels) {
+				dts_error(ds, "out of memory");
+				ret = -1;
+				break;
+			}
+			i = 0;
+			list_for_each_entry(li, &ds->items, node) {
+				if  (li->item.atom == dea_label)
+					d.pn.labels[i++] = &li->item;
+			}
+		}
+
 		break;
 
 	case det_property:
@@ -663,12 +679,14 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 	if (!ret && ds->ops->emit)
 		ret = ds->ops->emit(ds, depth, type, &d);
 
-	if (type == det_property) {
+	if (type == det_property || type == det_node) {
 		list_for_each_entry_safe(pli, plin, &pi_list, node) {
 			list_del(&pli->node);
 			free(pli);
 		}
 		if (d.pn.items)
+			free(d.pn.items);
+		if (d.pn.labels)
 			free(d.pn.items);
 	}
 
@@ -693,6 +711,7 @@ static int start(struct dts_state *ds, char c)
 
 	/* it's a dtsi, no flags */
 	if (c == '/') {
+		ds->start_root = true;
 		accumulate(ds, c);
 		goto_state(ds, s_nodes_and_properties_marker);
 		return 0;
@@ -701,6 +720,13 @@ static int start(struct dts_state *ds, char c)
 	if (c == '&') {
 		ds->refroot = true;
 		goto_state(ds, s_node_ref);
+		return 0;
+	}
+
+	if (ispropnodec(c)) {
+		ds->start_root = false;
+		accumulate(ds, c);
+		goto_state(ds, s_nodes_and_properties);
 		return 0;
 	}
 
@@ -781,7 +807,13 @@ static int slash(struct dts_state *ds, char c)
 	case s_start:
 		/* / encountered */
 		if (isspace(c)) {
+			ds->start_root = true;
 			goto_state(ds, s_nodes_and_properties);
+			break;
+		}
+		if (c == '{') {
+			ds->start_root = true;
+			goto_state(ds, s_nodes_and_properties_marker);
 			break;
 		}
 		if (!isalpha(c)) {
@@ -793,9 +825,13 @@ static int slash(struct dts_state *ds, char c)
 	case s_headers:
 		if (isalpha(c))
 			goto_state(ds, s_slash_directive);
-		else if (isspace(c))
+		else if (isspace(c)) {
+			ds->start_root = true;
 			goto_state(ds, s_nodes_and_properties);
-		else {
+		} else if (c == '{') {
+			ds->start_root = true;
+			goto_state(ds, s_nodes_and_properties_marker);
+		} else {
 			dts_error(ds, "bad headers '%c'\n", c);
 			return -1;
 		}
@@ -810,6 +846,7 @@ static int slash(struct dts_state *ds, char c)
 	case s_nodes_and_properties:
 		/* not a directive, it's / again */
 		if (get_accumulator_size(ds) == 1 && isspace(c)) {
+			ds->start_root = true;
 			goto_state(ds, ds->pre_slash_fs);
 			break;
 		}
@@ -844,6 +881,9 @@ static int in_c_comment(struct dts_state *ds, char c)
 
 	comment_accumulate(ds, c);
 	if (ds->last_c != '*' || c != '/')
+		return 0;
+
+	if (get_comment_accumulator_size(ds) < 4)
 		return 0;
 
 	buf = get_comment_accumulator(ds);
@@ -977,8 +1017,10 @@ static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
 				dts_emit(ds, det_node_empty);
 			ds->node_empty = false;
 		}
-		if (ds->depth == 0)
+		if (ds->depth == 0) {
 			ds->refroot = false;
+			ds->start_root = false;
+		}
 		goto_state(ds, s_semicolon);
 		return 1;
 	}
@@ -1008,6 +1050,7 @@ static int nodes_and_properties(struct dts_state *ds, char c)
 
 	/* root only */
 	if (c == '/') {
+		ds->start_root = true;
 		accumulate(ds, c);
 		goto_state(ds, s_nodes_and_properties_marker);
 		return 0;

@@ -142,11 +142,6 @@ struct dts_emit_item {
 	enum dts_emit_atom atom;
 	const char *contents;
 	struct dts_location loc;
-#if 0
-	const char *filename;
-	int start_line, start_col;
-	int end_line, end_col;
-#endif
 };
 
 enum dts_emit_type {
@@ -181,8 +176,9 @@ struct dts_emit_data {
 		const struct dts_emit_item *del_node;
 		const struct dts_emit_item *del_prop;
 		struct {
-			const struct dts_emit_item *label;
 			const struct dts_emit_item *name;
+			int nr_labels;
+			const struct dts_emit_item **labels;
 			/* bellow only for prop */
 			int nr_items;
 			const struct dts_property_item **items;
@@ -195,27 +191,16 @@ struct dts_state {
 
 	struct acc_state acc_body;
 	struct dts_location acc_loc;
-#if 0
-	int acc_start_line;
-	int acc_start_col;
-	int acc_end_line;
-	int acc_end_col;
-#endif
 
 	struct acc_state acc_comm;
 	struct dts_location comm_loc;
-#if 0
-	int acc_comm_start_line;
-	int acc_comm_start_col;
-	int acc_comm_end_line;
-	int acc_comm_end_col;
-#endif
 
 	const struct dts_ops *ops;
 
 	enum file_state fs;
 	enum file_state pre_slash_fs;
 	enum file_state pre_preproc_fs;
+	bool start_root;
 	bool refroot;
 	int depth;
 	bool node_empty;
