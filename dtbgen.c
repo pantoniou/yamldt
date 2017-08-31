@@ -1720,13 +1720,9 @@ static void dts_emit_node(struct yaml_dt_state *dt, struct node *np, int depth)
 	fprintf(fp, "%s", pfx);
 	count = 0;
 	list_for_each_entry(l, &np->labels, node) {
-		if (count == 1)
-			printf(" /*");
 		fprintf(fp, "%s%s:", count > 0 ? " " : "", l->label);
 		count++;
 	}
-	if (count > 1)
-		fprintf(fp, " */");
 	fprintf(fp, "%s%s {\n", count > 0 ? " " : "", name);
 
 	list_for_each_entry(prop, &np->properties, node)
