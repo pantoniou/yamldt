@@ -209,7 +209,6 @@ static int d2y_emit_single_scalar(struct d2y_state *d2y,
 		const struct dts_emit_item *ei)
 {
 	struct dts_state *ds = to_ds(d2y);
-	const char *s;
 
 	switch (ei->atom) {
 	default:
@@ -237,13 +236,7 @@ static int d2y_emit_single_scalar(struct d2y_state *d2y,
 		fprintf(d2y->outfp, "*%s", ei->contents);
 		break;
 	case dea_pathref:
-		/* TODO record and label node that it refers */
-		fprintf(d2y->outfp, "*");
-		s = ei->contents;
-		while (*s) {
-			fprintf(d2y->outfp, "%c", ispunct(*s) ? '_' : *s);
-			s++;
-		}
+		fprintf(d2y->outfp, "!anchor %s", ei->contents);
 		break;
 	}
 
@@ -468,6 +461,11 @@ static int d2y_emit(struct dts_state *ds, int depth,
 		}
 		break;
 	case det_include:
+
+		if (depth != 0) {
+			dts_error(ds, "Only support includes at depth 0 (was %d)\n", depth);
+			return -1;
+		}
 		len = strlen(data->include->contents);
 		filename = alloca(len + 1);
 		strcpy(filename, data->include->contents);
@@ -499,17 +497,31 @@ static int d2y_emit(struct dts_state *ds, int depth,
 			  !strcmp(data->pn.name->contents, "/");
 		if (is_root)	/* do not output anything for root */
 			break;
-		fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
-		if (data->pn.name->atom == dea_ref)
-			fprintf(d2y->outfp, "*");
 
-		/* both name && pathref get printed out */
-		fprintf(d2y->outfp, "%s", data->pn.name->contents);
+		i = 0;
+		do {
+			fprintf(d2y->outfp, "%*s", depth * d2y->shift, "");
+			if (data->pn.name->atom == dea_ref)
+				fprintf(d2y->outfp, "*");
 
-		fprintf(d2y->outfp, ":");
-		if (data->pn.label)
-			fprintf(d2y->outfp, " &%s", data->pn.label->contents);
-		fprintf(d2y->outfp, "\n");
+			/* both name && pathref get printed out */
+			fprintf(d2y->outfp, "%s", data->pn.name->contents);
+
+			fprintf(d2y->outfp, ":");
+
+			if (data->pn.nr_labels > i)
+				fprintf(d2y->outfp, " &%s",
+						data->pn.labels[i]->contents);
+			fprintf(d2y->outfp, "\n");
+
+			/* for any label but the last output empty node */
+			if (i + 1 < data->pn.nr_labels) {
+				fprintf(d2y->outfp, "%*s", (depth + 1) * d2y->shift, "");
+				fprintf(d2y->outfp, "~: ~\n");
+			}
+
+		} while (++i < data->pn.nr_labels);
+
 		break;
 	case det_node_empty:
 		fprintf(d2y->outfp, "%*s", (depth + 1) * d2y->shift, "");
