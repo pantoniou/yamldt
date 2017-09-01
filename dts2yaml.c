@@ -275,6 +275,7 @@ static void d2y_emit_comment_line(struct d2y_state *d2y,
 		"error",
 		"warning",
 		"pragma",
+		"line",
 		NULL,
 	};
 	const char *s;
