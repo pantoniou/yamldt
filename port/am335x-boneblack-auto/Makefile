@@ -17,7 +17,7 @@ YAMLDT ?= $(TOPDIR)/yamldt
 DTS2YAML ?= $(TOPDIR)/dts2yaml
 
 # pass extra validate flags
-YAMLDTFLAGS ?= -C \
+YAMLDTFLAGS ?= -C -@ \
 	$(if $(findstring validate, $(MAKECMDGOALS)), \
 		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
 

@@ -1,6 +1,6 @@
 TOPDIR ?= $(realpath .)/../..
 
-TOPTARGETS := all clean check validate
+TOPTARGETS := all clean check validate genyamls
 
 SUBDIRS := $(wildcard */.)
 
