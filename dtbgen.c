@@ -120,6 +120,7 @@ struct dtb_emit_state {
 	bool compatible;
 	bool object;
 	bool dts;
+	bool symbols;
 };
 
 #define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
@@ -509,14 +510,43 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 		resolve(dt, child, flags);
 }
 
+static bool is_node_referenced(struct yaml_dt_state *dt,
+				struct node *np, struct node *npref)
+{
+	struct node *child;
+	struct property *prop;
+	struct ref *ref;
+	bool ret;
+
+	list_for_each_entry(prop, &np->properties, node) {
+		list_for_each_entry(ref, &prop->refs, node) {
+			if (ref->type != r_anchor ||
+			    !to_dt_ref(ref)->is_resolved)
+				continue;
+			if (to_dt_ref(ref)->npref == npref)
+				return true;
+		}
+	}
+
+	list_for_each_entry(child, &np->children, node) {
+		ret = is_node_referenced(dt, child, npref);
+		if (ret)
+			return true;
+	}
+	return false;
+}
+
 static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 {
+	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct dtb_node *dtbnp = to_dtb_node(np);
 	struct node *child;
 	struct property *prop;
 	fdt32_t phandle;
 
-	if (dtbnp->phandle != 0) {
+	if (dtbnp->phandle != 0 &&
+	   (dtb->object || dtb->symbols ||
+	    is_node_referenced(dt, tree_root(to_tree(dt)), np))) {
 		prop = prop_alloc(to_tree(dt), "phandle");
 
 		phandle = cpu_to_fdt32(dtbnp->phandle);
@@ -1522,6 +1552,7 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dtb->compatible = dt->cfg.compatible;
 	dtb->object = dt->cfg.object;
 	dtb->dts = dt->cfg.dts;
+	dtb->symbols = dt->cfg.symbols;
 
 	INIT_LIST_HEAD(&dtb->fixups);
 
@@ -1529,6 +1560,7 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
 	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
 	dt_debug(dt, " dts        = %s\n", dtb->dts ? "true" : "false");
+	dt_debug(dt, " symbols    = %s\n", dtb->symbols ? "true" : "false");
 	return 0;
 }
 
@@ -1842,7 +1874,9 @@ int dtb_emit(struct yaml_dt_state *dt)
 
 	dtb_append_auto_properties(dt);
 
-	dtb_add_symbols(dt);
+	if (dtb->object || dtb->symbols)
+		dtb_add_symbols(dt);
+
 	if (dtb->object) {
 		dtb_add_fixups(dt);
 		dtb_add_local_fixups(dt);

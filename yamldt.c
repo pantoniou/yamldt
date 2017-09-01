@@ -78,6 +78,7 @@ static struct option opts[] = {
 	{ "save-temps",		no_argument, 	   0,  0 },
 	{ "silent",		no_argument,	   0,  0  },
 	{ "color",		required_argument, 0,  0  },
+	{ "symbols",		no_argument, 	   0, '@' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -198,7 +199,7 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dlcvCysS:g:h?", opts, &option_index)) != -1) {
+			"o:dlcvCys@S:g:h?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -238,6 +239,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'C':
 			cfg->compatible = true;
+			break;
+		case '@':
+			cfg->symbols = true;
 			break;
 		case 'y':
 			cfg->yaml = true;

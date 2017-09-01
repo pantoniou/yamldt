@@ -121,6 +121,7 @@ struct yaml_dt_config {
 	/* for dtb */
 	bool compatible;
 	bool dts;
+	bool symbols;
 
 	/* for YAML */
 	bool yaml;
