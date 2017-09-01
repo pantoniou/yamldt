@@ -1105,6 +1105,7 @@ static void late_resolve_node(struct yaml_dt_state *dt,
 			      struct node *np)
 {
 	struct node *child, *childt;
+	struct dtb_emit_state *dtb = to_dtb(dt);
 
 	/* handle renames first */
 	list_for_each_entry(child, &np->children, node) {
@@ -1138,9 +1139,11 @@ resolve_again:
 	/* handle refs */
 	list_for_each_entry(child, &np->children, node) {
 		list_for_each_entry(childt, &np->children, node) {
-			if (child == childt || strcmp(child->name, childt->name))
+			if (child == childt ||
+			    strcmp(child->name, childt->name))
 				continue;
-			tree_apply_ref_node(to_tree(dt), child, childt);
+			tree_apply_ref_node(to_tree(dt), child, childt,
+					dtb->compatible);
 			node_free(to_tree(dt), childt);
 			goto resolve_again;
 		}
@@ -1791,7 +1794,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 	if (dtb->object)
 		dtb_create_overlay_structure(dt);
 
-	tree_apply_ref_nodes(to_tree(dt), dtb->object);
+	tree_apply_ref_nodes(to_tree(dt), dtb->object, dtb->compatible);
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */

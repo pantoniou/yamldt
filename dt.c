@@ -1244,6 +1244,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	yaml_event_type_t type = event->type;
 	bool found_existing;
 	char *label;
+	struct label *l;
 	char namebuf[NODE_FULLNAME_MAX];
 	int len;
 	const char *s;
@@ -1320,8 +1321,19 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		}
 
 		if (found_existing) {
-			if (label)
-				label_add(to_tree(dt), np, label);
+			if (label) {
+				l = label_add_nolink(to_tree(dt), np, label);
+				if (l) {
+					/* in non compatible mode always insert to tail */
+					/* in compatible mode; if the node is completely empty */
+					if (!dt->cfg.compatible ||
+						(list_empty(&np->children) &&
+						 list_empty(&np->properties)))
+						list_add_tail(&l->node, &np->labels);
+					else
+						list_add(&l->node, &np->labels);
+				}
+			}
 
 			dt_debug(dt, "using existing node @%s%s%s\n",
 					dn_fullname(np, namebuf, sizeof(namebuf)),

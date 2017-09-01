@@ -130,8 +130,8 @@ struct label *label_alloc(struct tree *t, const char *label)
 	return t->ops->label_alloc(t, label);
 }
 
-void label_add(struct tree *t, struct node *np,
-		const char *label)
+struct label *label_add_nolink(struct tree *t, struct node *np,
+			       const char *label)
 {
 	struct label *l;
 
@@ -140,12 +140,22 @@ void label_add(struct tree *t, struct node *np,
 	/* do not add duplicate */
 	list_for_each_entry(l, &np->labels, node) {
 		if (!strcmp(l->label, label))
-			return;
+			return NULL;
 	}
 
 	l = label_alloc(t, label);
 	l->np = np;
-	list_add_tail(&l->node, &np->labels);
+	return l;
+}
+
+void label_add(struct tree *t, struct node *np,
+		const char *label)
+{
+	struct label *l;
+
+	l = label_add_nolink(t, np, label);
+	if (l)
+		list_add_tail(&l->node, &np->labels);
 }
 
 void label_free(struct tree *t, struct label *l)
@@ -487,11 +497,11 @@ static void sanitize_base(struct tree *t, struct node *np)
 }
 
 void tree_apply_ref_node(struct tree *t, struct node *npref,
-			 struct node *np)
+			 struct node *np, bool compatible)
 {
 	struct property *prop, *propn;
 	struct property *propref, *proprefn;
-	struct label *l, *ln;
+	struct label *l, *ln, *lt;
 	struct node *child, *childn, *childref, *childrefn;
 	bool found;
 	char namebuf[2][NODE_FULLNAME_MAX];
@@ -504,8 +514,16 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 	}
 
 	/* add label to noderef */
-	list_for_each_entry_safe(l, ln, &np->labels, node)
-		label_add(t, npref, l->label);
+	list_for_each_entry_safe(l, ln, &np->labels, node) {
+		lt = label_add_nolink(t, npref, l->label);
+		if (lt) {
+			if (!compatible)
+				list_add_tail(&lt->node, &npref->labels);
+			else
+				list_add(&lt->node, &npref->labels);
+		}
+
+	}
 
 	list_for_each_entry_safe(prop, propn, &np->properties, node) {
 
@@ -580,12 +598,12 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 			list_add_tail(&child->node, &npref->children);
 			sanitize_base(t, child);
 		} else
-			tree_apply_ref_node(t, childref, child);
+			tree_apply_ref_node(t, childref, child, compatible);
 
 	}
 }
 
-void tree_apply_ref_nodes(struct tree *t, bool object)
+void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 {
 	struct node *np, *npn, *npref;
 	struct list_head *ref_nodes = tree_ref_nodes(t);
@@ -605,7 +623,7 @@ void tree_apply_ref_nodes(struct tree *t, bool object)
 		}
 
 		if (npref)
-			tree_apply_ref_node(t, npref, np);
+			tree_apply_ref_node(t, npref, np, compatible);
 
 		/* free everything now */
 		if (npref || !object) {
