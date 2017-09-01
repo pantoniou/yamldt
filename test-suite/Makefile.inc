@@ -33,10 +33,17 @@ YAMLDTBS := $(addsuffix .yaml.dtb, $(basename $(YAMLS)))
 FDTDUMPS := $(addsuffix .fdtdump, $(basename $(DTBS))) $(addsuffix .fdtdump, $(basename $(YAMLDTBS)))
 CPPS     := $(addsuffix .cpp, $(basename $(DTBS))) $(addsuffix .yaml.cpp, $(basename $(YAMLDTBS)))
 
+BLACKYAMLS    := $(addsuffix .yaml, $(BLACKLIST))
+BLACKDTSS     := $(addsuffix .dts, $(BLACKLIST))
+BLACKDIFFS    := $(addsuffix .diff, $(BLACKLIST))
+
 %.diff: %.yaml.fdtdump %.fdtdump
 	cmp -s $^ || (diff -u $^ | tee $@; false)
 
 %.cpp.dts: %.dts
+	$(CPP) $(CPPFLAGS) $< > $@
+
+%.cpp.yaml: %.yaml
 	$(CPP) $(CPPFLAGS) $< > $@
 
 %.dtb: %.dts
@@ -55,7 +62,7 @@ CPPS     := $(addsuffix .cpp, $(basename $(DTBS))) $(addsuffix .yaml.cpp, $(base
 %.fdtdump: %.dtb
 	$(FDTDUMP) $(FDTDUMPFLAGS) 2>/dev/null $< >$@
 
-.PHONY: clean check genyamls
+.PHONY: clean check genyamls genblackyamls checkblack
 
 # .NOTPARALLEL:
 
@@ -65,12 +72,19 @@ clean:
 	rm -f $(DIFFS) $(DTBS) $(YAMLDTBS) $(FDTDUMPS) $(CPPS) $(YAMLS)
 	rm -f *.yaml
 	rm -f *.yamli
+	rm -f *.cpp.yaml *.cpp.dts
 
 $(YAMLS): $(DTSS)
 $(YAMLS): genyamls
 
 genyamls:
 	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(DTSS) || true
+	@echo "dts2yaml DONE"
+
+checkblack: $(BLACKDIFFS)
+
+genblackyamls:
+	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(BLACKDTSS) || true
 	@echo "dts2yaml DONE"
 
 validate: check
