@@ -772,6 +772,7 @@ int main(int argc, char *argv[])
 	int i, count;
 	struct d2y_include *d2yi, *d2yin;
 	struct list_head includes;
+	bool all_generated;
 
 	while ((cc = getopt_long(argc, argv,
 			"o:t:s:rl:hd?", opts, &option_index)) != -1) {
@@ -855,22 +856,32 @@ int main(int argc, char *argv[])
 	}
 
 	if (recursive) {
-		list_for_each_entry_safe(d2yi, d2yin, &includes, node) {
-			if (!d2yi->dt_include || d2yi->generated || d2yi->error)
-				continue;
+		do {
+			list_for_each_entry_safe(d2yi, d2yin, &includes, node) {
+				if (!d2yi->dt_include || d2yi->generated || d2yi->error)
+					continue;
 
-			ret = convert_one(d2yi->original, d2yi->filename,
-					debug, silent, tabs, shift, color,
-					leading + d2yi->depth * shift,
-					&includes);
-			if (ret) {
-				d2yi->error = true;
-				fprintf(stderr, "Failed to convert %s\n", filename);
-				if (!ret_sticky)
-					ret_sticky = ret;
-			} else
-				d2yi->generated = true;
-		}
+				ret = convert_one(d2yi->original, d2yi->filename,
+						debug, silent, tabs, shift, color,
+						leading + d2yi->depth * shift,
+						&includes);
+				if (ret) {
+					d2yi->error = true;
+					fprintf(stderr, "Failed to convert %s\n", filename);
+					if (!ret_sticky)
+						ret_sticky = ret;
+				} else
+					d2yi->generated = true;
+			}
+
+			all_generated = true;
+			list_for_each_entry(d2yi, &includes, node) {
+				if (d2yi->dt_include && !d2yi->generated && !d2yi->error) {
+					all_generated = false;
+					break;
+				}
+			}
+		} while (!all_generated);
 	}
 
 	list_for_each_entry_safe(d2yi, d2yin, &includes, node) {
