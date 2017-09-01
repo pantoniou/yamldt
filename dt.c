@@ -1344,9 +1344,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				np = node_lookup_by_label(to_tree(dt), label,
 						strlen(label));
 				if (np) {
-					dt_warning_at(dt, &dt->last_map_mark,
-							"Node %s with duplicate label %s\n",
-							dt->map_key, label);
+					dt_debug(dt, "Node %s with duplicate label %s\n",
+						dt->map_key, label);
 					label = NULL;
 					np = NULL;
 				}
@@ -1404,15 +1403,27 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			free(dt->map_key);
 		dt->map_key = NULL;
 
+		np = dt->current_np;
+
 		dt_debug(dt, "* finished with %s at depth %d\n",
-				dn_fullname(dt->current_np, namebuf, sizeof(namebuf)),
+				dn_fullname(np, namebuf, sizeof(namebuf)),
 				dt->depth - 1);
 
 		dt->depth--;
-		dt->current_np = dt->current_np->parent;
+		dt->current_np = np->parent;
 
 		if (dt->current_np == NULL && dt->current_np_ref) {
 			dt_debug(dt, "* out of ref context\n");
+
+			/* if we can apply the ref now, do it */
+			if (tree_apply_single_ref_node(to_tree(dt), np,
+				dt->cfg.object, dt->cfg.compatible)) {
+
+				list_del(&np->node);
+				node_free(to_tree(dt), np);
+				np = NULL;
+			}
+
 			dt->current_np = tree_root(to_tree(dt));
 			dt->current_np_ref = false;
 		}
@@ -1591,6 +1602,15 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				if (dt->map_key)
 					free(dt->map_key);
 				dt->map_key = NULL;
+
+				/* if we can apply the ref now, do it */
+				if (tree_apply_single_ref_node(to_tree(dt), np,
+					dt->cfg.object, dt->cfg.compatible)) {
+
+					list_del(&np->node);
+					node_free(to_tree(dt), np);
+					np = NULL;
+				}
 
 				dt_debug(dt, "* out of ref context\n");
 				dt->current_np = tree_root(to_tree(dt));

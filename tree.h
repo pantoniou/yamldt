@@ -160,6 +160,8 @@ struct ref *ref_alloc(struct tree *t, enum ref_type type,
 		const char *xtag);
 void ref_free(struct tree *t, struct ref *ref);
 
+struct label *label_add_nolink(struct tree *t, struct node *np,
+			       const char *label);
 void label_add(struct tree *t, struct node *np, const char *label);
 void label_free(struct tree *t, struct label *l);
 
@@ -187,9 +189,11 @@ struct property *prop_get_by_name(struct tree *t,
 struct ref *ref_get_by_index(struct tree *t,
 		struct property *prop, int index);
 
+bool tree_apply_single_ref_node(struct tree *t, struct node *np,
+				bool object, bool compatible);
 void tree_apply_ref_node(struct tree *t, struct node *npref,
-			 struct node *np);
-void tree_apply_ref_nodes(struct tree *t, bool object);
+			 struct node *np, bool compatible);
+void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible);
 
 /* this should be enough */
 #define NODE_FULLNAME_MAX	4096

@@ -603,6 +603,18 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 	}
 }
 
+bool tree_apply_single_ref_node(struct tree *t, struct node *np,
+				bool object, bool compatible)
+{
+	struct node *npref;
+
+	npref = node_lookup(t, np->name, -1);
+	if (!npref)
+		return false;
+	tree_apply_ref_node(t, npref, np, compatible);
+	return true;
+}
+
 void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 {
 	struct node *np, *npn, *npref;

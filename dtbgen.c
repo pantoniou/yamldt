@@ -391,7 +391,6 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!null")) {
 			data = NULL;
 			size = 0;
-			fprintf(stderr, "tag=!null\n");
 		} else {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,
@@ -950,34 +949,45 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 	node_free(to_tree(dt), old_root);
 }
 
-static void dtb_handle_special_properties(struct yaml_dt_state *dt)
+static void dtb_handle_special_properties(struct yaml_dt_state *dt,
+					  struct node *np)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct property *prop, *propn;
 	struct dtb_property *dtbprop;
+	struct node *child;
 	struct ref *ref;
 	struct node *root;
 	bool resolve_error;
+	bool is_memreserve;
+	bool is_name;
+
+	if (!np)
+		return;
 
 	assert(dt);
 
 	root = tree_root(to_tree(dt));
-	if (!root)
-		return;
 
-	list_for_each_entry_safe(prop, propn, &root->properties, node) {
+	list_for_each_entry_safe(prop, propn, &np->properties, node) {
 
-		/* detach and keep memreserve property */
-		if (!strcmp(prop->name, "/memreserve/")) {
+		is_memreserve = np == root &&
+				!strcmp(prop->name, "/memreserve/");
+		is_name = dtb->compatible && !strcmp(prop->name, "name");
 
-			dtbprop = to_dtb_prop(prop);
+		dtbprop = to_dtb_prop(prop);
 
-			resolve_error = false;
+		resolve_error = false;
+		if (is_memreserve || is_name) {
 			list_for_each_entry(ref, &prop->refs, node) {
 				ref_resolve(dt, ref);
 				if (!to_dt_ref(ref)->is_resolved)
 					resolve_error = true;
 			}
+		}
+
+		/* detach and keep memreserve property */
+		if (is_memreserve) {
 
 			list_del(&prop->node);
 			prop->np = NULL;
@@ -997,8 +1007,17 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt)
 				prop_free(to_tree(dt), prop);
 			} else
 				dtb->memreserve_prop = prop;
+		} else if (is_name && dtbprop->size == strlen(np->name) + 1 &&
+			   !memcmp(np->name, dtbprop->data, dtbprop->size)) {
+
+			list_del(&prop->node);
+			prop->np = NULL;
+
 		}
 	}
+
+	list_for_each_entry(child, &np->children, node)
+		dtb_handle_special_properties(dt, child);
 }
 
 static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
@@ -1787,7 +1806,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 		     size_mem_rsvmap;
 	int size;
 
-	dtb_handle_special_properties(dt);
+	dtb_handle_special_properties(dt, tree_root(to_tree(dt)));
 	if (dt->cfg.late)
 		dtb_late_resolve(dt);
 

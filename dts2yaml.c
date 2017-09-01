@@ -272,6 +272,9 @@ static void d2y_emit_comment_line(struct d2y_state *d2y,
 		"endif",
 		"define",
 		"include",
+		"error",
+		"warning",
+		"pragma",
 		NULL,
 	};
 	const char *s;
