@@ -103,7 +103,7 @@ static inline bool state_with_preproc(enum file_state fs)
 
 static inline bool is_valid_final_state(enum file_state fs)
 {
-	return fs == s_start || fs == s_nodes_and_properties;
+	return fs == s_start || fs == s_headers || fs == s_nodes_and_properties;
 }
 
 static inline bool is_valid_preproc_state(enum file_state fs)
