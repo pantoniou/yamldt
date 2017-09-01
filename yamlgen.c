@@ -273,6 +273,10 @@ void __yaml_assign_temp_labels(struct tree *t, struct node *np, int *next)
 	/* for each ref, verify that a label exists */
 	/* if it doesn't create one temporary */
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
+
 		list_for_each_entry(ref, &prop->refs, node) {
 			if (ref->type != r_anchor)
 				continue;
@@ -337,6 +341,10 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 
 	outcount = 0;
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
+
 		outcount++;
 
 		fprintf(fp, "%*s", depth * 2, "");

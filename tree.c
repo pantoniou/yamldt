@@ -342,6 +342,8 @@ struct property *prop_get_by_name(struct tree *t,
 		return NULL;
 
 	list_for_each_entry(prop, &np->properties, node) {
+		if (prop->deleted)
+			continue;
 		if (strcmp(prop->name, name))
 			continue;
 		if (index == 0)
@@ -527,12 +529,19 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 
 	list_for_each_entry_safe(prop, propn, &np->properties, node) {
 
+		if (prop->deleted)
+			continue;
+
 		tree_debug(t, "using property %s @%s\n",
 			prop->name,
 			dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])));
 
 		if (prop->is_delete) {
 			list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
+
+				if (propref->deleted)
+					continue;
+
 				if (strcmp(propref->name, prop->name))
 					continue;
 
@@ -540,7 +549,10 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 					propref->name,
 					dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
 
-				prop_del(t, propref);
+				if (compatible)
+					propref->deleted = true;
+				else
+					prop_del(t, propref);
 			}
 
 			list_for_each_entry_safe(childref, childrefn, &npref->children, node) {
@@ -560,6 +572,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 
 		found = false;
 		list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
+			/* note this takes into account deleted properties */
 			if (!strcmp(propref->name, prop->name)) {
 				found = true;
 				break;
@@ -571,6 +584,9 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 
 		/* if found, free old copy */
 		if (found) {
+			if (propref->deleted)
+				propref->deleted = false;
+
 			/* carefully put it at the same point in the list */
 			list_add(&prop->node, &propref->node);
 			list_del(&propref->node);

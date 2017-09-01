@@ -709,6 +709,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 			append_input_marker(dt, "---\n");
 	}
 
+	yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
 	yaml_parser_set_input_string(&dt->parser, dt->input_content,
 				     dt->input_size);
 
@@ -1004,11 +1005,14 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 
 		} else {
 			if (prop->is_delete) {
-				dt_debug(dt, "Deleting property %s at %s\n",
+				dt_debug(dt, "deleting property %s at %s\n",
 						prop->name,
 						dn_fullname(np, namebuf, sizeof(namebuf)));
 
-				prop_del(to_tree(dt), prop);
+				if (dt->cfg.compatible)
+					prop->deleted = true;
+				else
+					prop_del(to_tree(dt), prop);
 
 			} else
 				dt_debug(dt, "updating property %s at %s\n",
@@ -1474,6 +1478,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				list_for_each_entry(prop, &np->properties, node) {
 					if (!strcmp(prop->name, dt->map_key)) {
 						found_existing = true;
+						/* bring it back to life */
+						if (prop->deleted) {
+							prop->deleted = false;
+							prop->is_delete = false;
+						}
 						break;
 					}
 				}
@@ -1639,6 +1648,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 					list_for_each_entry(prop, &np->properties, node) {
 						if (!strcmp(prop->name, dt->map_key)) {
 							found_existing = true;
+							/* bring it back to life */
+							if (prop->deleted) {
+								prop->deleted = false;
+								prop->is_delete = false;
+							}
 							break;
 						}
 					}
@@ -1691,6 +1705,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				list_for_each_entry(prop, &np->properties, node) {
 					if (!strcmp(prop->name, dt->map_key)) {
 						found_existing = true;
+						/* bring it back to life */
+						if (prop->deleted) {
+							prop->deleted = false;
+							prop->is_delete = false;
+						}
 						break;
 					}
 				}

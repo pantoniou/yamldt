@@ -443,6 +443,9 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 
 	list_for_each_entry(prop, &npt->properties, node) {
 
+		if (prop->deleted)
+			continue;
+
 		list_for_each_entry_safe(ref, refn, &prop->refs, node) {
 
 			if (flags & RF_CONTENT)
@@ -519,6 +522,10 @@ static bool is_node_referenced(struct yaml_dt_state *dt,
 	bool ret;
 
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
+
 		list_for_each_entry(ref, &prop->refs, node) {
 			if (ref->type != r_anchor ||
 			    !to_dt_ref(ref)->is_resolved)
@@ -661,6 +668,9 @@ static void add_fixups(struct yaml_dt_state *dt, struct node *np)
 	int refnamelen;
 
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
 
 		list_for_each_entry(ref, &prop->refs, node) {
 
@@ -809,11 +819,16 @@ static void add_local_fixup(struct yaml_dt_state *dt, struct ref *ref,
 	}
 
 	found = false;
-	list_for_each_entry(prop, &np->properties, node)
+	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
+
 		if (!strcmp(prop->name, ref->prop->name)) {
 			found = true;
 			break;
 		}
+	}
 
 	/* not found? create */
 	if (!found) {
@@ -843,6 +858,9 @@ static void add_local_fixups(struct yaml_dt_state *dt, struct node *np,
 	int refnamelen;
 
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
 
 		list_for_each_entry(ref, &prop->refs, node) {
 
@@ -1013,6 +1031,9 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt,
 
 	list_for_each_entry_safe(prop, propn, &np->properties, node) {
 
+		if (prop->deleted)
+			continue;
+
 		is_memreserve = np == root &&
 				!strcmp(prop->name, "/memreserve/");
 		is_name = dtb->compatible && !strcmp(prop->name, "name");
@@ -1087,6 +1108,10 @@ static struct ref *get_reg_property_ref(struct yaml_dt_state *dt,
 	struct ref *ref;
 
 	list_for_each_entry(prop, &np->properties, node) {
+
+		if (prop->deleted)
+			continue;
+
 		if (!strcmp(prop->name, "reg")) {
 			list_for_each_entry(ref, &prop->refs, node) {
 				if (ref->type == r_scalar)
@@ -1306,8 +1331,11 @@ static int count_properties(struct yaml_dt_state *dt, struct node *np)
 	int count;
 
 	count = 0;
-	list_for_each_entry(prop, &np->properties, node)
+	list_for_each_entry(prop, &np->properties, node) {
+		if (prop->deleted)
+			continue;
 		count++;
+	}
 
 	list_for_each_entry(child, &np->children, node)
 		count += count_properties(dt, child);
@@ -1321,8 +1349,11 @@ static int fill_prop_table(struct yaml_dt_state *dt, struct node *np,
 	struct property *prop;
 	struct node *child;
 
-	list_for_each_entry(prop, &np->properties, node)
+	list_for_each_entry(prop, &np->properties, node) {
+		if (prop->deleted)
+			continue;
 		propp[pos++] = prop;
+	}
 
 	list_for_each_entry(child, &np->children, node)
 		pos = fill_prop_table(dt, child, propp, pos);
@@ -1417,6 +1448,9 @@ static void build_string_table_compatible(struct yaml_dt_state *dt,
 
 	list_for_each_entry(prop, &np->properties, node) {
 
+		if (prop->deleted)
+			continue;
+
 		data = dtb->area[dt_strings].data;
 		s = data;
 		e = s + dtb->area[dt_strings].size;
@@ -1475,6 +1509,9 @@ static void flatten_node(struct yaml_dt_state *dt, struct node *np)
 
 	list_for_each_entry(prop, &np->properties, node) {
 
+		if (prop->deleted)
+			continue;
+
 		dtbprop = to_dtb_prop(prop);
 
 		dt_emit_32(dt, dt_struct, FDT_PROP, false);
@@ -1521,6 +1558,10 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 		list_for_each_entry(child, &np->children, node) {
 
 			list_for_each_entry(prop, &child->properties, node) {
+
+				if (prop->deleted)
+					continue;
+
 				dtbprop = to_dtb_prop(prop);
 				if (!strcmp(prop->name, "reg") &&
 					dtbprop->size >= sizeof(fdt32_t)) {
@@ -1799,8 +1840,11 @@ static void dts_emit_node(struct yaml_dt_state *dt, struct node *np, int depth)
 	}
 	fprintf(fp, "%s%s {\n", count > 0 ? " " : "", name);
 
-	list_for_each_entry(prop, &np->properties, node)
+	list_for_each_entry(prop, &np->properties, node) {
+		if (prop->deleted)
+			continue;
 		dts_emit_prop(dt, prop, depth + 1);
+	}
 
 	list_for_each_entry(child, &np->children, node)
 		dts_emit_node(dt, child, depth + 1);
@@ -2038,6 +2082,8 @@ static void __dn_dump(struct yaml_dt_state *dt, struct node *np, int depth)
 	printf("%s%s {\n", count > 0 ? " " : "", name);
 
 	list_for_each_entry(prop, &np->properties, node) {
+		if (prop->deleted)
+			continue;
 		dtbprop = to_dtb_prop(prop);
 		printf("%*s%s", (depth + 1) * 4, "", prop->name);
 		p = dtbprop->data;
