@@ -1470,10 +1470,12 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			found_existing = false;
 			assert(np);
-			list_for_each_entry(prop, &np->properties, node) {
-				if (!strcmp(prop->name, dt->map_key)) {
-					found_existing = true;
-					break;
+			if (strcmp(dt->map_key, "/memreserve/")) {
+				list_for_each_entry(prop, &np->properties, node) {
+					if (!strcmp(prop->name, dt->map_key)) {
+						found_existing = true;
+						break;
+					}
 				}
 			}
 			if (!found_existing)
@@ -1631,7 +1633,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			if (!prop) {
 				found_existing = false;
-				if (dt->map_key) {
+				/* memreserve is special; allow it to be present many times */
+				if (dt->map_key && strcmp(dt->map_key, "/memreserve/")) {
 					assert(np);
 					list_for_each_entry(prop, &np->properties, node) {
 						if (!strcmp(prop->name, dt->map_key)) {
