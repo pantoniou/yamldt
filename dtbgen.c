@@ -1007,12 +1007,9 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt,
 				prop_free(to_tree(dt), prop);
 			} else
 				dtb->memreserve_prop = prop;
-		} else if (is_name && dtbprop->size == strlen(np->name) + 1 &&
-			   !memcmp(np->name, dtbprop->data, dtbprop->size)) {
-
+		} else if (is_name) {
 			list_del(&prop->node);
 			prop->np = NULL;
-
 		}
 	}
 

@@ -931,7 +931,7 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 static void finalize_current_property(struct yaml_dt_state *dt)
 {
 	char namebuf[NODE_FULLNAME_MAX];
-	struct node *np;
+	struct node *np, *child, *childn;
 	struct property *prop;
 	struct ref *ref, *refn;
 	int nrefs, nnulls;
@@ -977,11 +977,21 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 
 			if (prop->is_delete && !dt->current_np_ref) {
 
-				dt_debug(dt, "Deleting property %s at %s\n",
+				dt_debug(dt, "deleting property %s at %s\n",
 						prop->name,
 						dn_fullname(np, namebuf, sizeof(namebuf)));
 
 				prop_del(to_tree(dt), prop);
+
+				list_for_each_entry_safe(child, childn, &np->children, node) {
+					if (strcmp(child->name, prop->name))
+						continue;
+
+					dt_debug(dt, "deleting child %s\n",
+						dn_fullname(child, &namebuf[0], sizeof(namebuf)));
+
+					node_free(to_tree(dt), child);
+				}
 
 			} else {
 				dt_debug(dt, "appending property %s at %s\n",
