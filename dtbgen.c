@@ -533,6 +533,9 @@ static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 
 static void dtb_append_auto_properties(struct yaml_dt_state *dt)
 {
+	if (!tree_root(to_tree(dt)))
+		return;
+
 	append_auto_properties(dt, tree_root(to_tree(dt)));
 }
 
@@ -584,6 +587,9 @@ static void add_symbols(struct yaml_dt_state *dt, struct node *np,
 static void dtb_add_symbols(struct yaml_dt_state *dt)
 {
 	struct node *symbols_np = NULL;
+
+	if (!tree_root(to_tree(dt)))
+		return;
 
 	add_symbols(dt, tree_root(to_tree(dt)), &symbols_np);
 }
@@ -668,6 +674,9 @@ static void dtb_add_fixups(struct yaml_dt_state *dt)
 	int ret;
 	char *name;
 	char namebuf[NODE_FULLNAME_MAX];
+
+	if (!tree_root(to_tree(dt)))
+		return;
 
 	add_fixups(dt, tree_root(to_tree(dt)));
 
@@ -839,6 +848,9 @@ static void add_local_fixups(struct yaml_dt_state *dt, struct node *np,
 static void dtb_add_local_fixups(struct yaml_dt_state *dt)
 {
 	struct node *np;
+
+	if (!tree_root(to_tree(dt)))
+		return;
 
 	np = NULL;
 	add_local_fixups(dt, tree_root(to_tree(dt)), &np);
@@ -1025,6 +1037,8 @@ static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 	assert(dt);
 
 	root = tree_root(to_tree(dt));
+	if (!root)
+		return;
 
 	if (dtb->compatible) {
 		resolve(dt, root, RF_CONTENT);
@@ -1368,6 +1382,9 @@ static void build_string_table_compatible(struct yaml_dt_state *dt,
 	void *s, *e, *data;
 	int l1, l2;
 
+	if (!np)
+		return;
+
 	list_for_each_entry(prop, &np->properties, node) {
 
 		data = dtb->area[dt_strings].data;
@@ -1408,6 +1425,9 @@ static void dtb_build_string_table(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
 
+	if (!tree_root(to_tree(dt)))
+		return;
+
 	if (!dtb->compatible)
 		dtb_build_string_table_minimal(dt);
 	else
@@ -1445,6 +1465,9 @@ static void flatten_node(struct yaml_dt_state *dt, struct node *np)
 
 static void dtb_flatten_node(struct yaml_dt_state *dt)
 {
+	if (!tree_root(to_tree(dt)))
+		return;
+
 	flatten_node(dt, tree_root(to_tree(dt)));
 	dt_emit_32(dt, dt_struct, FDT_END, false);
 }
@@ -1999,6 +2022,9 @@ static void dtb_dump(struct yaml_dt_state *dt)
 {
 	struct node *np;
 	struct list_head *ref_nodes;
+
+	if (!tree_root(to_tree(dt)))
+		return;
 
 	if (!dt->cfg.debug)
 		return;

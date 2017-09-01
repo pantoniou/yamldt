@@ -1007,6 +1007,7 @@ static int hash(struct dts_state *ds, char c)
 		"error",
 		"warning",
 		"pragma",
+		"line",
 		NULL,
 	};
 	const char *s;
