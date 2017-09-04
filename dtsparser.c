@@ -150,6 +150,8 @@ static const char *states_txt[] = {
 	[s_node_del_name]		= "node_del_name",
 	[s_prop_del]			= "prop_del",
 	[s_prop_del_name]		= "prop_del_name",
+	[s_prop_macro]			= "prop_macro",
+	[s_prop_macro_args]		= "prop_macro_args",
 };
 
 struct dts_emit_list_item {
@@ -444,19 +446,23 @@ static int dts_generate_property_items(struct dts_state *ds,
 		if (atom == dea_bits) {
 			li_bits = li;
 
-		} else if (is_string_atom(atom)) {
+		} else if (is_string_atom(atom) || atom == dea_expr) {
 
 			lit = li;
 
 			/* count string items and check */
 			nr_elems = 1;
-			list_for_each_entry_continue(li, &ds->items, node) {
-				atom = li->item.atom;
-				if (atom == dea_comment)
-					continue;
-				if (!is_string_atom(atom))
-					break;
-				nr_elems++;
+
+			/* macros can't be grouped */
+			if (atom != dea_expr) {
+				list_for_each_entry_continue(li, &ds->items, node) {
+					atom = li->item.atom;
+					if (atom == dea_comment)
+						continue;
+					if (!is_string_atom(atom))
+						break;
+					nr_elems++;
+				}
 			}
 
 			size = sizeof(*pli) +
@@ -1362,6 +1368,12 @@ static int property(struct dts_state *ds, char c)
 		return 0;
 	}
 
+	if (ismacroc(c, true)) {
+		accumulate(ds, c);
+		goto_state(ds, s_prop_macro);
+		return 0;
+	}
+
 	dts_error(ds, "bad property item start '%c'\n", c);
 	return -1;
 }
@@ -2093,6 +2105,80 @@ static int prop_del_name(struct dts_state *ds, char c)
 	return -1;
 }
 
+static int prop_macro(struct dts_state *ds, char c)
+{
+	const char *buf;
+	struct dts_emit_list_item *li;
+	int ret;
+
+	if (c == ';' || c == ',' || isspace(c)) {
+		buf = get_accumulator(ds);
+		dts_debug(ds, "prop expr (define) %s\n", buf);
+		li = item_from_accumulator(ds, dea_expr);
+		if (!li)
+			return -1;
+		reset_accumulator(ds);
+		if (c == ';') {
+			ret = dts_emit(ds, det_property);
+			if (ret)
+				return ret;
+			goto_state(ds, s_nodes_and_properties);
+		} else
+			goto_state(ds, s_property);
+		return 0;
+	}
+	if (c != '(' && !ismacroc(c, false)) {
+		dts_error(ds, "bad macro char '%c'\n", c);
+		return -1;
+	}
+	accumulate(ds, c);
+	if (c == '(') {
+		ds->expr_nest = 1;
+		goto_state(ds, s_prop_macro_args);
+		return 0;
+	}
+	return 0;
+}
+
+static int prop_macro_args(struct dts_state *ds, char c)
+{
+	const char *buf;
+	struct dts_emit_list_item *li;
+
+	if (c == ')') {
+		if (ds->expr_nest == 0) {
+			dts_error(ds, "bad expression\n");
+			return -1;
+		}
+		accumulate(ds, c);
+		ds->expr_nest--;
+		if (ds->expr_nest == 0) {
+			buf = get_accumulator(ds);
+			dts_debug(ds, "prop expr (macro with args) %s\n", buf);
+			li = item_from_accumulator(ds, dea_expr);
+			if (!li)
+				return -1;
+			reset_accumulator(ds);
+			goto_state(ds, s_property);
+		}
+		return 0;
+	}
+
+	if (c == '(') {
+		accumulate(ds, c);
+		ds->expr_nest++;
+		return 0;
+	}
+
+	if (c == '\n' && ds->last_c != '\\') {
+		dts_error(ds, "bad macro expansion\n");
+		return -1;
+	}
+
+	accumulate(ds, c);
+	return 0;
+}
+
 static int (*states[])(struct dts_state *ds, char c) = {
 	[s_start] 			= start,
 	[s_headers]			= headers,
@@ -2132,6 +2218,8 @@ static int (*states[])(struct dts_state *ds, char c) = {
 	[s_node_del_name]		= node_del_name,
 	[s_prop_del]			= prop_del,
 	[s_prop_del_name]		= prop_del_name,
+	[s_prop_macro]			= prop_macro,
+	[s_prop_macro_args]		= prop_macro_args,
 	NULL
 };
 

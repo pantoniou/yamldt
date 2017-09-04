@@ -280,7 +280,8 @@ static void d2y_emit_comment_line(struct d2y_state *d2y,
 	};
 	const char *s;
 	const char **ss;
-	int len;
+	char c;
+	int i, len;
 
 	fprintf(d2y->outfp, "%*s", d2y->leading + depth * d2y->shift, "");
 	fprintf(d2y->outfp, "#");
@@ -301,7 +302,12 @@ static void d2y_emit_comment_line(struct d2y_state *d2y,
 				break;
 			}
 		}
-		fwrite(line, count, 1, d2y->outfp);
+		for (i = 0; i < count; i++) {
+			c = line[i];
+			/* only output characters that are printable */
+			if (isprint(c))
+				fputc(c, d2y->outfp);
+		}
 	}
 	fprintf(d2y->outfp, "\n");
 }

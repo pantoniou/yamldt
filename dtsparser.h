@@ -76,9 +76,11 @@ enum file_state {
 	s_node_del_name,
 	s_prop_del,
 	s_prop_del_name,
+	s_prop_macro,
+	s_prop_macro_args,
 
 	s_first = s_start,
-	s_last = s_prop_del_name,
+	s_last = s_prop_macro_args,
 };
 
 enum dts_message_type {
