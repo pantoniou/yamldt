@@ -957,7 +957,8 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 		dt_debug(dt, "Deleting empty tree marker %s at %s\n",
 				prop->name[0] ? prop->name : "-",
 				dn_fullname(np, namebuf, sizeof(namebuf)));
-		prop_del(to_tree(dt), prop);
+		prop_free(to_tree(dt), prop);
+		prop = NULL;
 
 	} else {
 
@@ -982,8 +983,6 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 						prop->name,
 						dn_fullname(np, namebuf, sizeof(namebuf)));
 
-				prop_del(to_tree(dt), prop);
-
 				for_each_child_of_node_safe(np, child, childn) {
 					if (strcmp(child->name, prop->name))
 						continue;
@@ -991,8 +990,10 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 					dt_debug(dt, "deleting child %s\n",
 						dn_fullname(child, &namebuf[0], sizeof(namebuf)));
 
-					node_free(to_tree(dt), child);
+					node_del(to_tree(dt), child);
 				}
+
+				prop_free(to_tree(dt), prop);
 
 			} else {
 				dt_debug(dt, "appending property %s at %s\n",
@@ -1009,10 +1010,7 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 						prop->name,
 						dn_fullname(np, namebuf, sizeof(namebuf)));
 
-				if (dt->cfg.compatible)
-					prop->deleted = true;
-				else
-					prop_del(to_tree(dt), prop);
+				prop_del(to_tree(dt), prop);
 
 			} else
 				dt_debug(dt, "updating property %s at %s\n",
@@ -1324,11 +1322,15 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 		found_existing = false;
 		if (dt->current_np) {
-			for_each_child_of_node(dt->current_np, np) {
+			/* note that we match on deleted too */
+			for_each_child_of_node_withdel(dt->current_np, np) {
 				/* match on same name or root */
 				if (!strcmp(dt->map_key, np->name) ||
 					(dt->map_key == '\0' && np->name[0] == '\0')) {
 					found_existing = true;
+					/* resurrect? */
+					if (np->deleted)
+						np->deleted = false;
 					break;
 				}
 			}

@@ -129,7 +129,6 @@ struct tree_ops {
 struct tree {
 	struct node *root;
 	struct list_head ref_nodes;
-	struct list_head del_props;
 	const struct tree_ops *ops;
 };
 
@@ -146,11 +145,6 @@ static inline void tree_set_root(struct tree *t, struct node *np)
 static inline struct list_head *tree_ref_nodes(struct tree *t)
 {
 	return &t->ref_nodes;
-}
-
-static inline struct list_head *tree_del_props(struct tree *t)
-{
-	return &t->del_props;
 }
 
 /* children list accessors */
@@ -235,6 +229,8 @@ void prop_ref_clear(struct tree *t, struct property *prop);
 
 struct node *node_alloc(struct tree *t, const char *name, const char *label);
 void node_free(struct tree *t, struct node *np);
+void node_clear(struct tree *t, struct node *np);
+void node_del(struct tree *t, struct node *np);
 
 struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len);

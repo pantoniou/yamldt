@@ -105,14 +105,7 @@ void prop_free(struct tree *t, struct property *prop)
 
 void prop_del(struct tree *t, struct property *prop)
 {
-	assert(t && prop);
-
-	if (prop->np) {
-		list_del(&prop->node);
-		prop->np = NULL;
-	}
 	prop->deleted = true;
-	list_add_tail(&prop->node, &t->del_props);
 }
 
 void prop_ref_clear(struct tree *t, struct property *prop)
@@ -187,7 +180,7 @@ struct node *node_alloc(struct tree *t, const char *name,
 	return np;
 }
 
-void node_free(struct tree *t, struct node *np)
+void node_clear(struct tree *t, struct node *np)
 {
 	struct node *child, *childn;
 	struct property *prop, *propn;
@@ -199,15 +192,43 @@ void node_free(struct tree *t, struct node *np)
 		node_free(t, child);
 
 	for_each_property_of_node_safe_withdel(np, prop, propn)
-		prop_del(t, prop);
+		prop_free(t, prop);
 
 	for_each_label_of_node_safe(np, l, ln)
 		label_free(t, l);
+}
+
+void node_free(struct tree *t, struct node *np)
+{
+	assert(t && np);
+
+	node_clear(t, np);
 
 	if (np->parent)
 		list_del(&np->node);
 
 	t->ops->node_free(t, np);
+}
+
+void node_del(struct tree *t, struct node *np)
+{
+	struct node *child;
+	struct property *prop;
+	struct label *l, *ln;
+
+	assert(t && np);
+
+	for_each_child_of_node(np, child)
+		node_del(t, child);
+
+	for_each_property_of_node(np, prop)
+		prop_del(t, prop);
+
+	/* labels get deleted */
+	for_each_label_of_node_safe(np, l, ln)
+		label_free(t, l);
+
+	np->deleted = true;
 }
 
 static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
@@ -451,14 +472,12 @@ void tree_init(struct tree *t, const struct tree_ops *ops)
 
 	t->root = NULL;
 	INIT_LIST_HEAD(&t->ref_nodes);
-	INIT_LIST_HEAD(&t->del_props);
 	t->ops = ops;
 }
 
 void tree_cleanup(struct tree *t)
 {
 	struct node *np, *npn;
-	struct property *prop, *propn;
 
 	/* free the root */
 	if (t->root)
@@ -471,10 +490,6 @@ void tree_cleanup(struct tree *t)
 		assert(!np->parent);
 		node_free(t, np);
 	}
-
-	/* free the deleted properties */
-	list_for_each_entry_safe(prop, propn, &t->del_props, node)
-		prop_free(t, prop);
 }
 
 /* clear any crud that shouldn't be part of the base tree */
@@ -488,7 +503,7 @@ static void sanitize_base(struct tree *t, struct node *np)
 		if (prop->is_delete || !strcmp(prop->name, "~")) {
 			tree_debug(t, "removing property %s @%s\n",
 				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
-			prop_del(t, prop);
+			prop_free(t, prop);
 		}
 	}
 
@@ -509,7 +524,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 	if (np->is_delete) {
 		tree_debug(t, "deleting node @%s\n",
 			dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
-		node_free(t, npref);
+		node_del(t, npref);
 		return;
 	}
 
@@ -541,10 +556,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 					propref->name,
 					dn_fullname(npref, &namebuf[0][0], sizeof(namebuf[0])));
 
-				if (compatible)
-					propref->deleted = true;
-				else
-					prop_del(t, propref);
+				prop_del(t, propref);
 			}
 
 			for_each_child_of_node_safe(npref, childref, childrefn) {
@@ -555,10 +567,10 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 					dn_fullname(childref, &namebuf[0][0], sizeof(namebuf[0])),
 					dn_fullname(npref, &namebuf[1][0], sizeof(namebuf[1])));
 
-				node_free(t, childref);
+				node_del(t, childref);
 			}
 
-			prop_del(t, prop);
+			prop_free(t, prop);
 			continue;
 		}
 
@@ -583,7 +595,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 			list_add(&prop->node, &propref->node);
 			list_del(&propref->node);
 			propref->np = NULL;
-			prop_del(t, propref);
+			prop_free(t, propref);
 		} else /* move property over to new parent */
 			list_add_tail(&prop->node, &npref->properties);
 	}
@@ -592,8 +604,12 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 
 		/* find matching child */
 		found = false;
-		for_each_child_of_node(npref, childref) {
+		/* note, we match on deleted nodes as well */
+		for_each_child_of_node_withdel(npref, childref) {
 			if (!strcmp(childref->name, child->name)) {
+				/* ressurect? */
+				if (childref->deleted)
+					childref->deleted = false;
 				found = true;
 				break;
 			}
