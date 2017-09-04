@@ -1,0 +1,25 @@
+/dts-v1/;
+
+/ {
+	foo_label: foo {
+		this-is-foo;
+	};
+};
+
+&foo_label {
+	this-is-foo-label;
+};
+
+&{/foo} {
+	this-is-foo-pathref;
+};
+
+/ {
+	test = < 1 \
+	2 \
+	3 \
+	\
+	4
+	>;
+};
+

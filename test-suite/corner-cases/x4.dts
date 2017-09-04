@@ -1,0 +1,15 @@
+
+/dts-v1/;
+
+// #include "stdio.h"
+
+/ {
+	#address-cells = <1>;
+	// #include <something>
+	test#prop = <2>;
+	foo: foo {
+	};
+};
+
+&foo {
+};

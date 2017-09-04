@@ -1,0 +1,11 @@
+/dts-v1/;
+
+/ {
+	a: foo {
+		this = <0>;
+	};
+};
+
+/ {
+	/delete-node/foo;
+};

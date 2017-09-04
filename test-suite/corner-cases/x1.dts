@@ -1,0 +1,111 @@
+/*
+ * dtc2yaml.c - Convert DTC to YAML filter
+ *
+ * Converts DTC to YAML
+ *
+ * (C) Copyright Pantelis Antoniou <pantelis.antoniou@konsulko.com>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *     (1) Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *
+ *     (2) Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in
+ *     the documentation and/or other materials provided with the
+ *     distribution.
+ *
+ *     (3)The name of the author may not be used to
+ *     endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/* testing */
+   // more testing:
+/dts-v1/;
+
+// #include "something.dtsi" /* this is a preproc comment test */
+// #include <stdio.h>
+
+/* memreserves */
+
+/memreserve/ 10000 100;
+
+/memreserve/ 20000    200;
+
+/ {
+	compatible = "foo;  { }    /bits 16/ \" ";
+	#address-cells = <1>;
+	ref = &label2;
+	simple-ref =<&label2>;
+	test-64 = /bits/ 64 <100>;
+	test-str-mult = "1-str", "2-str";
+	test-arr-mult = <1>, <2>, <3>;
+
+	/* this is foo node */
+	/* there are many like it but this is mine */
+	label: foo {
+		bar = <&label (10 + 10 - 4) &{/foo} /* comment */ >;
+		test-bits = /bits/ 16 <8 8 >;
+		mac = [ 10 40 40 6070ff32];
+		boolean;
+
+		/**
+		* subnodes to me, subnodes to you
+		* flowers are red and so are we
+		*/
+		another-subnode@1 {
+			this-is-sub = "Hello";
+		};
+	};
+
+	/**
+	 * a whisky bar is what we must find
+	 *
+	 */
+	label2: bar {
+		this-is-bar;
+		bad-array = < 0x10>;
+//		char = < 'a' '\n' '\x10' '\xff' >;
+	};
+
+	label3: baz {
+	};
+};
+
+&label {
+	test = <5>;
+	more-str = "hello", <10 12>, [10 23], < 'a' '\n' >, &label;
+	// macro = <&label GPIO GPIO2(10, 20, (30 >= 5) + 1) >;
+};
+
+&{/foo} {
+	this-is-path-ref;
+};
+
+// /include/ "xx.dtsi"
+
+// /delete-node/ &label;
+/delete-node/ &{/foo};
+/ {
+	/delete-property/ compatible;
+	/delete-node/ baz;
+};
+
+// &label3 {
+//	testing;
+//};

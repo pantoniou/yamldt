@@ -1,0 +1,17 @@
+/dts-v1/;
+
+/ {
+	a: foo {
+		foo;
+	};
+};
+
+/ {
+	a: baz {
+		baz;
+	};
+};
+
+/ {
+	/delete-node/ foo;
+};

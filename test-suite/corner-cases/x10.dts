@@ -1,0 +1,23 @@
+/dts-v1/;
+
+/ {
+	a: foo {
+		before0;
+		this = <0>;
+		after0;
+	};
+};
+
+&a {
+	before1;
+	this = <1>;
+	after1;
+};
+
+/ {
+	foo {
+		before2;
+		this = <2>;
+		after2;
+	};
+};

@@ -1,0 +1,32 @@
+/dts-v1/;
+
+/ {
+	a: foo {
+		n1 {
+			n1;
+		};
+		bar {
+			foo-bar;
+		};
+		baz {
+			foo-baz;
+		};
+		n2 {
+			n2;
+		};
+	};
+};
+
+/ {
+	foo {
+		/delete-node/ bar;
+		/delete-node/ baz;
+
+		bar {
+			del-bar;
+		};
+		baz {
+			del-baz;
+		};
+	};
+};

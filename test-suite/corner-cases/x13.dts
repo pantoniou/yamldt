@@ -1,0 +1,7 @@
+/dts-v1/;
+
+/memreserve/ 100 100;
+/memreserve/ 100 100;
+
+/ {
+};

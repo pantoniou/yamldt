@@ -1,0 +1,19 @@
+/*
+ * Copyright (C) 2014 PHYTEC Messtechnik GmbH
+ * Author: Wadim Egorov <w.egorov@phytec.de>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
+/dts-v1/;
+
+#define GIC_PPI 10
+#define GIC_CPU_MASK_SIMPLE(x)	((x) + 32)
+#define IRQ_TYPE_LEVEL_HIGH 1
+
+/ {
+	interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
+	ti,x-min = /bits/ 16 <0x0>;
+};

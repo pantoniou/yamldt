@@ -10,7 +10,6 @@ CPPFLAGS ?= -I ./ -I $(TOPDIR)/test-suite \
 	 -I $(TOPDIR)/include/dt-bindings/input \
 	 -nostdinc -undef -D__DTS__ -x assembler-with-cpp
 DTC ?= dtc
-# DTCFLAGS ?= -@ -q
 DTCFLAGS ?= -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
@@ -70,8 +69,8 @@ check: $(DIFFS)
 
 clean:
 	rm -f $(DIFFS) $(DTBS) $(YAMLDTBS) $(FDTDUMPS) $(CPPS) $(YAMLS)
-	rm -f *.yaml
-	rm -f *.yamli
+	find ./ -name '*.yaml' -print | xargs rm -f
+	find ./ -name '*.yamli' -print | xargs rm -f
 	rm -f *.cpp.yaml *.cpp.dts
 
 $(YAMLS): $(DTSS)

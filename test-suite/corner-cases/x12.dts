@@ -1,0 +1,21 @@
+/dts-v1/;
+
+/ {
+	foo {
+		one;
+		aa: baz {
+			three;
+		};
+	};
+};
+
+/ {
+	d: e: foo {
+		two;
+		g: bar {
+			three;
+		};
+	};
+	e: foo {
+	};
+};
