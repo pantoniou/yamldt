@@ -1360,10 +1360,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				np = node_lookup_by_label(to_tree(dt), label,
 						strlen(label));
 				if (np) {
-					dt_debug(dt, "Node %s with duplicate label %s\n",
-						dt->map_key, label);
 					/* in compatible mode we allow it */
 					if (!dt->cfg.compatible) {
+						dt_warning_at(dt, &dt->current_mark,
+							"node %s with duplicate label %s; removing\n",
+							dt->map_key, label);
 						label = NULL;
 						np = NULL;
 					}

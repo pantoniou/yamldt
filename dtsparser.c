@@ -728,7 +728,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		if (d.pn.items)
 			free(d.pn.items);
 		if (d.pn.labels)
-			free(d.pn.items);
+			free(d.pn.labels);
 	}
 
 	reset_item_list(ds);
@@ -1755,7 +1755,7 @@ static int item_expr(struct dts_state *ds, char c)
 				return -1;
 			reset_accumulator(ds);
 			goto_state(ds, s_array);
-		} else 
+		} else
 			accumulate(ds, c);
 		return 0;
 	}
@@ -2295,10 +2295,7 @@ int dts_feed(struct dts_state *ds, int c)
 	if (c == '\n') {
 		ds->line++;
 		ds->col = 1;
-	} else if (c == '\t')
-		ds->col = ((ds->col + ds->tabs - 1) / ds->tabs) *
-				ds->tabs + 1;
-	else
+	} else
 		ds->col++;
 
 	return 0;

@@ -78,6 +78,7 @@ struct d2y_state {
 	FILE *outfp;
 	struct list_head *includes;
 	struct dts_state ds;
+	struct acc_state acc_file;
 };
 
 #define to_d2y(_ds)	container_of(_ds, struct d2y_state, ds)
@@ -136,10 +137,15 @@ static void d2y_message(struct dts_state *ds, enum dts_message_type type,
 {
 	struct d2y_state *d2y = to_d2y(ds);
 	va_list ap;
-	const char *emph = "", *reset = "";
+	const char *emph = "", *reset = "", *marker = "";
 	const char *kind, *kindemph;
 	const char *filename;
-	int line, col, tline, tcol;
+	int i, len, line, col, tline, tcol;
+	const char *s, *ls, *e;
+	char *linebuf;
+	FILE *fp;
+	char *buf;
+	size_t size;
 
 	if (d2y->silent || (!d2y->debug && type == dmt_info))
 		return;
@@ -148,6 +154,7 @@ static void d2y_message(struct dts_state *ds, enum dts_message_type type,
 	     d2y->color == 1) {
 		emph = WHITE;
 		reset = RESET;
+		marker = GREEN;
 	}
 
 	switch (type) {
@@ -182,14 +189,57 @@ static void d2y_message(struct dts_state *ds, enum dts_message_type type,
 	(void)tline;
 	(void)tcol;
 
-	fprintf(stderr, "%s%s:%d:%d: %s%s%s",
-			emph, filename, line, col,
-			kindemph, kind, emph);
+	s = acc_get(&d2y->acc_file);
+	e = s + acc_get_size(&d2y->acc_file);
+	linebuf = NULL;
+	i = 1;
+	while (s < e && i <= line) {
+		ls = strchr(s, '\n');
+		if (!ls)
+			ls = e;
+
+		if (i == line) {
+			len = ls - s;
+			linebuf = alloca(len + 1);
+			memcpy(linebuf, s, len);
+			linebuf[len] = '\0';
+			for (i = 0; i < len; i++) {
+				if (isspace(linebuf[i]))
+					linebuf[i] = ' ';
+			}
+			break;
+		}
+
+		i++;
+		s = ls + 1;
+	}
+
+	fp = open_memstream(&buf, &size);
+	assert(fp);
 
 	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
+	vfprintf(fp, fmt, ap);
 	va_end(ap);
-	fprintf(stderr, "%s", reset);
+
+	fclose(fp);
+
+	len = strlen(buf);
+	while (len > 1 && buf[len - 1] == '\n')
+		buf[--len] = '\0';
+
+	fprintf(stderr, "%s%s:%d:%d: %s%s%s%s%s\n",
+			emph, filename, line, col,
+			kindemph, kind, emph, buf, reset);
+
+	free(buf);
+
+	if (linebuf) {
+		fprintf(stderr, " %s\n %*s%s^",
+				linebuf, col - 1, "", marker);
+		while (++col < tcol - 1)
+			fprintf(stderr, "~");
+		fprintf(stderr, "%s\n", reset);
+	}
 }
 
 static int d2y_emit_bits(struct d2y_state *d2y,
@@ -360,7 +410,7 @@ static void d2y_emit_top_level_comment(struct d2y_state *d2y, int depth,
 			while (isspace(*s))
 				s++;
 		}
-		
+
 		if (*s == '*') {
 			while (*s == '*')
 				s++;
@@ -668,9 +718,10 @@ static int convert_one(const char *filename, const char *outfilename,
 	const char *thisoutfilename;
 	struct d2y_state d2y_state, *d2y = &d2y_state;
 	struct dts_state *ds = to_ds(d2y);
-	int ret, c;
+	int ret, c, i, j;
 	char tmp[PATH_MAX];
 	const char *s;
+	bool got_eof;
 
 	memset(d2y, 0, sizeof(*d2y));
 
@@ -708,6 +759,7 @@ static int convert_one(const char *filename, const char *outfilename,
 	d2y->shift = shift;
 	d2y->leading = leading;
 	d2y->includes = includes;
+	acc_setup(&d2y->acc_file);
 
 	ret = dts_setup(ds, filename, tabs, &d2y_ops);
 	if (ret) {
@@ -743,13 +795,36 @@ static int convert_one(const char *filename, const char *outfilename,
 	dts_debug(ds, "opened %s for YAML output\n", d2y->filename);
 
 	ret = 0;
-	do {
-		c = getc(d2y->fp);
-		ret = dts_feed(ds, c);
-		if (ret < 0) 
-			break;
-	} while (c != EOF);
 
+	do {
+		/* read a line */
+		i = acc_get_size(&d2y->acc_file);
+		while ((c = getc(d2y->fp)) != EOF && c != '\n') {
+			/* accumulate */
+			ret = acc_add(&d2y->acc_file, c);
+			if (ret < 0) {
+				dts_error(ds, "out of memory\n");
+				break;
+			}
+		}
+		got_eof = c == EOF;
+		if (!got_eof) {
+			ret = acc_add(&d2y->acc_file, '\n');
+			if (ret)
+				break;
+		}
+
+		j = acc_get_size(&d2y->acc_file);
+		s = acc_get(&d2y->acc_file);
+		while (i < j && !ret)
+			ret = dts_feed(ds, s[i++]);
+
+		if (!ret && got_eof)
+			ret = dts_feed(ds, EOF);
+
+	} while (!ret && !got_eof);
+
+	acc_cleanup(&d2y->acc_file);
 	fclose(d2y->outfp);
 	fclose(d2y->fp);
 
