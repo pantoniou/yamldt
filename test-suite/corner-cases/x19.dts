@@ -1,0 +1,7 @@
+/dts-v1/;
+
+#define FOO "string"
+
+/ {
+	str = FOO;
+};
