@@ -1910,6 +1910,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 		dtb_create_overlay_structure(dt);
 
 	tree_apply_ref_nodes(to_tree(dt), dtb->object, dtb->compatible);
+	tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */

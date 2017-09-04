@@ -195,6 +195,8 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 			 struct node *np, bool compatible);
 void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible);
 
+int tree_detect_duplicate_labels(struct tree *t, struct node *np);
+
 /* this should be enough */
 #define NODE_FULLNAME_MAX	4096
 const char *dn_fullname_multi(struct node *np, char **buf, int *size);

@@ -137,7 +137,7 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 
 	assert(t && np && label);
 
-	/* do not add duplicate */
+	/* do not add duplicate label in same node */
 	list_for_each_entry(l, &np->labels, node) {
 		if (!strcmp(l->label, label))
 			return NULL;
@@ -211,7 +211,7 @@ void node_free(struct tree *t, struct node *np)
 }
 
 static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
-		const char *label, int len)
+		const char *label, int len, struct node *npskip)
 {
 	struct node *child, *found;
 	struct label *l;
@@ -223,8 +223,8 @@ static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
 	}
 
 	list_for_each_entry(child, &np->children, node) {
-		found = __node_lookup_by_label(t, child, label, len);
-		if (found)
+		found = __node_lookup_by_label(t, child, label, len, npskip);
+		if (found && found != npskip)
 			return found;
 	}
 	return NULL;
@@ -239,7 +239,7 @@ struct node *node_lookup_by_label(struct tree *t,
 	if (len < 0)
 		len = strlen(label);
 
-	return __node_lookup_by_label(t, t->root, label, len);
+	return __node_lookup_by_label(t, t->root, label, len, NULL);
 }
 
 struct node *node_get_child_by_name(struct tree *t,
@@ -673,4 +673,30 @@ void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 		} else
 			node_free(t, np);
 	}
+}
+
+int tree_detect_duplicate_labels(struct tree *t, struct node *np)
+{
+	struct label *l;
+	struct node *child, *npref;
+	int ret;
+
+	list_for_each_entry(l, &np->labels, node) {
+		npref = __node_lookup_by_label(t, tree_root(t),
+				l->label, strlen(l->label), np);
+		if (npref) {
+			tree_error_at_node(t, np,
+				"duplicate label %s\n",
+				l->label);
+			return -1;
+		}
+	}
+
+	list_for_each_entry(child, &np->children, node) {
+		ret = tree_detect_duplicate_labels(t, child);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }

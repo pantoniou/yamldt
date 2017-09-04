@@ -1360,8 +1360,11 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				if (np) {
 					dt_debug(dt, "Node %s with duplicate label %s\n",
 						dt->map_key, label);
-					label = NULL;
-					np = NULL;
+					/* in compatible mode we allow it */
+					if (!dt->cfg.compatible) {
+						label = NULL;
+						np = NULL;
+					}
 				}
 			}
 

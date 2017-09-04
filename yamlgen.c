@@ -429,6 +429,7 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 int yaml_emit(struct yaml_dt_state *dt)
 {
 	tree_apply_ref_nodes(to_tree(dt), dt->cfg.object, false);
+	tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
 	yaml_assign_temp_labels(to_tree(dt));
 	yaml_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
 
