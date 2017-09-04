@@ -65,6 +65,7 @@ struct node {
 	struct list_head labels;
 	char *name;
 	bool is_delete : 1;	/* set to true it is signals deletion */
+	bool deleted : 1;
 };
 
 struct label {
@@ -151,6 +152,68 @@ static inline struct list_head *tree_del_props(struct tree *t)
 {
 	return &t->del_props;
 }
+
+/* children list accessors */
+#define for_each_child_of_node(np, child) \
+	list_for_each_entry(child, &(np)->children, node) \
+		if (!(child)->deleted)
+
+#define for_each_child_of_node_safe(np, child, childn) \
+	list_for_each_entry_safe(child, childn, &(np)->children, node) \
+		if (!(child)->deleted)
+
+#define for_each_child_of_node_withdel(np, child) \
+	list_for_each_entry(child, &(np)->children, node)
+
+#define for_each_child_of_node_safe_withdel(np, child, childn) \
+	list_for_each_entry_safe(child, childn, &(np)->children, node) 
+
+#define first_child_of_node(np) \
+	list_entry(&(np)->children, struct node, node)
+
+/* property list accessors */
+#define for_each_property_of_node(np, prop) \
+	list_for_each_entry(prop, &(np)->properties, node) \
+		if (!(prop)->deleted)
+
+#define for_each_property_of_node_safe(np, prop, propn) \
+	list_for_each_entry_safe(prop, propn, &(np)->properties, node) \
+		if (!(prop)->deleted)
+
+#define for_each_property_of_node_withdel(np, prop) \
+	list_for_each_entry(prop, &(np)->properties, node)
+
+#define for_each_property_of_node_safe_withdel(np, prop, propn) \
+	list_for_each_entry_safe(prop, propn, &(np)->properties, node) 
+
+#define first_property_of_node(np) \
+	list_entry(&(np)->properties, struct property, node)
+
+/* ref list accessors */
+#define for_each_ref_of_property(prop, ref) \
+	list_for_each_entry(ref, &(prop)->refs, node)
+
+#define for_each_ref_of_property_safe(prop, ref, refn) \
+	list_for_each_entry_safe(ref, refn, &(prop)->refs, node)
+
+#define for_each_ref_of_property_continue(prop, ref) \
+	list_for_each_entry_continue(ref, &(prop)->refs, node)
+
+#define first_ref_of_property(prop) \
+	list_entry(&(prop)->refs, struct ref, node)
+
+/* label list accessors */
+#define for_each_label_of_node(np, l) \
+	list_for_each_entry(l, &(np)->labels, node)
+
+#define for_each_label_of_node_safe(np, l, ln) \
+	list_for_each_entry_safe(l, ln, &(np)->labels, node)
+
+#define for_each_label_of_node_continue(np, l) \
+	list_for_each_entry_continue(l, &(np)->labels, node)
+
+#define first_label_of_node(np) \
+	list_entry(&(np)->labels, struct label, node)
 
 void tree_init(struct tree *t, const struct tree_ops *ops);
 void tree_cleanup(struct tree *t);

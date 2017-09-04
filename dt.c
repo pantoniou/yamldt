@@ -963,7 +963,7 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 
 		/* detect whether it's a delete property */
 		nrefs = nnulls = 0;
-		list_for_each_entry_safe(ref, refn, &prop->refs, node) {
+		for_each_ref_of_property_safe(prop, ref, refn) {
 			nrefs++;
 			if ((!ref->xtag || !strcmp(ref->xtag, "!null")) &&
 			((ref->len == 4 && !memcmp(ref->data, "null", 4)) ||
@@ -984,7 +984,7 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 
 				prop_del(to_tree(dt), prop);
 
-				list_for_each_entry_safe(child, childn, &np->children, node) {
+				for_each_child_of_node_safe(np, child, childn) {
 					if (strcmp(child->name, prop->name))
 						continue;
 
@@ -1323,8 +1323,8 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		}
 
 		found_existing = false;
-		if (dt->current_np && !dt->cfg.late) {
-			list_for_each_entry(np, &dt->current_np->children, node) {
+		if (dt->current_np) {
+			for_each_child_of_node(dt->current_np, np) {
 				/* match on same name or root */
 				if (!strcmp(dt->map_key, np->name) ||
 					(dt->map_key == '\0' && np->name[0] == '\0')) {
@@ -1478,7 +1478,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			found_existing = false;
 			assert(np);
 			if (strcmp(dt->map_key, "/memreserve/")) {
-				list_for_each_entry(prop, &np->properties, node) {
+				for_each_property_of_node_withdel(np, prop) {
 					if (!strcmp(prop->name, dt->map_key)) {
 						found_existing = true;
 						/* bring it back to life */
@@ -1648,7 +1648,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 				/* memreserve is special; allow it to be present many times */
 				if (dt->map_key && strcmp(dt->map_key, "/memreserve/")) {
 					assert(np);
-					list_for_each_entry(prop, &np->properties, node) {
+					for_each_property_of_node_withdel(np, prop) {
 						if (!strcmp(prop->name, dt->map_key)) {
 							found_existing = true;
 							/* bring it back to life */
@@ -1705,7 +1705,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 		if (!prop) {
 			found_existing = false;
 			if (dt->map_key) {
-				list_for_each_entry(prop, &np->properties, node) {
+				for_each_property_of_node_withdel(np, prop) {
 					if (!strcmp(prop->name, dt->map_key)) {
 						found_existing = true;
 						/* bring it back to life */

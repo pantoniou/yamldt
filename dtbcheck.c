@@ -349,10 +349,10 @@ static int count_constraints_single(struct yaml_dt_state *dt, struct node *np)
 	count = dt_get_rcount(sdt, np, "constraint", 0);
 
 	/* constraints of the properties */
-	list_for_each_entry(child, &np->children, node) {
+	for_each_child_of_node(np, child) {
 		if (strcmp(child->name, "properties"))
 			continue;
-		list_for_each_entry(npp, &child->children, node) {
+		for_each_child_of_node(child, npp) {
 			constraint_count = dt_get_rcount(sdt, npp, "constraint", 0);
 			if (dt_get_string(sdt, npp, "type", 0, 0))
 				constraint_count++;
@@ -664,7 +664,7 @@ static void collect_constraint_node(struct yaml_dt_state *dt,
 				for (m = top; m >= 0 && (npt = npstack[m]); m--) {
 					for (n = 0; (npp = dt_get_node(sdt, npt, "properties", n)); n++) {
 
-						list_for_each_entry(nppt, &npp->children, node) {
+						for_each_child_of_node(npp, nppt) {
 
 							/* property name must match */
 							if (strcmp(nppt->name, propname))
@@ -683,7 +683,7 @@ static void collect_constraint_node(struct yaml_dt_state *dt,
 		for (m = top; m >= 0 && (npt = npstack[m]); m--) {
 			for (n = 0; (npp = dt_get_node(sdt, npt, "properties", n)); n++) {
 
-				list_for_each_entry(nppt, &npp->children, node) {
+				for_each_child_of_node(npp, nppt) {
 
 					collect_constraint_check_default(dt, npstack, top, stacksz,
 							clist, idxp, nppt, nppt->name);
@@ -905,7 +905,7 @@ static int prepare_schema(struct yaml_dt_state *dt)
 	root = tree_root(to_tree(sdt));
 
 	idx = 0;
-	list_for_each_entry(np, &root->children, node) {
+	for_each_child_of_node(root, np) {
 
 		/* never generate checkers for virtuals */
 		ret = dt_get_bool(sdt, np, "virtual", 0, 0);
@@ -1193,7 +1193,7 @@ static void check_node_single(struct yaml_dt_state *dt,
 		}
 	}
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		check_node_single(dt, child, snp, select_ctx, check_ctx);
 }
 
@@ -1211,7 +1211,7 @@ int dtbchk_check(struct yaml_dt_state *dt)
 	int ret;
 
 	/* check each rule in the root */
-	list_for_each_entry(snp, &sroot->children, node) {
+	for_each_child_of_node(sroot, snp) {
 
 		select = dt_get_binary(sdt, snp, "selected-rule-output",
 				0, 0, &select_size);

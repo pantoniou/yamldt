@@ -272,12 +272,9 @@ void __yaml_assign_temp_labels(struct tree *t, struct node *np, int *next)
 
 	/* for each ref, verify that a label exists */
 	/* if it doesn't create one temporary */
-	list_for_each_entry(prop, &np->properties, node) {
+	for_each_property_of_node(np, prop) {
 
-		if (prop->deleted)
-			continue;
-
-		list_for_each_entry(ref, &prop->refs, node) {
+		for_each_ref_of_property(prop, ref) {
 			if (ref->type != r_anchor)
 				continue;
 
@@ -306,7 +303,7 @@ void __yaml_assign_temp_labels(struct tree *t, struct node *np, int *next)
 		}
 	}
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		__yaml_assign_temp_labels(t, child, next);
 }
 
@@ -332,7 +329,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 				np->name);
 
 		/* output only first label */
-		list_for_each_entry(l, &np->labels, node) {
+		for_each_label_of_node(np, l) {
 			fprintf(fp, " &%s", l->label);
 			break;
 		}
@@ -340,10 +337,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 	}
 
 	outcount = 0;
-	list_for_each_entry(prop, &np->properties, node) {
-
-		if (prop->deleted)
-			continue;
+	for_each_property_of_node(np, prop) {
 
 		outcount++;
 
@@ -356,7 +350,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 			fprintf(fp, "\"%s\":", prop->name);
 
 		count = 0;
-		list_for_each_entry(ref, &prop->refs, node) {
+		for_each_ref_of_property(prop, ref) {
 			if (ref->type == r_seq_start ||
 			    ref->type == r_seq_end)
 				continue;
@@ -367,7 +361,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 			fputs(" [", fp);
 
 		i = 0;
-		list_for_each_entry(ref, &prop->refs, node) {
+		for_each_ref_of_property(prop, ref) {
 
 			if (ref->type == r_seq_start ||
 			    ref->type == r_seq_end)
@@ -390,19 +384,19 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 		fputc('\n', fp);
 	}
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		outcount++;
 
 	/* "~: ~" for an empty tree without props or children */
 	if (outcount == 0)
 		fprintf(fp, "%*s~: ~\n", depth * 2, "");
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		__yaml_flatten_node(t, fp, child, object, depth + 1);
 
 	/* multiple labels to same node; spit out only the labels */
 	if (l && depth > 0) {
-		list_for_each_entry_continue(l, &np->labels, node) {
+		for_each_label_of_node_continue(np, l) {
 			fprintf(fp, "%*s# %s: &%s { }\n", (depth - 1) * 2, "",
 					np->name, l->label);
 		}
@@ -429,7 +423,8 @@ void yaml_cleanup(struct yaml_dt_state *dt)
 int yaml_emit(struct yaml_dt_state *dt)
 {
 	tree_apply_ref_nodes(to_tree(dt), dt->cfg.object, false);
-	tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
+	if (!dt->cfg.object)
+		tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
 	yaml_assign_temp_labels(to_tree(dt));
 	yaml_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
 

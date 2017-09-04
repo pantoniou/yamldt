@@ -97,7 +97,7 @@ void prop_free(struct tree *t, struct property *prop)
 	if (prop->np)
 		list_del(&prop->node);
 
-	list_for_each_entry_safe(ref, refn, &prop->refs, node)
+	for_each_ref_of_property_safe(prop, ref, refn)
 		ref_free(t, ref);
 
 	t->ops->prop_free(t, prop);
@@ -119,7 +119,7 @@ void prop_ref_clear(struct tree *t, struct property *prop)
 {
 	struct ref *ref, *refn;
 
-	list_for_each_entry_safe(ref, refn, &prop->refs, node)
+	for_each_ref_of_property_safe(prop, ref, refn)
 		ref_free(t, ref);
 }
 
@@ -138,7 +138,7 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 	assert(t && np && label);
 
 	/* do not add duplicate label in same node */
-	list_for_each_entry(l, &np->labels, node) {
+	for_each_label_of_node(np, l) {
 		if (!strcmp(l->label, label))
 			return NULL;
 	}
@@ -195,13 +195,13 @@ void node_free(struct tree *t, struct node *np)
 
 	assert(t && np);
 
-	list_for_each_entry_safe(child, childn, &np->children, node)
+	for_each_child_of_node_safe_withdel(np, child, childn)
 		node_free(t, child);
 
-	list_for_each_entry_safe(prop, propn, &np->properties, node)
+	for_each_property_of_node_safe_withdel(np, prop, propn)
 		prop_del(t, prop);
 
-	list_for_each_entry_safe(l, ln, &np->labels, node)
+	for_each_label_of_node_safe(np, l, ln)
 		label_free(t, l);
 
 	if (np->parent)
@@ -216,13 +216,13 @@ static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
 	struct node *child, *found;
 	struct label *l;
 
-	list_for_each_entry(l, &np->labels, node) {
+	for_each_label_of_node(np, l) {
 		if (strlen(l->label) == len &&
 		    !memcmp(l->label, label, len))
 			return np;
 	}
 
-	list_for_each_entry(child, &np->children, node) {
+	for_each_child_of_node(np, child) {
 		found = __node_lookup_by_label(t, child, label, len, npskip);
 		if (found && found != npskip)
 			return found;
@@ -251,7 +251,7 @@ struct node *node_get_child_by_name(struct tree *t,
 	if (!t || !np || !name)
 		return NULL;
 
-	list_for_each_entry(child, &np->children, node) {
+	for_each_child_of_node(np, child) {
 		if (strcmp(child->name, name))
 			continue;
 		if (index == 0)
@@ -290,7 +290,7 @@ struct node *node_lookup_by_path(struct tree *t,
 		namelen = !s ? len : (s - path);
 
 		found = false;
-		list_for_each_entry(child, &np->children, node) {
+		for_each_child_of_node(np, child) {
 			if (strlen(child->name) == namelen &&
 			    !memcmp(child->name, name, namelen)) {
 				found = true;
@@ -341,9 +341,7 @@ struct property *prop_get_by_name(struct tree *t,
 	if (!t || !np || !name)
 		return NULL;
 
-	list_for_each_entry(prop, &np->properties, node) {
-		if (prop->deleted)
-			continue;
+	for_each_property_of_node(np, prop) {
 		if (strcmp(prop->name, name))
 			continue;
 		if (index == 0)
@@ -361,7 +359,7 @@ struct ref *ref_get_by_index(struct tree *t,
 	if (!t || !prop)
 		return NULL;
 
-	list_for_each_entry(ref, &prop->refs, node) {
+	for_each_ref_of_property(prop, ref) {
 		if (ref->type == r_seq_start || ref->type == r_seq_end)
 			continue;
 		if (index == 0)
@@ -486,7 +484,7 @@ static void sanitize_base(struct tree *t, struct node *np)
 	struct property *prop, *propn;
 	char namebuf[NODE_FULLNAME_MAX];
 
-	list_for_each_entry_safe(prop, propn, &np->properties, node) {
+	for_each_property_of_node_safe_withdel(np, prop, propn) {
 		if (prop->is_delete || !strcmp(prop->name, "~")) {
 			tree_debug(t, "removing property %s @%s\n",
 				prop->name, dn_fullname(np, namebuf, sizeof(namebuf)));
@@ -494,7 +492,7 @@ static void sanitize_base(struct tree *t, struct node *np)
 		}
 	}
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		sanitize_base(t, child);
 }
 
@@ -516,7 +514,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 	}
 
 	/* add label to noderef */
-	list_for_each_entry_safe(l, ln, &np->labels, node) {
+	for_each_label_of_node_safe(np, l, ln) {
 		lt = label_add_nolink(t, npref, l->label);
 		if (lt) {
 			if (!compatible)
@@ -527,20 +525,14 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 
 	}
 
-	list_for_each_entry_safe(prop, propn, &np->properties, node) {
-
-		if (prop->deleted)
-			continue;
+	for_each_property_of_node_safe_withdel(np, prop, propn) {
 
 		tree_debug(t, "using property %s @%s\n",
 			prop->name,
 			dn_fullname(np, &namebuf[0][0], sizeof(namebuf[0])));
 
 		if (prop->is_delete) {
-			list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
-
-				if (propref->deleted)
-					continue;
+			for_each_property_of_node_safe(npref, propref, proprefn) {
 
 				if (strcmp(propref->name, prop->name))
 					continue;
@@ -555,7 +547,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 					prop_del(t, propref);
 			}
 
-			list_for_each_entry_safe(childref, childrefn, &npref->children, node) {
+			for_each_child_of_node_safe(npref, childref, childrefn) {
 				if (strcmp(childref->name, prop->name))
 					continue;
 
@@ -571,7 +563,7 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 		}
 
 		found = false;
-		list_for_each_entry_safe(propref, proprefn, &npref->properties, node) {
+		for_each_property_of_node_safe_withdel(npref, propref, proprefn) {
 			/* note this takes into account deleted properties */
 			if (!strcmp(propref->name, prop->name)) {
 				found = true;
@@ -596,11 +588,11 @@ void tree_apply_ref_node(struct tree *t, struct node *npref,
 			list_add_tail(&prop->node, &npref->properties);
 	}
 
-	list_for_each_entry_safe(child, childn, &np->children, node) {
+	for_each_child_of_node_safe(np, child, childn) {
 
 		/* find matching child */
 		found = false;
-		list_for_each_entry(childref, &npref->children, node) {
+		for_each_child_of_node(npref, childref) {
 			if (!strcmp(childref->name, child->name)) {
 				found = true;
 				break;
@@ -681,7 +673,7 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 	struct node *child, *npref;
 	int ret;
 
-	list_for_each_entry(l, &np->labels, node) {
+	for_each_label_of_node(np, l) {
 		npref = __node_lookup_by_label(t, tree_root(t),
 				l->label, strlen(l->label), np);
 		if (npref) {
@@ -692,7 +684,7 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 		}
 	}
 
-	list_for_each_entry(child, &np->children, node) {
+	for_each_child_of_node(np, child) {
 		ret = tree_detect_duplicate_labels(t, child);
 		if (ret)
 			return ret;

@@ -111,7 +111,6 @@ struct yaml_dt_config {
 	const char *output_file;
 	bool debug;
 	bool silent;
-	bool late;
 	int color;
 	bool save_temps;
 

@@ -68,7 +68,6 @@
 static struct option opts[] = {
 	{ "output",	 	required_argument, 0, 'o' },
 	{ "debug",	 	no_argument,	   0, 'd' },
-	{ "late-resolve",	no_argument,       0, 'l' },
 	{ "",			no_argument,	   0, 'c' },
 	{ "compatible",		no_argument,	   0, 'C' },
 	{ "yaml",		no_argument,	   0, 'y' },
@@ -199,7 +198,7 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dlcvCys@S:g:h?", opts, &option_index)) != -1) {
+			"o:dcvCys@S:g:h?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -230,9 +229,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			cfg->debug = true;
-			break;
-		case 'l':
-			cfg->late = true;
 			break;
 		case 'c':
 			cfg->object = true;

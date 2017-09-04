@@ -114,7 +114,7 @@ static void run_filter_on_node(struct yaml_dt_state *dt, struct ebpf_vm *vm, str
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 	}
 
-	list_for_each_entry(child, &np->children, node)
+	for_each_child_of_node(np, child)
 		run_filter_on_node(dt, vm, child);
 }
 

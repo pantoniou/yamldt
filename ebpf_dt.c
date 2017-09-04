@@ -151,7 +151,7 @@ struct node *get_and_verify_node(struct yaml_dt_state *dt, struct node *np, uint
 	if ((intptr_t)np == (intptr_t)ptr)
 		return np;
 
-	list_for_each_entry(child, &np->children, node) {
+	for_each_child_of_node(np, child) {
 		match = get_and_verify_node(dt, child, ptr);
 		if (match)
 			return match;
