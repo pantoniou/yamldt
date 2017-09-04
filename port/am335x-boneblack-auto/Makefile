@@ -39,7 +39,7 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 	-cmp -s $^ || (diff -u $^ | tee $@)
 
 %.cpp.yaml: %.yaml
-	$(CPP) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< > $@
+	$(CPP) $(CPPFLAGS) -D__DTS__ $< > $@
 
 %.dtb: %.yaml
 	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
