@@ -34,12 +34,12 @@ else
 fi
 AM_CONDITIONAL([HAVE_LIBYAML], [test x$have_libyaml = xtrue])
 
-# check whether a dtc with yaml support is available
-AC_MSG_CHECKING([for dtc with YAML support])
+# We don't need YAML support in DTC anymore
+# check whether a dtc exists in the path
 AC_PATH_PROGS_FEATURE_CHECK([DTC], [dtc],
-	[[ echo '/dts-v1/; / { };' | \
-	 	$ac_path_DTC -I dts -O yaml - -o - 2>/dev/null >/dev/null && \
-           ac_cv_path_DTC=$ac_path_DTC ac_path_DTC_found=:]])
+    [[ echo '/dts-v1/; / { };' | \
+	$ac_path_DTC -I dts -O dtb - -o - 2>/dev/null >/dev/null && \
+		ac_cv_path_DTC=$ac_path_DTC ac_path_DTC_found=:]])
 AC_SUBST([DTC], [$ac_cv_path_DTC])
 
 # check if we can run DTC
