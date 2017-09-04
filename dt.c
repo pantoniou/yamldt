@@ -1785,6 +1785,7 @@ static void get_error_location(struct yaml_dt_state *dt,
 	size_t currline;
 	size_t lastline, tlastline;
 	struct input *in;
+	int i, len;
 
 	*filebuf = '\0';
 	*linebuf = '\0';
@@ -1854,7 +1855,13 @@ static void get_error_location(struct yaml_dt_state *dt,
 		filebuf[filebufsize - 1] = '\0';
 
 	}
-	lastline++;
+	/* lastline++; */
+
+	/* convert linebuffer whitespace to spaces */
+	len = strlen(linebuf);
+	for (i = 0; i < len; i++)
+		if (isspace(linebuf[i]))
+			linebuf[i] = ' ';
 
 	/* convert to presentation */
 	*linep = lastline;
