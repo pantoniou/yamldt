@@ -426,10 +426,6 @@ yamldt [options] <input-file>
 
 The `-C/--compatible` option generates a bit exact DTB file.
 
-The `-l/--late-resolve` option enables manipulation of the tree in ways
-that is not possible with DTS (for example unit names are automatically
-generated).
-
 The `-c/--object` option generates an YAML object file that can be
 used in linking similar to the way C sources and object files work.
 
