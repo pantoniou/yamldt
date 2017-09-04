@@ -11,6 +11,15 @@ node that the rule selects in the output tree.
 `yamldl` parses a device tree description (source) file in YAML format
 and outputs a (bit-exact if the -C option is used) device tree blob.
 
+# dts2yaml
+
+An automatic DTS to YAML conversion tool, that works on standard DTS
+files which use the preprocessor. Capable of detecting macro usage and
+advanced DTS concepts, like property/nodes deletes etc.
+
+Conversion is accurate as long as the source file still looks like a
+DTS source (i.e. not using extremely complex macros).
+
 ## Rationale
 
 A DT aware YAML schema is a good fit as a DTS syntax alternative.
@@ -496,19 +505,40 @@ $ fdtdump foo.dtb
 
 ```
 
+The dts2yaml tool converts an existing dts/dtsi file to YAML
+format. It is capable of detecting macro usage so you can use it
+on both raw DTS files as well as DTS files that use the preprocessor.
+
+```
+dts2yaml [options] [input-file]
+ options are:
+   -o, --output        Output file
+   -t, --tabs		Set tab size (default 8)
+   -s, --shift		Shift when outputing YAML (default 2)
+   -l, --leading	Leading space for output
+   -d, --debug		Enable debug messages
+       --silent        Be really silent
+       --color         [auto|off|on]
+   -r, --recursive     Generate DTS/DTSI included files
+   -h, --help		Help
+       --color         [auto|off|on]
+```
+
+All the input files will be converted to yaml format; if no output option is
+given the output will be named according to the input filename. So foo.dts will
+be foo.yaml and foo.dtsi foo.yamli.
+
+The recursive option is going to convert all included files as well that have
+a dts/dtsi extension.
+
 ## Test suite
 
-To run the test-suite you will need a patched DTC that can generate
-yaml as an output option. If it a capable DTC is found in your path
-it will be used.
+To run the test-suite you will need a relative recent DTC compiler.
+YAML patches are not required anymore.
 
-The DTC patches are available under patches/dtc and at
-https://github.com/pantoniou/dtc/tree/yaml
-
-The test-suite compiles all the DTS files in the Linux kernel for
-all arches to both YAML and dtb format. The generated YAML file
-is compiled again with `yamldt` using the compatible option to a
-different dtb file.
+The test-suite converts all the DTS files in the Linux kernel for
+all arches to YAML format using dts2yaml and then compiles the YAML
+fle with `yamldt` and the DTS file with DTC.
 
 The resulting dtb files are bit-exact because the `-C` option is used.
 
@@ -518,50 +548,49 @@ validation checks. It is recommended to use the `--keep-going`
 flag to continue checking even in the presence of validation
 errors.
 
+Currently out of 1379 DTS files, only 6 fail conversion;
+
+```
+exynos3250-monk exynos4412-trats2 exynos3250-rinato exynos5433-tm2
+exynos5433-tm2e
+```
+
+All 6 use a complex pin mux macro declaration that is no possible
+to be automatically converted.
+
 # Workflow
 
 It is expected that the first thing a user of `yamldt` would want
 to do is to convert an existing DTS configuration to YAML.
 
-Using a patched DTC as mentioned earlier you can generate a raw
-YAML file that functionally generates the same (bitexact with the
--C option) DTB file.
-
 We're going to use as an example the beaglebone black and the
 am335x-boneblack.dts source as located in the port/ directory.
 
-The DTS source files in the kernel are using the C preprocessor
-so it's imperative to use it as a first pass (note you can pipe
-the output to cut down on the steps).
+Compile the original DTS source with DTC
 
 ```
-$ cpp -I ./ -I ../../port -I ../../include \
--I ../../include/dt-bindings/input -nostdinc \
--undef -x assembler-with-cpp -D__DTS__ \
-am335x-boneblack.dts > am335x-boneblack.cpp.dts
+$  cc -E  -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input \
+	-nostdinc -undef -x assembler-with-cpp -D__DTS__ am335x-boneblack.dts 
+	| dtc -@ -q -I dts -O dtb - -o am335x-boneblack.dtc.dtb
 ```
 
-Compile this file with DTC to generate a DTB file, we'll use this
-as a reference.
-
+Use dts2yaml to convert to yaml
 ```
-$ dtc -@ -q -I dts -O dtb am335x-boneblack.cpp.dts \
--o am335x-boneblack.dtc.dtb
-```
-
-Compile the same file with the patched DTC but now select a YAML
-output option.
-
-```
-$ dtc -@ -q -I dts -O yaml am335x-boneblack.cpp.dts \
--o am335x-boneblack.dtc.yaml
+$ dts2yaml -r am335x-boneblack.dts
+$ ls *.yaml*
+am335x-boneblack-common.yamli  am335x-bone-common.yamli  am33xx-clocks.yamli
+am33xx.yamli  tps65217.yamli
 ```
 
-This (raw) yaml file is functionally identical to the original DTS
-and parses down to the same exact file using the -C option.
+Note the recursive option automatically generates the dependent include files.
 
 ```
-$ yamldt -C am335x-boneblack.dtc.yaml -o am335x-boneblack.dtb
+$ cc -I ./ -I ../../port -I ../../include -I ../../include/dt-bindings/input \
+	-nostdinc -undef -x assembler-with-cpp -D__DTS__ am335x-boneblack.yaml | \
+	../../yamldt -C -@ - -o am335x-boneblack.dtb 
+```
+
+```
 $ ls -l *.dtb
 -rw-rw-r-- 1 panto panto 50045 Jul 27 19:10 am335x-boneblack.dtb
 -rw-rw-r-- 1 panto panto 50045 Jul 27 19:07 am335x-boneblack.dtc.dtb
@@ -580,10 +609,9 @@ $ ls -l *.dtb
 -rw-rw-r-- 1 panto panto 50045 Jul 27 19:07 am335x-boneblack.dtc.dtb
 ```
 
-You can now start the conversion to YAML using the same file
-structure as the DTS files but with yaml instead of DTS.
-Large parts of the new YAML source can be copied verbatim from
-m335x-boneblack.dtc.yaml file.
+Plese note that the CPP command line is the same, so no changes to header files
+is required. dts2yaml is smart enough to detect macro usage and convert from
+the space delimited form that DTC uses to the comma one that YAML does.
 
 ## Notes on DTS to DTS conversion
 
