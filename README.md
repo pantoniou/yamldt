@@ -1,15 +1,15 @@
 # yamldt
 
-A YAML to DT blob generator/compiler and validator, utilizing a YAML schema
++`yamldt` is a YAML to DT blob generator/compiler and validator, utilizing a YAML schema
 that is functionaly equivalent to DTS and supports all DTS features.
 
 Validation is performed against another YAML schema that defines properties
-and constraints which a checker uses generating small code fragments that
+and constraints. A checker uses the schema to generate small code fragments that
 are compiled to ebpf and executed for the specific validation of each
-node that the rule selects in the output tree.
+DT node the rule selects in the output tree.
 
 `yamldl` parses a device tree description (source) file in YAML format
-and outputs a (bit-exact if the -C option is used) device tree blob.
+and outputs a device tree blob (which can be bit-exact if the -C option is used).
 
 # dts2yaml
 
@@ -24,46 +24,46 @@ DTS source (i.e. not using extremely complex macros).
 
 A DT aware YAML schema is a good fit as a DTS syntax alternative.
 
-YAML is a human-readable data serialization language, and is expressive
+YAML is a human-readable data serialization language and is expressive
 enough to cover all DTS source features.
 
-Simple YAML file are just key value pairs that are very easy to parse, even
+Simple YAML files are just key value pairs that are very easy to parse, even
 without using a formal YAML parser. YAML streams are containing documents
 separated by the --- marker. This model is a good fit for DT since one may
 simply append few lines of text in a given YAML stream to modify it.
-In restricted environments you may for instance avoid having to edit a
-large configuration blob but just appending your changes to the stream.
+In addition, composition of YAML files in restricted environments may be as
+simple be appending a few lines of text to an existing YAML file.
 
-The parsers of YAML are very mature, as it has been released in 2001.
-It is in wide-spread use and schema validation tools are available.
+The parsers of YAML are very mature, as YAML was first released in 2001.
+It is currently in wide-spread use and schema validation tools are available and common.
 YAML support is available for every major programming language.
 
-Projects currently use YAML as their configuration format:
+The following projects currently use YAML as their configuration format:
 
 1. [github](https://github.com/github/linguist/blob/master/lib/linguist/languages.yml)
 2. [openstack](https://github.com/openstack/governance/blob/master/reference/projects.yaml)
 3. [jenkins](https://wiki.jenkins.io/display/JENKINS/YAML+Project+Plugin)
 4. [yedit](https://github.com/oyse/yedit/wiki)
 
-Data in YAML can easily be converted to/form other format that a
-particular tool that we may use in the future understands.
+Data in YAML can easily be converted to and from other formats making
+it convertable to formats which future tools may understand.
 
 More importantly YAML offers (an optional) type information for each
-property item, which is IMHO crucial for thorough validation and checking
-against device tree bindings (when they will be converted to a
+property item, which is crucial for thorough validation and checking
+against device tree bindings (once the bindings are converted to a
 machine readable format, preferably YAML).
 
 yamldt implements a schema checker partly based on an RFC posted
-on the mainline list some years ago by Rob Herring.
+on the mainline linux-kernel list some years ago by Rob Herring.
 
 ## Validation
 
-`yamldt` is capable to perform validation of DT constructs using
-a C code based eBPF checker. eBPF code fragments are assembled that
-can perform type checking of properties, enforce arbitrary value
+`yamldt` is capable of performing validation of DT constructs using
+a C-based eBPF checker. eBPF code fragments are assembled that
+can perform type checking of properties and enforce arbitrary value
 constraints while fully supporting inheritance.
 
-As an example, let's see how the validation of a given fragment
+As an example, here's how the validation of a given fragment
 works using on a jedec,spi-nor node:
 
 ```yaml
@@ -182,8 +182,8 @@ jedec,spi-nor:
         m25p,fast-read: true
 ```
 
-Note the constraint rule that matches on any compatible on the
-given list. This binding inherits from spi-slave `inherits: *spi-slave`
+Note the constraint rule matches on any compatible string in the
+given list. This binding inherits from spi-slave as indicated by the line: `inherits: *spi-slave`
 
 `*spi-slave` is standard YAML reference notation which points to
 the spi-slave binding, pasted here for convenience:
@@ -320,9 +320,8 @@ Note the `&spi-slave` anchor, this is what it's used to refer to
 other parts of the schema.
 
 The SPI slave binding defines a number of properties that all
-inherited bindings include.
-
-This in turn inherits from `device-compatible` which is this:
+inherited bindings include. This in turn inherits from `device-compatible`
+which is this:
 
 ```yaml
 %YAML 1.1
@@ -346,9 +345,9 @@ checked against a given rule.
 
 The `selected` rule defines two constraints. The first one
 is the name of a variable in a derived binding that all
-it's constraints has to satisfy; in this case it's the
+its constraints must satisfy; in this case it's the
 jedec,spi-nor compatible constraint in the binding above.
-The select constraint is a reference to the
+The selected constraint is a reference to the
 `device-status-enabled` constrainst defined at:
 
 ```yaml
@@ -372,7 +371,7 @@ device-enabled:
 The `device-enabled` constraint checks where the node is
 enabled in DT parlance.
 
-Taking those two constraints together we generate the enable
+Taking those two constraints together yamldt generates an enable
 method filter which triggers on an enable device node that
 matches any of the compatible strings defined in the jedec,spi-nor
 binding.
@@ -380,12 +379,11 @@ binding.
 The check method will be generated by collecting all the
 property constraints (category, type and explicit value constraints).
 
-Note how a variable v is used a the current property value. The
-generated methods will provide it to the constraint all primed
-up and ready to use.
+Note how in the above example a variable (v) is used as the current property value. The
+generated methods will provide it, initialized to the current value to the constraint.
 
 Note that custom, manually written select and check methods
-are possible but their usage is not recommended for simple type.
+are possible but their usage is not recommended for simple types.
 
 ## Installation
 
@@ -424,10 +422,10 @@ yamldt [options] <input-file>
    -v, --version       Display version
 ```
 
-The `-C/--compatible` option generates a bit exact DTB file.
+The `-C/--compatible` option generates a bit-exact DTB file.
 
 The `-c/--object` option generates an YAML object file that can be
-used in linking similar to the way C sources and object files work.
+used in linking, similar to the way C sources and object files work.
 
 The `-s/--dts` option selects a DTS output format instead of DTB.
 
@@ -436,12 +434,12 @@ YAML file is one that is containing no comments and integer values
 have been calculated if possible. It is guaranteed to be a valid
 YAML file suitable for use by other external tools.
 
-The `-S/--schema` option is going to use the given file(s) as
-input for the checker. As an extension if given a directory name
+The `-S/--schema` option will use the given file(s) as
+input for the checker. As an extension, if given a directory name
 with a terminating slash (i.e. dir/) it will recursively collect
 and use all YAML files within.
 
-The `-g/--codegen` option is going to use the given YAML file(s)
+The `-g/--codegen` option will use the given YAML file(s)
 (or dir/ as in the schema option) as input for the code generator.
 
 The `--save-temps` option will save all intermediate files/blobs.
@@ -451,8 +449,8 @@ The `--silent` option will supress all informational messages.
 `--color` controls color output in the terminal.
 
 Automatic suffix detection does what you expect (i.e. an output file
-ending in .dtb is selecting the DTB generation option, .yaml the yaml
-one and so on).
+ending in .dtb if selecting the DTB generation option, .yaml if selecting the yaml
+generation option and so on).
 
 Given a source file in YAML `foo.yaml` you generate a dtb file
 with
@@ -532,9 +530,9 @@ a dts/dtsi extension.
 To run the test-suite you will need a relative recent DTC compiler.
 YAML patches are not required anymore.
 
-The test-suite converts all the DTS files in the Linux kernel for
-all arches to YAML format using dts2yaml and then compiles the YAML
-fle with `yamldt` and the DTS file with DTC.
+The test-suite first converts all the DTS files in the Linux kernel for
+all architectures to YAML format using dts2yaml. Afterwards it compiles the YAML
+files with `yamldt` and the DTS files with DTC.
 
 The resulting dtb files are bit-exact because the `-C` option is used.
 
@@ -559,7 +557,7 @@ to be automatically converted.
 It is expected that the first thing a user of `yamldt` would want
 to do is to convert an existing DTS configuration to YAML.
 
-We're going to use as an example the beaglebone black and the
+The following example uses the beaglebone black and the
 am335x-boneblack.dts source as located in the port/ directory.
 
 Compile the original DTS source with DTC
@@ -667,7 +665,7 @@ foo: node { baz; };
 bar = <&foo>;
 ```
 
-In YAML the equivalent method is called anchors and are defined
+In YAML the equivalent methods are called anchors and are defined
 as follows:
 
 ```yaml
@@ -688,8 +686,10 @@ Is used like this in YAML
 mac: !int8 [ 0, 1, 2, 3, 4, 5 ]
 ```
 
-* DTS is using spaces to seperate array elements, YAML is either using
-  indentation or commas in JSON form.
+* DTS uses spaces to seperate array elements, YAML uses either
+  indentation or commas in JSON form. Note that yamldt is smart
+  enough to detect the DTS form and automatically convert in
+  most cases.
 
 ```
 pinmux = <0x00 0x01>;
@@ -725,8 +725,8 @@ foo: &yaml_pseudo__0__
 ref: *foo
 ```
 
-* Integer expression evaluation similar in manner that the CPP preprocessor
-  performs is available. This is required in order for macros defined to
+* Integer expression evaluation, similar in manner to that which the CPP preprocessor
+  performs, is available. This is required in order for macros to
   work. For example:
 
   Given the following two files
@@ -1525,7 +1525,7 @@ That file contains a single jedec,spi-nor device and when we validate:
     "#size-cells": 1
 ```
 
-This is a valid device node so running validate..
+This is a valid device node, so running validate produces the following:
 
 ```
 $ make validate
@@ -1538,10 +1538,10 @@ cc -E -MT rule-check.cpp.yaml -MMD -MP -MF rule-check.o.Yd -I ./ -I ../../port -
 ../../yamldt  -g ../../validate/schema/codegen.yaml -S ../../validate/bindings/ -y am33xx.cpp.yaml am33xx-clocks.cpp.yaml am335x-bone-common.cpp.yaml am335x-boneblack-common.cpp.yaml am335x-boneblack.cpp.yaml rule-check.cpp.yaml -o am335x-boneblack-rules.pure.yaml
 jedec,spi-nor: /ocp/spi@48030000/m25p80@0 OK
 ```
-Note the last line, it means that the node was checked and it was found OK.
+Note the last line. It means the node was checked and was found OK.
 
-Editing the rule-check.yaml file, let's introduce a couple of errors;
-Commenting out the reg property `# reg: 0`
+Editing the rule-check.yaml file, let's introduce a couple of errors.
+The following output is generated by commenting out the reg property `# reg: 0`
 
 ```
 $ make validate
@@ -1573,9 +1573,9 @@ rule-check.yaml:8:10: error: bad property type
 
 Note the message about the type error and the pointer to the place where the reg property was defined.
 
-Finally, let's make an error that violates a constraint
+Finally, let's make an error that violates a constraint.
 
-Change the `spi-tx-bus-width` value to 3
+Change the `spi-tx-bus-width` value to 3.
 
 ```
 $ make validate
@@ -1592,4 +1592,4 @@ rule-check.yaml:9:23: error: constraint rule failed
      spi-tx-bus-width:
 ```
 
-Note how the offending value was highlighted, the offending constraint and property definition were listed too.
+Note how the offending value is highlighted. The offending constraint and property definition are listed too.
