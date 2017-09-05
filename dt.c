@@ -1923,8 +1923,12 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 				kind, str, reset,
 				linebuf,
 				(int)column, "", marker, reset);
-		while (++column < end_column - 1)
-			fprintf(stderr, "~");
+		if (column > 0 && end_column > 0) {
+			fprintf(stderr, "column=%zd end_column=%zd\n",
+					column, end_column);
+			while (++column < end_column - 1)
+				fprintf(stderr, "~");
+		}
 		fprintf(stderr, "\n");
 	} else
 		fprintf(stderr, "%s\n", str);
