@@ -15,7 +15,12 @@ bool isesc(char c);
 bool is_printable_string(const void *data, int len);
 char *c2str(char c, char *buf, int bufsz);
 int quoted_strlen(const char *str);
-char get_escape_char(const char *s, int *i);
+
+/* negative on error, \0 on EOF */
+int esc_getc(const char **sp);
+/* -1 on error, -2 on unterminated escape */
+int esc_strlen(const char *s);
+char *esc_getstr(const char *s, char *buf, int bufsz);
 
 /* from linux kernel */
 #ifndef ARRAY_SIZE

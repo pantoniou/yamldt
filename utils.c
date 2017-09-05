@@ -144,104 +144,133 @@ int quoted_strlen(const char *str)
 	return len + 1;
 }
 
-/*
- * Parse a octal encoded character starting at index i in string s.  The
- * resulting character will be returned and the index i will be updated to
- * point at the character directly after the end of the encoding, this may be
- * the '\0' terminator of the string.
- */
-static char get_oct_char(const char *s, int *i)
+int esc_getc(const char **sp)
 {
-	char x[4];
-	char *endx;
-	long val;
+	const char *s = *sp;
+	char c, c1;
+	int outc = -1, i;
 
-	x[3] = '\0';
-	strncpy(x, s + *i, 3);
-
-	val = strtol(x, &endx, 8);
-	if (endx <= x)
+	if (!*s)
 		return 0;
 
-	(*i) += endx - x;
-	return val;
-}
-
-/*
- * Parse a hexadecimal encoded character starting at index i in string s.  The
- * resulting character will be returned and the index i will be updated to
- * point at the character directly after the end of the encoding, this may be
- * the '\0' terminator of the string.
- */
-static char get_hex_char(const char *s, int *i)
-{
-	char x[3];
-	char *endx;
-	long val;
-
-	x[2] = '\0';
-	strncpy(x, s + *i, 2);
-
-	val = strtol(x, &endx, 16);
-	if (endx <= x)
-		return 0;
-
-	(*i) += endx - x;
-	return val;
-}
-
-char get_escape_char(const char *s, int *i)
-{
-	char	c = s[*i];
-	int	j = *i + 1;
-	char	val;
-
-	switch (c) {
-	case 'a':
-		val = '\a';
-		break;
-	case 'b':
-		val = '\b';
-		break;
-	case 't':
-		val = '\t';
-		break;
-	case 'n':
-		val = '\n';
-		break;
-	case 'v':
-		val = '\v';
-		break;
-	case 'f':
-		val = '\f';
-		break;
-	case 'r':
-		val = '\r';
-		break;
-	case '0':
-	case '1':
-	case '2':
-	case '3':
-	case '4':
-	case '5':
-	case '6':
-	case '7':
-		j--; /* need to re-read the first digit as
-		      * part of the octal value */
-		val = get_oct_char(s, &j);
-		break;
-	case 'x':
-		val = get_hex_char(s, &j);
-		break;
-	default:
-		val = c;
+	c = *s++;
+	if (c != '\\') {
+		outc = c;
+		goto out;
 	}
 
-	(*i) = j;
-	return val;
+	c = *s++;
+	if (!c)
+		return -2;
+	switch (c) {
+	case 'a':
+		outc = '\a';
+		break;
+	case 'b':
+		outc = '\b';
+		break;
+	case 't':
+		outc = '\t';
+		break;
+	case 'n':
+		outc = '\n';
+		break;
+	case 'v':
+		outc = '\v';
+		break;
+	case 'f':
+		outc = '\f';
+		break;
+	case 'r':
+		outc = '\r';
+		break;
+	case '?':
+	case '\'':
+	case '\"':
+		outc = c;
+		break;
+	case 'x':
+	case 'X':
+		/* hex */
+		outc = 0;
+		i = 0;
+		c1 = '\0';
+		for (;;) {
+			c1 = *s;
+			if (c1 >= '0' && c1 <= '9')
+				outc = (outc << 4) | (c1 - '0');
+			else if (c1 >= 'A' && c1 <= 'F')
+				outc = (outc << 4) | (10 + c1 - 'A');
+			else if (c1 >= 'a' && c1 <= 'f')
+				outc = (outc << 4) | (10 + c1 - 'a');
+			else
+				break;
+			s++;
+			i++;
+		}
+
+		/* bad hex escape sequence */
+		if (i == 0 || i > 2)
+			return (c1 || i > 2) ? -1 : -2;
+		break;
+	case '0':
+		/* octal */
+		outc = 0;
+		i = 0;
+		c1 = '\0';
+		for (;;) {
+			c1 = *s;
+			if (c1 >= '0' && c1 <= '7')
+				outc = (outc << 3) | (c1 - '0');
+			else
+				break;
+			s++;
+			i++;
+		}
+		/* bad octal escape sequence */
+		if (i == 0 || i > 3)
+			return (c1 || i > 3) ? -1 : -2;
+		break;
+	default:
+		return -1;
+	}
+out:
+	*sp = s;
+	return outc;
 }
 
-#include <stdio.h>
+/* count the number of characters in an escaped string (with the given quote) */
+int esc_strlen(const char *s)
+{
+	int c;
+	int count;
+
+	count = 0;
+	c = 0;
+	while (*s && (c = esc_getc(&s)) > 0)
+		count++;
+
+	if (!*s && c >= 0)
+		return count;
+
+	return c;
+}
+
+char *esc_getstr(const char *s, char *buf, int bufsz)
+{
+	int c, len;
+	char *p;
+
+	len = esc_strlen(s);
+	if (len + 1 < bufsz)
+		return NULL;
+
+	p = buf;
+	while (*s && (c = esc_getc(&s)) >= 0)
+		*p++ = (char)c;
+	*p = '\0';
+	return buf;
+}
 
 char **str_to_argv(const char *binary, const char *str)
 {

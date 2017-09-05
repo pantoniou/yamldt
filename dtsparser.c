@@ -288,63 +288,23 @@ static bool is_valid_int(const char *buf)
 
 static int is_string_or_char_done(const char *buf, char c, char termc)
 {
-	const char *s;
-	char tc, cc;
-	int count, ret;
+	int len = strlen(buf);
+	char *tbuf = alloca(len + 1 + 1);
+	int elen;
 
-#define NEXTC(_s, _c) \
-	({ \
-		char _cc; \
-		\
-		if (*(_s)) \
-	 		_cc = *(_s)++; \
-	 	else { \
-			_cc = (_c); \
-			(_c)= '\0'; \
-		} \
-		_cc; \
-	})
+	elen = esc_strlen(buf);
 
-	tc = c;
-	count = 0;
-	s = buf;
-	ret = 0;
-	while ((cc = NEXTC(s, tc)) != '\0') {
-		/* final terminator? */
-		if (cc == termc && !tc)
-			return 1;
+	if (c == termc && elen >= 0)
+		return 1;
 
-		/* escape */
-		if (cc == '\\') {
-			cc = NEXTC(s, tc);
-			if (cc == '\0') {
-				ret = 0;
-				break;
-			}
-			if (cc == 'x' || cc == 'X') {
-				cc = NEXTC(s, tc);
-				if (!cc || !isxdigit(cc)) {
-					ret = !cc ? 0 : -1;
-					break;
-				}
-				cc = NEXTC(s, tc);
-				if (!cc || !isxdigit(cc)) {
-					ret = !cc ? 0 : -1;
-					break;
-				}
-			} else if (cc == termc || cc == '\\') {
-				;
-			} else if (!isescc(cc)) {
-				ret = !cc ? 0 : -1;
-				break;
-			}
-		}
-		count++;
-		if (termc == '\'' && count > 1)
-			ret = -1;
-	}
+	strcpy(tbuf, buf);
+	tbuf[len] = c;
+	tbuf[len + 1] = '\0';
+	len++;
 
-	return ret;
+	elen = esc_strlen(tbuf);
+
+	return (elen >= 0 || elen == -2) ? 0 : -1;
 }
 
 static struct dts_emit_list_item *

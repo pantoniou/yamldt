@@ -392,6 +392,10 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 		} else if (!strcmp(tag, "!null")) {
 			data = NULL;
 			size = 0;
+		} else if (!strcmp(tag, "!char")) {
+			val32 = cpu_to_fdt32((uint32_t)to_dt_ref(ref)->val);
+			data = &val32;
+			size = sizeof(val32);
 		} else {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,
@@ -1571,7 +1575,8 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 		if (!strcmp(stag, "!int") || !strcmp(stag, "!uint") ||
 		    !strcmp(stag, "!int16") || !strcmp(stag, "!uint16") ||
 		    !strcmp(stag, "!int32") || !strcmp(stag, "!uint32") ||
-		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64"))
+		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64") ||
+		    !strcmp(stag, "!char"))
 			fputc('<', fp);
 		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
 			fputc('[', fp);
@@ -1594,11 +1599,17 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
 
+			if (!strcmp(stag, "!char"))
+				fputc('\'', fp);
+
 			if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
 				fprintf(fp, " %02x", to_dt_ref(reft)->is_int ?
 					    (unsigned int)to_dt_ref(reft)->val & 0xff : 0);
 			else
 				fwrite(reft->data, reft->len, 1, fp);
+
+			if (!strcmp(stag, "!char"))
+				fputc('\'', fp);
 
 			if (!strcmp(stag, "!str") && strcmp(to_dt_ref(ref)->tag, "!pathref"))
 				fputc('"', fp);
@@ -1616,7 +1627,8 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 		if (!strcmp(stag, "!int") || !strcmp(stag, "!uint") ||
 		    !strcmp(stag, "!int16") || !strcmp(stag, "!uint16") ||
 		    !strcmp(stag, "!int32") || !strcmp(stag, "!uint32") ||
-		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64"))
+		    !strcmp(stag, "!int64") || !strcmp(stag, "!uint64") ||
+		    !strcmp(stag, "!char"))
 			fputc('>', fp);
 		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
 			fputc(']', fp);

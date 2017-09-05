@@ -275,34 +275,60 @@ static int d2y_emit_single_scalar(struct d2y_state *d2y,
 		const struct dts_emit_item *ei)
 {
 	struct dts_state *ds = to_ds(d2y);
+	const char *str;
+	bool char_escape = false;
 
+	str = ei->contents;
 	switch (ei->atom) {
 	default:
 		dts_error_at(ds, &ei->loc, "bad scalar item\n");
 		return -1;
 	case dea_int:
-		fprintf(d2y->outfp, "%s", ei->contents);
+	case dea_expr:
 		break;
 	case dea_char:
-		fprintf(d2y->outfp, "'%s'", ei->contents);
-		break;
-	case dea_expr:
-		fprintf(d2y->outfp, "%s", ei->contents);
+		if (strchr(str, '\'')) {
+			fputs("!char \"", d2y->outfp);
+			char_escape = true;
+		} else
+			fputc('\'', d2y->outfp);
 		break;
 	case dea_byte:
-		fprintf(d2y->outfp, "0x%s", ei->contents);
+		fputs("0x", d2y->outfp);
 		break;
 	case dea_string:
-		fprintf(d2y->outfp, "\"%s\"", ei->contents);
+		fputc('\"', d2y->outfp);
 		break;
 	case dea_stringref:
-		fprintf(d2y->outfp, "!pathref %s", ei->contents);
+		fputs("!pathref ", d2y->outfp);
 		break;
 	case dea_ref:
-		fprintf(d2y->outfp, "*%s", ei->contents);
+		fputc('*', d2y->outfp);
 		break;
 	case dea_pathref:
-		fprintf(d2y->outfp, "!anchor %s", ei->contents);
+		fputs("!anchor ", d2y->outfp);
+		break;
+	}
+
+	fprintf(d2y->outfp, "%s", str);
+
+	switch (ei->atom) {
+	default:
+	case dea_int:
+	case dea_expr:
+	case dea_byte:
+	case dea_stringref:
+	case dea_ref:
+	case dea_pathref:
+		break;
+	case dea_char:
+		if (char_escape)
+			fputc('\"', d2y->outfp);
+		else
+			fputc('\'', d2y->outfp);
+		break;
+	case dea_string:
+		fputc('\"', d2y->outfp);
 		break;
 	}
 

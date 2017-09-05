@@ -86,6 +86,7 @@ static const char *get_builtin_tag(const char *tag)
 		"!uint32",
 		"!int64",
 		"!uint64",
+		"!char",
 	};
 
 	int i;
@@ -1185,6 +1186,15 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 			/* try to find implicitly a type */
 			tag = (char *)event->data.scalar.tag;
 
+			/* try to figure out if it's a single char */
+			if (!tag && event->data.scalar.style == YAML_SINGLE_QUOTED_SCALAR_STYLE) {
+				if (esc_strlen(ref_label) == 1)
+					tag = "!char";
+				else
+					dt_warning_at(dt, &dt->current_mark,
+						"single quoted string used as string\n");
+			}
+
 			xtag = tag ? tag : "!str";
 			rt = r_scalar;
 
@@ -2164,6 +2174,12 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 			to_dt_ref(ref)->is_builtin_tag = true;
 		} else if (!strcmp(tag, "!null")) {
 			to_dt_ref(ref)->is_null = true;
+			to_dt_ref(ref)->is_builtin_tag = true;
+		} else if (!strcmp(tag, "!char")) {
+			val = esc_getc(&p);
+			if ((int)val < 0 || val > INT32_MAX)
+				return -EINVAL;
+			to_dt_ref(ref)->val = val;
 			to_dt_ref(ref)->is_builtin_tag = true;
 		} else
 			to_dt_ref(ref)->is_builtin_tag = false;
