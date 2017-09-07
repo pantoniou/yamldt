@@ -108,6 +108,7 @@ struct constraint_desc {
 struct dtb_check_state {
 	/* copy from config */
 	const char *schema;
+	const char *schema_save;
 	const char *codegen;
 	bool save_temps;
 
@@ -741,6 +742,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	struct list_head clist;
 	struct constraint_desc *cd, *cdn;
 	struct node *npstack[NPSTACK_SIZE];
+	struct node *npt;
 
 	switch (type) {
 	case t_select:
@@ -865,13 +867,17 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 		}
 
 		/* add the output */
-		prop = prop_alloc(to_tree(sdt), output_name);
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
+		npt = node_alloc(to_tree(sdt), output_name, NULL);
+		list_add_tail(&npt->node, &np->children);
+
+		prop = prop_alloc(to_tree(sdt), "ebpf");
+		prop->np = npt;
+		list_add_tail(&prop->node, &npt->properties);
 
 		ref = ref_alloc(to_tree(sdt), r_scalar,
 				b64_output, b64_output_size,
-				dtbchk->output_tag);
+				"!base64");
+
 		ref->prop = prop;
 		list_add_tail(&ref->node, &prop->refs);
 
@@ -882,7 +888,6 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 		to_dt_ref(ref)->binary_size = output_size;
 
 		free(b64_output);
-
 	}
 
 out_err:
@@ -938,8 +943,12 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	memset(dtbchk, 0, sizeof(*dtbchk));
 
 	dtbchk->schema = dt->cfg.schema;
+	dtbchk->schema_save = dt->cfg.schema_save;
 	dtbchk->codegen = dt->cfg.codegen;
 	dtbchk->save_temps = dt->cfg.save_temps;
+
+	if (!dtbchk->schema_save && dtbchk->save_temps)
+		dtbchk->schema_save = "schema.yaml";
 
 	INIT_LIST_HEAD(&dtbchk->clist);
 
@@ -996,9 +1005,8 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	dt_set_error_on_failed_get(cgdt, false);
 
 	/* schema is parsed after codegen */
-	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema,
-			dtbchk->save_temps ? "schema.yaml" : NULL,
-			"schema");
+	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema, dtbchk->schema_save,
+				      "schema");
 	if (!dtbchk->sdt)
 		dt_fatal(dt, "Couldn't parse schema file %s\n", dtbchk->schema);
 
@@ -1006,11 +1014,12 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 	if (err)
 		dt_fatal(dt, "Failed to prepare schema\n");
 
-	if (dtbchk->save_temps)
+	if (dtbchk->schema_save)
 		dt_emitter_emit(dtbchk->sdt);
 
 	dt_debug(dt, "DTB checker configuration:\n");
 	dt_debug(dt, " schema      = %s\n", dtbchk->schema);
+	dt_debug(dt, " schema-save = %s\n", dtbchk->schema_save);
 	dt_debug(dt, " codegen     = %s\n", dtbchk->codegen ? : "<NONE>");
 	dt_debug(dt, "-----------------\n");
 	dt_debug(dt, " input-tag   = %s\n", dtbchk->input_tag);
@@ -1208,15 +1217,22 @@ int dtbchk_check(struct yaml_dt_state *dt)
 	struct ebpf_dt_ctx check_ctx;
 	struct ebpf_vm *select_vm;
 	struct ebpf_vm *check_vm;
+	struct node *npsel, *npchk;
 	int ret;
+
+	if (!sroot)
+		return 0;
 
 	/* check each rule in the root */
 	for_each_child_of_node(sroot, snp) {
 
-		select = dt_get_binary(sdt, snp, "selected-rule-output",
-				0, 0, &select_size);
-		check = dt_get_binary(sdt, snp, "check-rule-output",
-				0, 0, &check_size);
+		npsel = node_get_child_by_name(to_tree(sdt), snp,
+				"selected-rule-output", 0);
+		select = dt_get_binary(sdt, npsel, "ebpf", 0, 0, &select_size);
+
+		npchk = node_get_child_by_name(to_tree(sdt), snp,
+				"check-rule-output", 0);
+		check = dt_get_binary(sdt, npchk, "ebpf", 0, 0, &check_size);
 
 		/* can't check this node */
 		if (!select || !check)

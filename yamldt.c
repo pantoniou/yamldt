@@ -74,7 +74,8 @@ static struct option opts[] = {
 	{ "dts",		no_argument,	   0, 's' },
 	{ "schema",		required_argument, 0, 'S' },
 	{ "codegen",		required_argument, 0, 'g' },
-	{ "save-temps",		no_argument, 	   0,  0 },
+	{ "save-temps",		no_argument, 	   0,  0  },
+	{ "schema-save",	required_argument, 0,  0  },
 	{ "silent",		no_argument,	   0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
@@ -97,6 +98,7 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "   -S, --schema        Use schema (all yaml files in dir/)\n"
 "   -g, --codegen       Code generator configuration file\n"
 "       --save-temps    Save temporary files\n"
+"       --schema-save   Save schema to given file\n"
 "       --silent        Be really silent\n"
 "       --color         [auto|off|on]\n"
 "   -h, --help          Help\n"
@@ -116,6 +118,7 @@ int main(int argc, char *argv[])
 	struct yaml_dt_checker *c, *selected_checker = NULL;
 	const char *s, *t;
 	const char * const *ss;
+	bool input_output_optional = false;
 
 	memset(dt, 0, sizeof(*dt));
 
@@ -221,6 +224,10 @@ int main(int argc, char *argv[])
 				cfg->save_temps = true;
 				continue;
 			}
+			if (!strcmp(s, "schema-save")) {
+				cfg->schema_save = optarg;
+				continue;
+			}
 		}
 
 		switch (cc) {
@@ -261,12 +268,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (optind >= argc) {
+	/* they're optional when saving the schema only */
+	input_output_optional = cfg->schema_save;
+
+	if (!input_output_optional && optind >= argc) {
 		fprintf(stderr, "Missing input file arguments optind/argc %d/%d\n", optind, argc);
 		return EXIT_FAILURE;
 	}
 
-	if (!cfg->output_file) {
+	if (!input_output_optional && !cfg->output_file) {
 		fprintf(stderr, "Missing output file\n");
 		return EXIT_FAILURE;
 	}
@@ -280,7 +290,7 @@ int main(int argc, char *argv[])
 
 	err = dt_parse(dt);
 
-	if (!err) {
+	if (!err && cfg->output_file) {
 		dt_emitter_emit(dt);
 		dt_checker_check(dt);
 	}

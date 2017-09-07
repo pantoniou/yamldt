@@ -689,6 +689,9 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 	struct node *child, *npref;
 	int ret;
 
+	if (!np)
+		return 0;
+
 	for_each_label_of_node(np, l) {
 		npref = __node_lookup_by_label(t, tree_root(t),
 				l->label, strlen(l->label), np);

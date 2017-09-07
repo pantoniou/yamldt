@@ -710,9 +710,11 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 			append_input_marker(dt, "---\n");
 	}
 
-	yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
-	yaml_parser_set_input_string(&dt->parser, dt->input_content,
-				     dt->input_size);
+	if (dt->input_size > 0) {
+		yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
+		yaml_parser_set_input_string(&dt->parser, dt->input_content,
+					dt->input_size);
+	}
 
 	tree_init(to_tree(dt), emitter->tops);
 
@@ -1761,6 +1763,9 @@ int dt_parse(struct yaml_dt_state *dt)
 	int err;
 	bool end;
 
+	if (dt->input_size <= 0)
+		return 0;
+
 	while (1) {
 
 		if (!yaml_parser_parse(&dt->parser, &event)) {
@@ -1780,9 +1785,7 @@ int dt_parse(struct yaml_dt_state *dt)
 		if (end)
 			break;
 	}
-	return 0;
-
-	// return dt->error_flag ? -1 : 0;
+	return dt->error_flag ? -1 : 0;
 }
 
 static void get_error_location(struct yaml_dt_state *dt,
