@@ -770,6 +770,9 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	if (list_empty(&clist))
 		return 0;
 
+	if (!dtbchk->codegen)
+		dt_fatal(dt, "required codegen is missing\n");
+
 	/* open memstream */
 	fp = open_memstream(&buf, &size);
 	assert(fp);
@@ -939,6 +942,7 @@ static int prepare_schema(struct yaml_dt_state *dt)
 			continue;
 		}
 
+
 		ret = prepare_schema_node(dt, sdt, np, t_select, &idx);
 		if (ret)
 			dt_fatal(dt, "Failed to prepare selector %s\n",
@@ -976,55 +980,56 @@ int dtbchk_setup(struct yaml_dt_state *dt)
 
 	dt->checker_state = dtbchk;
 
-	if (!dtbchk->codegen)
-		dt_fatal(dt, "No codegen file provided\n");
-
 	if (!dtbchk->schema)
 		dt_fatal(dt, "No schema file provided\n");
 
-	dtbchk->cgdt = dt_parse_single(dt, dtbchk->codegen, NULL, "codegen");
-	if (!dtbchk->cgdt)
-		dt_fatal(dt, "Couldn't parse codegen file %s\n", dtbchk->schema);
+	/* if codegen is available use it */
+	if (dtbchk->codegen) {
 
-	cgdt = dtbchk->cgdt;
-	cgroot = tree_root(to_tree(cgdt));
+		dtbchk->cgdt = dt_parse_single(dt, dtbchk->codegen, NULL, "codegen");
+		if (!dtbchk->cgdt)
+			dt_fatal(dt, "Couldn't parse codegen file %s\n", dtbchk->schema);
 
-	/* lookup failures are errors */
-	dt_set_error_on_failed_get(cgdt, true);
+		cgdt = dtbchk->cgdt;
+		cgroot = tree_root(to_tree(cgdt));
 
-	dtbchk->input_tag = dt_get_string(cgdt, cgroot, "input-tag", 0, 0);
-	dtbchk->input_ext = dt_get_string(cgdt, cgroot, "input-extension", 0, 0);
-	dtbchk->output_tag = dt_get_string(cgdt, cgroot, "output-tag", 0, 0);
-	dtbchk->output_ext = dt_get_string(cgdt, cgroot, "output-extension", 0, 0);
-	dtbchk->compiler = dt_get_string(cgdt, cgroot, "compiler", 0, 0);
-	dtbchk->cflags = dt_get_string(cgdt, cgroot, "cflags", 0, 0);
+		/* lookup failures are errors */
+		dt_set_error_on_failed_get(cgdt, true);
 
-	dtbchk->cg_common = dt_get_node(cgdt, cgroot, "common", 0);
-	dtbchk->cg_common_prolog = dt_get_string(cgdt, dtbchk->cg_common, "prolog", 0, 0);
-	dtbchk->cg_common_epilog = dt_get_string(cgdt, dtbchk->cg_common, "epilog", 0, 0);
+		dtbchk->input_tag = dt_get_string(cgdt, cgroot, "input-tag", 0, 0);
+		dtbchk->input_ext = dt_get_string(cgdt, cgroot, "input-extension", 0, 0);
+		dtbchk->output_tag = dt_get_string(cgdt, cgroot, "output-tag", 0, 0);
+		dtbchk->output_ext = dt_get_string(cgdt, cgroot, "output-extension", 0, 0);
+		dtbchk->compiler = dt_get_string(cgdt, cgroot, "compiler", 0, 0);
+		dtbchk->cflags = dt_get_string(cgdt, cgroot, "cflags", 0, 0);
 
-	dtbchk->cg_node = dt_get_node(cgdt, cgroot, "node", 0);
-	dtbchk->cg_node_select = dt_get_node(cgdt, dtbchk->cg_node, "select", 0);
-	dtbchk->cg_node_check = dt_get_node(cgdt, dtbchk->cg_node, "check", 0);
-	dtbchk->cg_node_select_prolog = dt_get_string(cgdt, dtbchk->cg_node_select, "prolog", 0, 0);
-	dtbchk->cg_node_select_epilog = dt_get_string(cgdt, dtbchk->cg_node_select, "epilog", 0, 0);
-	dtbchk->cg_node_check_prolog = dt_get_string(cgdt, dtbchk->cg_node_check, "prolog", 0, 0);
-	dtbchk->cg_node_check_epilog = dt_get_string(cgdt, dtbchk->cg_node_check, "epilog", 0, 0);
+		dtbchk->cg_common = dt_get_node(cgdt, cgroot, "common", 0);
+		dtbchk->cg_common_prolog = dt_get_string(cgdt, dtbchk->cg_common, "prolog", 0, 0);
+		dtbchk->cg_common_epilog = dt_get_string(cgdt, dtbchk->cg_common, "epilog", 0, 0);
 
-	dtbchk->cg_property = dt_get_node(cgdt, cgroot, "property", 0);
-	dtbchk->cg_property_check = dt_get_node(cgdt, dtbchk->cg_property, "check", 0);
-	dtbchk->cg_property_check_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "prolog", 0, 0);
-	dtbchk->cg_property_check_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "epilog", 0, 0);
-	dtbchk->cg_property_check_badtype_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-prolog", 0, 0);
-	dtbchk->cg_property_check_badtype_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-epilog", 0, 0);
+		dtbchk->cg_node = dt_get_node(cgdt, cgroot, "node", 0);
+		dtbchk->cg_node_select = dt_get_node(cgdt, dtbchk->cg_node, "select", 0);
+		dtbchk->cg_node_check = dt_get_node(cgdt, dtbchk->cg_node, "check", 0);
+		dtbchk->cg_node_select_prolog = dt_get_string(cgdt, dtbchk->cg_node_select, "prolog", 0, 0);
+		dtbchk->cg_node_select_epilog = dt_get_string(cgdt, dtbchk->cg_node_select, "epilog", 0, 0);
+		dtbchk->cg_node_check_prolog = dt_get_string(cgdt, dtbchk->cg_node_check, "prolog", 0, 0);
+		dtbchk->cg_node_check_epilog = dt_get_string(cgdt, dtbchk->cg_node_check, "epilog", 0, 0);
 
-	dtbchk->cg_property_check_types = dt_get_node(cgdt, dtbchk->cg_property_check, "types", 0);
-	dtbchk->cg_property_check_categories = dt_get_node(cgdt, dtbchk->cg_property_check, "categories", 0);
+		dtbchk->cg_property = dt_get_node(cgdt, cgroot, "property", 0);
+		dtbchk->cg_property_check = dt_get_node(cgdt, dtbchk->cg_property, "check", 0);
+		dtbchk->cg_property_check_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "prolog", 0, 0);
+		dtbchk->cg_property_check_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "epilog", 0, 0);
+		dtbchk->cg_property_check_badtype_prolog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-prolog", 0, 0);
+		dtbchk->cg_property_check_badtype_epilog = dt_get_string(cgdt, dtbchk->cg_property_check, "badtype-epilog", 0, 0);
 
-	if (cgdt->error_flag)
-		dt_fatal(cgdt, "Could not find codegen data\n");
+		dtbchk->cg_property_check_types = dt_get_node(cgdt, dtbchk->cg_property_check, "types", 0);
+		dtbchk->cg_property_check_categories = dt_get_node(cgdt, dtbchk->cg_property_check, "categories", 0);
 
-	dt_set_error_on_failed_get(cgdt, false);
+		if (cgdt->error_flag)
+			dt_fatal(cgdt, "Could not find codegen data\n");
+
+		dt_set_error_on_failed_get(cgdt, false);
+	}
 
 	/* schema is parsed after codegen */
 	dtbchk->sdt = dt_parse_single(dt, dtbchk->schema, dtbchk->schema_save,
