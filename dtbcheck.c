@@ -912,6 +912,9 @@ static int prepare_schema(struct yaml_dt_state *dt)
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *root, *np;
 	int ret, idx;
+	const char *check, *select;
+	size_t check_size, select_size;
+	struct node *npsel, *npchk;
 
 	root = tree_root(to_tree(sdt));
 
@@ -922,6 +925,19 @@ static int prepare_schema(struct yaml_dt_state *dt)
 		ret = dt_get_bool(sdt, np, "virtual", 0, 0);
 		if (ret == 1)
 			continue;
+
+		npsel = node_get_child_by_name(to_tree(sdt), np,
+				"selected-rule-output", 0);
+		select = dt_get_binary(sdt, npsel, "ebpf", 0, 0, &select_size);
+
+		npchk = node_get_child_by_name(to_tree(sdt), np,
+				"check-rule-output", 0);
+		check = dt_get_binary(sdt, npchk, "ebpf", 0, 0, &check_size);
+
+		if (select && check) {
+			dt_debug(dt, "skipping schema_node %s:\n", np->name);
+			continue;
+		}
 
 		ret = prepare_schema_node(dt, sdt, np, t_select, &idx);
 		if (ret)
