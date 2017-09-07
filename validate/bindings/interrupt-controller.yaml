@@ -1,19 +1,16 @@
 %YAML 1.1
 ---
-version: 1
+interrupt-controller:
+  virtual: true
+  version: 1
 
-id: interrupt-controller
-virtual: true
+  properties:
+    "#interrupt-cells":
+      category: required
+      type: int
+      constraint: v > 0
 
-properties:
-  "#interrupt-cells":
-    category: required
-    type: int
-    constraint: v > 0
-
-  interrupt-controller:
-    category: required
-    type: bool
-    constraint: v == true
-...
-
+    interrupt-controller:
+      category: required
+      type: bool
+      constraint: v == true
