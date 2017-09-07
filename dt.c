@@ -56,6 +56,7 @@
 
 #include "utils.h"
 #include "syexpr.h"
+#include "base64.h"
 
 #include "dt.h"
 
@@ -87,6 +88,7 @@ static const char *get_builtin_tag(const char *tag)
 		"!int64",
 		"!uint64",
 		"!char",
+		"!base64",
 	};
 
 	int i;
@@ -2083,6 +2085,8 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 	const char *p;
 	const char *xtag = NULL;
 	const char *tag = NULL;
+	void *bin_output;
+	size_t bin_size;
 
 	/* already resolved? */
 	if (to_dt_ref(ref)->is_resolved)
@@ -2128,12 +2132,15 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 		len = ref->len;
 		p = ref->data;
 
-		if (len > 0) {
-			/* try to parse as an int anyway */
+		is_int = false;
+
+		/* either an explict int tag or no tag and reasonable length */
+		if ((tag && is_int_tag(tag)) ||
+		    (!tag && len > 0 && len < 1024)) {
+
 			ret = parse_int(p, len, &val, &is_unsigned, &is_hex);
 			is_int = ret == 0;
-		} else
-			is_int = false;
+		}
 
 		/* TODO type checking/conversion here */
 		if (!tag && is_int)
@@ -2188,6 +2195,13 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 				return -EINVAL;
 			to_dt_ref(ref)->val = val;
 			to_dt_ref(ref)->is_builtin_tag = true;
+		} else if (!strcmp(tag, "!base64")) {
+			bin_output = base64_decode((const void *)p, len, &bin_size);
+			if (!bin_output)
+				return -EINVAL;
+
+			to_dt_ref(ref)->binary = bin_output;
+			to_dt_ref(ref)->binary_size = bin_size;
 		} else
 			to_dt_ref(ref)->is_builtin_tag = false;
 		to_dt_ref(ref)->is_resolved = true;

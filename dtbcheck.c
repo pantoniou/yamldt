@@ -743,6 +743,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	struct constraint_desc *cd, *cdn;
 	struct node *npstack[NPSTACK_SIZE];
 	struct node *npt;
+	int ret;
 
 	switch (type) {
 	case t_select:
@@ -881,13 +882,18 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 		ref->prop = prop;
 		list_add_tail(&ref->node, &prop->refs);
 
-		dt_resolve_ref(sdt, ref);
+		ret = dt_resolve_ref(sdt, ref);
 
-		/* save to ref */
-		to_dt_ref(ref)->binary = output;
-		to_dt_ref(ref)->binary_size = output_size;
+		assert(!ret || to_dt_ref(ref)->binary);
 
+		free(output);
 		free(b64_output);
+
+		if (ret) {
+			tree_error_at_ref(to_tree(sdt), ref,
+				"Failed to encode to base64\n");
+			err = -ENOMEM;
+		}
 	}
 
 out_err:
