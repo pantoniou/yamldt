@@ -931,8 +931,8 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 	tree_set_root(to_tree(dt), root);
 
 	/* create an overlay fragment for the root */
-	if (!list_empty(&old_root->children) ||
-	    !list_empty(&old_root->properties)) {
+	if (old_root && (!list_empty(&old_root->children) ||
+			 !list_empty(&old_root->properties))) {
 
 		snprintf(namebuf, sizeof(namebuf), "fragment@%d", next_frag++);
 		ov = node_alloc(to_tree(dt), namebuf, NULL);
@@ -996,7 +996,8 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 		node_free(to_tree(dt), np);
 	}
 
-	node_free(to_tree(dt), old_root);
+	if (old_root)
+		node_free(to_tree(dt), old_root);
 }
 
 static void dtb_handle_special_properties(struct yaml_dt_state *dt,
