@@ -66,6 +66,8 @@ clean:
 	rm -f $(DTBS) $(FDTDUMPS) $(CPPS) $(YDEPS) \
 	      $(DTCDTBS) $(DDEPS) $(YAMLS) $(YAMLIS)
 
+validate: check
+
 # always rebuild the final DTBS to check
 $(DTBS): .FORCE
 

@@ -35,7 +35,10 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
-YAMLDTFLAGS_VALIDATE ?= -g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/
+YAMLDTFLAGS_VALIDATE ?=\
+		       -g $(TOPDIR)/validate/schema/codegen.yaml \
+		       -S $(TOPDIR)/validate/bindings/ \
+		       --schema-save=saved-schema.yaml
 YAMLDTFLAGS ?= -@ -C
 FDTDUMPFLAGS ?=
 YDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.o.Yd
