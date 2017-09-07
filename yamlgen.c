@@ -325,8 +325,11 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 	int outcount, count, i;
 
 	if (depth > 0) {
-		fprintf(fp, "%*s%s:", (depth - 1) * 2, "",
-				np->name);
+		fprintf(fp, "%*s", (depth - 1) * 2, "");
+		if (strchr(np->name, '#'))
+			fprintf(fp, "\"%s\":", np->name);
+		else
+			fprintf(fp, "%s:", np->name);
 
 		/* output only first label */
 		for_each_label_of_node(np, l) {
@@ -344,10 +347,10 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 		fprintf(fp, "%*s", depth * 2, "");
 		if (prop->name[0] == '\0')
 			fprintf(fp, "-");
-		else if (prop->name[0] != '#')
-			fprintf(fp, "%s:", prop->name);
-		else
+		else if (strchr(prop->name, '#'))
 			fprintf(fp, "\"%s\":", prop->name);
+		else
+			fprintf(fp, "%s:", prop->name);
 
 		count = 0;
 		for_each_ref_of_property(prop, ref) {
