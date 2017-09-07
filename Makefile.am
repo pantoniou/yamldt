@@ -6,7 +6,7 @@ include_HEADERS =
 
 AM_YFLAGS = -d
 
-bin_PROGRAMS = yamldt intexpr dts2yaml
+bin_PROGRAMS = yamldt intexpr dts2yaml shatest
 
 yamldt_CFLAGS = $(LIBYAML_CFLAGS) $(LIBELF_CFLAGS) 
 yamldt_SOURCES = yamldt.c \
@@ -20,7 +20,9 @@ yamldt_SOURCES = yamldt.c \
 		 dtbcheck.c dtbcheck.h \
 		 utils.c utils.h \
 		 syexpr.c syexpr.h \
-		 base64.c base64.h
+		 base64.c base64.h \
+		 hkdf.c hmac.c sha1.c sha224-256.c sha384-512.c usha.c \
+		 sha.h sha-private.h
 yamldt_LDADD = -lm $(LIBYAML_LIBS)
 
 if EXEC_EBPF
@@ -36,6 +38,10 @@ dts2yaml_SOURCES = dts2yaml.c \
 		   dtsparser.c dtsparser.h \
 		   syexpr.c syexpr.h \
 		   utils.c utils.h 
+
+shatest_SOURCES = shatest.c \
+		 hkdf.c hmac.c sha1.c sha224-256.c sha384-512.c usha.c \
+		 sha.h sha-private.h
 
 AM_MAKEFLAGS = DTC=@DTC@ \
 	       YAMLDT=@abs_top_builddir@/yamldt \
