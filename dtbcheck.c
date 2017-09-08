@@ -313,6 +313,140 @@ static int append_constraint(struct yaml_dt_state *dt,
 	return 0;
 }
 
+static int append_constraint_prop(struct yaml_dt_state *dt, struct node *npc,
+				  const char *name, const void *data, int size,
+				  const char *tag)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct property *prop;
+	struct ref *ref;
+
+	if (!data)
+		return 0;
+
+	prop = prop_alloc(to_tree(sdt), name);
+	prop->np = npc;
+	list_add_tail(&prop->node, &npc->properties);
+
+	ref = ref_alloc(to_tree(sdt), r_scalar, data, size, tag);
+	ref->prop = prop;
+	list_add_tail(&ref->node, &prop->refs);
+
+	return dt_resolve_ref(sdt, ref);
+}
+
+static int append_constraint_to_schema(struct yaml_dt_state *dt,
+				       struct node *np,
+				       struct constraint_desc *cd)
+{
+	struct dtb_check_state *dtbchk = to_dtbchk(dt);
+	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct node *npt, *npc;
+	char namebuf[NODE_FULLNAME_MAX];
+	const char *typetxt, *subtypetxt;
+	struct property *prop;
+	struct ref *ref;
+	int i;
+
+	/* add the contraint node if not there  */
+	npt = node_get_child_by_name(to_tree(sdt), np, "constraints", 0);
+	if (!npt) {
+		npt = node_alloc(to_tree(sdt), "constraints", NULL);
+		list_add_tail(&npt->node, &np->children);
+	}
+
+	snprintf(namebuf, sizeof(namebuf), "c-%d", cd->idx);
+	npc = node_alloc(to_tree(sdt), namebuf, NULL);
+	list_add_tail(&npc->node, &npt->children);
+
+	snprintf(namebuf, sizeof(namebuf), "%d", cd->idx);
+	append_constraint_prop(dt, npc, "id",
+			namebuf, strlen(namebuf), NULL);
+
+	switch (cd->type) {
+	case t_select:
+		typetxt = "select";
+		break;
+	case t_check:
+		typetxt = "check";
+		break;
+	default:
+		typetxt = NULL;
+		break;
+	}
+	if (typetxt)
+		append_constraint_prop(dt, npc, "type",
+			       typetxt, strlen(typetxt), "!str");
+
+	switch (cd->subtype) {
+	case st_select_ref:
+		subtypetxt = "select-ref";
+		break;
+	case st_select_prop:
+		subtypetxt = "select-prop";
+		break;
+	case st_check_category:
+		subtypetxt = "check-category";
+		break;
+	case st_check_type:
+		subtypetxt = "check-type";
+		break;
+	case st_check_rule:
+		subtypetxt = "check-rule";
+		break;
+	default:
+		subtypetxt = NULL;
+		break;
+	}
+	if (subtypetxt)
+		append_constraint_prop(dt, npc, "subtype",
+			       subtypetxt, strlen(subtypetxt), "!str");
+
+	if (cd->propname)
+		append_constraint_prop(dt, npc, "propname",
+				cd->propname, strlen(cd->propname),
+				"!str");
+	if (cd->constraint)
+		append_constraint_prop(dt, npc, "constraint",
+				cd->constraint, strlen(cd->constraint),
+				"!str");
+
+	if (cd->np) {
+		dn_fullname(cd->np, namebuf, sizeof(namebuf));
+		append_constraint_prop(dt, npc, "rule-originator",
+				namebuf, strlen(namebuf),
+				"!str");
+	}
+
+	if (cd->npp) {
+		dn_fullname(cd->npp, namebuf, sizeof(namebuf));
+		append_constraint_prop(dt, npc, "rule-provider",
+				namebuf, strlen(namebuf),
+				"!str");
+	}
+
+	if (cd->npstacksz > 0) {
+		prop = prop_alloc(to_tree(sdt), "rule-stack");
+		prop->np = npc;
+		list_add_tail(&prop->node, &npc->properties);
+
+		for (i = 0; i < cd->npstacksz; i++) {
+
+			dn_fullname(cd->npstack[i], namebuf, sizeof(namebuf));
+
+			ref = ref_alloc(to_tree(sdt), r_scalar,
+					namebuf, strlen(namebuf), "!str");
+			ref->prop = prop;
+			list_add_tail(&ref->node, &prop->refs);
+
+			dt_resolve_ref(sdt, ref);
+		}
+	}
+
+	return 0;
+}
+
 static int count_selected_single(struct yaml_dt_state *dt, struct node *np)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
@@ -809,6 +943,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 				cd->np->name, cd->npp->name, cd->propname, cd->constraint);
 
 		append_constraint(dt, cd, fp, vars);
+		append_constraint_to_schema(dt, np, cd);
 
 		list_del(&cd->node);
 		list_add_tail(&cd->node, &dtbchk->clist);
@@ -826,80 +961,81 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	fclose(fp);
 
 	err = 0;
-	if (size) {
-		/* add the source */
-		prop = prop_alloc(to_tree(sdt), source_name);
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
+	if (!size)
+		goto out;
 
-		ref = ref_alloc(to_tree(sdt), r_scalar, buf, size,
-				dtbchk->input_tag);
-		ref->prop = prop;
-		list_add_tail(&ref->node, &prop->refs);
+	/* add the source */
+	prop = prop_alloc(to_tree(sdt), source_name);
+	prop->np = np;
+	list_add_tail(&prop->node, &np->properties);
 
-		dt_resolve_ref(sdt, ref);
+	ref = ref_alloc(to_tree(sdt), r_scalar, buf, size,
+			dtbchk->input_tag);
+	ref->prop = prop;
+	list_add_tail(&ref->node, &prop->refs);
 
-		if (dtbchk->save_temps)
-			save_file(dt, np->name, type, dtbchk->input_ext,
-				  buf, size);
+	dt_resolve_ref(sdt, ref);
 
-		/* and compile it */
-		err = compile(ref->data, ref->len,
-				dtbchk->compiler,
-				dtbchk->cflags,
-				&output, &output_size);
-		if (err) {
-			tree_error_at_ref(to_tree(sdt), ref,
-				"Failed to compile %s:\n%s %s\n",
-				to_dt_ref(ref)->tag,
-				dtbchk->compiler, dtbchk->cflags);
-			goto out_err;
-		}
+	if (dtbchk->save_temps)
+		save_file(dt, np->name, type, dtbchk->input_ext,
+				buf, size);
 
-		b64_output = base64_encode(output, output_size,
-					   &b64_output_size);
-
-		if (dtbchk->save_temps)
-			save_file(dt, np->name, type, dtbchk->output_ext,
-					output, output_size);
-
-		if (!b64_output) {
-			tree_error_at_ref(to_tree(sdt), ref,
-				"Failed to encode to base64\n");
-			err = -ENOMEM;
-			goto out_err;
-		}
-
-		/* add the output */
-		npt = node_alloc(to_tree(sdt), output_name, NULL);
-		list_add_tail(&npt->node, &np->children);
-
-		prop = prop_alloc(to_tree(sdt), "ebpf");
-		prop->np = npt;
-		list_add_tail(&prop->node, &npt->properties);
-
-		ref = ref_alloc(to_tree(sdt), r_scalar,
-				b64_output, b64_output_size,
-				"!base64");
-
-		ref->prop = prop;
-		list_add_tail(&ref->node, &prop->refs);
-
-		ret = dt_resolve_ref(sdt, ref);
-
-		assert(!ret || to_dt_ref(ref)->binary);
-
-		free(output);
-		free(b64_output);
-
-		if (ret) {
-			tree_error_at_ref(to_tree(sdt), ref,
-				"Failed to encode to base64\n");
-			err = -ENOMEM;
-		}
+	/* and compile it */
+	err = compile(ref->data, ref->len,
+			dtbchk->compiler,
+			dtbchk->cflags,
+			&output, &output_size);
+	if (err) {
+		tree_error_at_ref(to_tree(sdt), ref,
+			"Failed to compile %s:\n%s %s\n",
+			to_dt_ref(ref)->tag,
+			dtbchk->compiler, dtbchk->cflags);
+		goto out;
 	}
 
-out_err:
+	b64_output = base64_encode(output, output_size,
+					&b64_output_size);
+
+	if (dtbchk->save_temps)
+		save_file(dt, np->name, type, dtbchk->output_ext,
+				output, output_size);
+
+	if (!b64_output) {
+		tree_error_at_ref(to_tree(sdt), ref,
+			"Failed to encode to base64\n");
+		err = -ENOMEM;
+		goto out;
+	}
+
+	/* add the output */
+	npt = node_alloc(to_tree(sdt), output_name, NULL);
+	list_add_tail(&npt->node, &np->children);
+
+	prop = prop_alloc(to_tree(sdt), "ebpf");
+	prop->np = npt;
+	list_add_tail(&prop->node, &npt->properties);
+
+	ref = ref_alloc(to_tree(sdt), r_scalar,
+			b64_output, b64_output_size,
+			"!base64");
+
+	ref->prop = prop;
+	list_add_tail(&ref->node, &prop->refs);
+
+	ret = dt_resolve_ref(sdt, ref);
+
+	assert(!ret || to_dt_ref(ref)->binary);
+
+	free(output);
+	free(b64_output);
+
+	if (ret) {
+		tree_error_at_ref(to_tree(sdt), ref,
+			"Failed to encode to base64\n");
+		err = -ENOMEM;
+	}
+
+out:
 
 	if (buf)
 		free(buf);
