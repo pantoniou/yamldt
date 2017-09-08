@@ -1385,13 +1385,13 @@ static void check_node_single(struct yaml_dt_state *dt,
 	case cet_bad_property_type:
 		if (!ref || !propname)
 			break;
-		tree_error_at_ref(to_tree(dt), ref, "%s%s%s has bad type\n",
+		tree_error_at_ref(to_tree(dt), ref, "property %s%s%s has bad type\n",
 				marker, propname, reset);
 		break;
 	case cet_missing_property:
 		if (!np || !propname)
 			break;
-		tree_error_at_node(to_tree(dt), np, "%s%s%s is missing\n",
+		tree_error_at_node(to_tree(dt), np, "property %s%s%s is missing\n",
 				marker, propname, reset);
 		break;
 	case cet_property_constraint_failed:
