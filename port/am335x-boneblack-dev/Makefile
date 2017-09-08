@@ -35,10 +35,10 @@ DTC ?= dtc
 DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
-YAMLDTFLAGS_VALIDATE ?=\
+YAMLDTFLAGS_VALIDATE ?= \
 		       -g $(TOPDIR)/validate/schema/codegen.yaml \
 		       -S $(TOPDIR)/validate/bindings/ \
-		       --schema-save=saved-schema.yaml
+		       --schema-save=schema.yaml
 YAMLDTFLAGS ?= -@ -C
 FDTDUMPFLAGS ?=
 YDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.o.Yd
@@ -75,9 +75,9 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 all: $(DTBS) $(DTSS)
 
 clean:
-	rm -f $(YDEPS) $(DDEPS) $(YAMLSO) $(ALLDTBS) $(FDTDUMPS) $(DIFFS) \
-		am335x-boneblack-rules.yaml \
-		*.pure.yaml *.pure.dts *.[ch] *.ebpf *.cpp.yaml
+	rm -f $(YDEPS) $(DDEPS) $(YAMLSO) $(ALLDTBS) $(FDTDUMPS) $(DIFFS)
+	rm -f am335x-boneblack-rules.yaml *.pure.yaml *.pure.dts *.[ch] *.ebpf *.cpp.yaml
+	rm -f schema.yaml
 
 check: $(DTCDTBS) $(DTBS) $(DTSS) $(DIFFS)
 

@@ -1,3 +1,4 @@
 *.o.yaml
 *.pure.yaml
 *.pure.dts
+schema.yaml

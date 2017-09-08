@@ -15,10 +15,17 @@ FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
 DTS2YAML ?= $(TOPDIR)/dts2yaml
 
+SCHEMA ?= schema.yaml
+
+CODEGEN ?= $(TOPDIR)/validate/schema/codegen.yaml
+BINDINGS ?= $(TOPDIR)/validate/bindings
+BINDING_FILES ?= $(shell find $(BINDINGS) -name '*.yaml' -print)
+
+VALIDATE ?= $(if $(findstring validate, $(MAKECMDGOALS)), 1)
+
 # pass extra validate flags
 YAMLDTFLAGS ?= -C \
-	$(if $(findstring validate, $(MAKECMDGOALS)), \
-		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
+	$(if $(findstring 1, $(VALIDATE)), -S $(SCHEMA))
 
 DTS2YAMLFLAGS ?=
 FDTDUMPFLAGS ?=
@@ -48,7 +55,7 @@ BLACKDIFFS    := $(addsuffix .diff, $(BLACKLIST))
 %.dtb: %.dts
 	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
-%.yaml.dtb: %.yaml | genyamls
+%.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
 	$(CPP) $(CPPFLAGS) $^ | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.dtc.yaml: %.dts
@@ -72,6 +79,7 @@ clean:
 	find ./ -name '*.yaml' -print | xargs rm -f
 	find ./ -name '*.yamli' -print | xargs rm -f
 	rm -f *.cpp.yaml *.cpp.dts
+	rm -f $(SCHEMA)
 
 $(YAMLS): $(DTSS)
 $(YAMLS): genyamls
@@ -86,4 +94,7 @@ genblackyamls:
 	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(BLACKDTSS) || true
 	@echo "dts2yaml DONE"
 
-validate: check
+$(SCHEMA): $(CODEGEN) $(BINDING_FILES)
+	$(YAMLDT) -g $(CODEGEN) -S $(BINDINGS)/ --schema-save=$(SCHEMA)
+
+validate: $(SCHEMA) check
