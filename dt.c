@@ -2072,6 +2072,15 @@ void dt_info(struct yaml_dt_state *dt, const char *fmt, ...)
 	va_end(ap);
 }
 
+void dt_error(struct yaml_dt_state *dt, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+}
+
 int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 {
 	struct tree *t = to_tree(dt);

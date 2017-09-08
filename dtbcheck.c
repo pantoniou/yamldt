@@ -338,21 +338,24 @@ static int append_constraint_prop(struct yaml_dt_state *dt, struct node *npc,
 
 static int append_constraint_to_schema(struct yaml_dt_state *dt,
 				       struct node *np,
+				       const char *npname,
 				       struct constraint_desc *cd)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
+	struct constraint_desc *cdt;
 	struct node *npt, *npc;
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *typetxt, *subtypetxt;
 	struct property *prop;
+	const char *constraint_propname;
 	struct ref *ref;
 	int i;
 
 	/* add the contraint node if not there  */
-	npt = node_get_child_by_name(to_tree(sdt), np, "constraints", 0);
+	npt = node_get_child_by_name(to_tree(sdt), np, npname, 0);
 	if (!npt) {
-		npt = node_alloc(to_tree(sdt), "constraints", NULL);
+		npt = node_alloc(to_tree(sdt), npname, NULL);
 		list_add_tail(&npt->node, &np->children);
 	}
 
@@ -382,21 +385,27 @@ static int append_constraint_to_schema(struct yaml_dt_state *dt,
 	switch (cd->subtype) {
 	case st_select_ref:
 		subtypetxt = "select-ref";
+		constraint_propname = "constraint";
 		break;
 	case st_select_prop:
 		subtypetxt = "select-prop";
+		constraint_propname = "constraint";
 		break;
 	case st_check_category:
 		subtypetxt = "check-category";
+		constraint_propname = "category";
 		break;
 	case st_check_type:
 		subtypetxt = "check-type";
+		constraint_propname = "type";
 		break;
 	case st_check_rule:
 		subtypetxt = "check-rule";
+		constraint_propname = "constraint";
 		break;
 	default:
 		subtypetxt = NULL;
+		constraint_propname = NULL;
 		break;
 	}
 	if (subtypetxt)
@@ -407,10 +416,11 @@ static int append_constraint_to_schema(struct yaml_dt_state *dt,
 		append_constraint_prop(dt, npc, "propname",
 				cd->propname, strlen(cd->propname),
 				"!str");
-	if (cd->constraint)
-		append_constraint_prop(dt, npc, "constraint",
+	if (cd->constraint) {
+		append_constraint_prop(dt, npc, constraint_propname,
 				cd->constraint, strlen(cd->constraint),
 				"!str");
+	}
 
 	if (cd->np) {
 		dn_fullname(cd->np, namebuf, sizeof(namebuf));
@@ -443,6 +453,9 @@ static int append_constraint_to_schema(struct yaml_dt_state *dt,
 			dt_resolve_ref(sdt, ref);
 		}
 	}
+
+	list_for_each_entry(cdt, &cd->children, node)
+		append_constraint_to_schema(dt, npc, "subconstraints", cdt);
 
 	return 0;
 }
@@ -579,6 +592,13 @@ static void save_file(struct yaml_dt_state *dt, const char *base,
 	free(filename);
 }
 
+static bool constraint_eq(const struct constraint_desc *cd1,
+		const struct constraint_desc *cd2)
+{
+	return cd1->type == cd2->type && cd1->subtype == cd2->subtype &&
+	       !strcmp(cd1->constraint, cd2->constraint);
+}
+
 static void add_constraint(struct yaml_dt_state *dt,
 	struct list_head *clist,
 	enum constraint_type type, enum constraint_subtype subtype, int *idxp,
@@ -631,22 +651,31 @@ static void add_constraint(struct yaml_dt_state *dt,
 
 	lh = cd->parent ? &cdt->children : clist;
 
-	/* detect duplicate constraints */
-	list_for_each_entry(cdn, lh, node) {
-		if (cdn->type == cd->type && cdn->subtype == cd->subtype &&
-		    cdn->npp == cd->npp && !strcmp(cdn->constraint, cd->constraint)) {
+	if (cd->parent) {
+		if (constraint_eq(cd->parent, cd)) {
 			free(cd);
 			return;
 		}
+
+		/* detect duplicate constraints */
+		list_for_each_entry(cdn, lh, node) {
+			if (constraint_eq(cdn, cd)) {
+				free(cd);
+				return;
+			}
+		}
+
 	}
 
 	list_add_tail(&cd->node, lh);
 
 	(*idxp)++;
 #if 0
+	{
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *typename;
 	const char *subtypename;
+	int i;
 
 	switch (type) {
 	case t_select:
@@ -691,6 +720,7 @@ static void add_constraint(struct yaml_dt_state *dt,
 				dn_fullname(cd->npstack[i], namebuf, sizeof(namebuf)));
 	fprintf(stderr, "    nptype=%s\n", dn_fullname(nptype, namebuf, sizeof(namebuf)));
 	fprintf(stderr, "    npcategory=%s\n", dn_fullname(npcategory, namebuf, sizeof(namebuf)));
+	}
 #endif
 }
 
@@ -943,7 +973,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 				cd->np->name, cd->npp->name, cd->propname, cd->constraint);
 
 		append_constraint(dt, cd, fp, vars);
-		append_constraint_to_schema(dt, np, cd);
+		append_constraint_to_schema(dt, np, "constraints", cd);
 
 		list_del(&cd->node);
 		list_add_tail(&cd->node, &dtbchk->clist);
@@ -1057,7 +1087,7 @@ static int prepare_schema(struct yaml_dt_state *dt)
 
 	root = tree_root(to_tree(sdt));
 
-	idx = 0;
+	idx = 1;
 	for_each_child_of_node(root, np) {
 
 		/* never generate checkers for virtuals */
@@ -1209,63 +1239,68 @@ void dtbchk_cleanup(struct yaml_dt_state *dt)
 
 #ifdef CAN_RUN_EBPF
 
-/* find the constraint entry by error code */
-static struct constraint_desc *lookup_constraint_by_ret(struct yaml_dt_state *dt,
-		struct node *np, struct node *snp, uint64_t vmret,
-		const char **errmsg)
+enum constraint_error_type {
+	cet_no_error,
+	cet_bad_property_type,
+	cet_missing_property,
+	cet_property_constraint_failed,
+	cet_node_constraint_failed,
+};
+
+static const char *constraint_error_txt(enum constraint_error_type errtype)
 {
-	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct constraint_desc *cd, *cdt;
-	int idx;
+	switch (errtype) {
+	case cet_no_error:
+		return "no error";
+	case cet_bad_property_type:
+		return "bad property type";
+	case cet_missing_property:
+		return "missing property";
+	case cet_property_constraint_failed:
+		return "constraint failed";
+	case cet_node_constraint_failed:
+		return "node constraint failed";
+	default:
+		break;
+	}
+	return "<NULL>";
+}
+
+static int parse_constraint_ret(uint64_t vmret,
+		enum constraint_error_type *errtype, const char **errmsg)
+{
 	long long ret = (int64_t)vmret;
+	const char *tmp_errmsg;
+	enum constraint_error_type tmp_errtype;
+	int idx;
+
+	if (!errtype)
+		errtype = &tmp_errtype;
+	else
+		*errtype = cet_no_error;
+	if (!errmsg)
+		errmsg = &tmp_errmsg;
+	else
+		*errmsg = "";
 
 	if (ret >= 0 || ret < -4000)
-		return NULL;
+		return 0;
 
 	if (ret < -3000) { 		/* badtype check */
 		idx = -(ret + 3000);
-		*errmsg = "bad property type";
-	} else if (ret < -2000) {	/* exist check */
+		*errtype = cet_bad_property_type;
+	} else if (ret < -2000) {	/* exists check */
 		idx = -(ret + 2000);
-		*errmsg = "missing property";
+		*errtype = cet_missing_property;
 	} else if (ret < -1000) { 	/* property check */
 		idx = -(ret + 1000);
-		*errmsg = "constraint rule failed";
-	} else if (ret == -1)		/* node constraint */
-		return NULL;
-	else
-		return NULL;
-
-	/* two levels (we group by property */
-	list_for_each_entry(cd, &dtbchk->clist, node) {
-		if (cd->idx == idx)
-			return cd;
-		list_for_each_entry(cdt, &cd->children, node) {
-			if (cdt->idx == idx)
-				return cdt;
-		}
+		*errtype = cet_property_constraint_failed;
+	} else {	 		/* node constraint */
+		idx = -(ret + 1000);
+		*errtype = cet_node_constraint_failed;
 	}
-	return NULL;
-}
-
-static void dump_constraints(struct yaml_dt_state *dt,
-		struct node *np, struct node *snp)
-{
-	struct dtb_check_state *dtbchk = to_dtbchk(dt);
-	struct constraint_desc *cd, *cdt;
-	char namebuf[NODE_FULLNAME_MAX];
-
-	/* two levels (we group by property */
-	list_for_each_entry(cd, &dtbchk->clist, node) {
-		printf("%3d: %s (%s)\n", cd->idx,
-				dn_fullname(cd->npp, namebuf, sizeof(namebuf)),
-				cd->propname);
-		list_for_each_entry(cdt, &cd->children, node) {
-			printf("   %3d: %s (%s)\n", cdt->idx,
-					dn_fullname(cdt->npp, namebuf, sizeof(namebuf)),
-					cdt->propname);
-		}
-	}
+	*errmsg = constraint_error_txt(*errtype);
+	return idx;
 }
 
 static void check_node_single(struct yaml_dt_state *dt,
@@ -1277,14 +1312,15 @@ static void check_node_single(struct yaml_dt_state *dt,
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *child;
 	char namebuf[NODE_FULLNAME_MAX];
-	int err;
+	int err, idx, count;
 	uint64_t vmret;
-	struct constraint_desc *cd;
+	struct node *npc, *npt, *npcc;
 	struct property *prop;
 	struct ref *ref;
-	const char *errmsg;
-	bool errout;
-	const char *good = "", *bad = "", *emph = "", *marker = "", *reset = "";
+	const char *errmsg, *propname, *constraint, *category, *subtype;
+	enum constraint_error_type errtype;
+	const char *good = "", *bad = "", *emph = "", *marker = "";
+	const char *reset = "", *constr = "";
 
 	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) ||
 	     dt->cfg.color == 1) {
@@ -1292,6 +1328,7 @@ static void check_node_single(struct yaml_dt_state *dt,
 		bad = RED;
 		emph = WHITE;
 		marker = YELLOW;
+		constr = MAGENTA;
 		reset = RESET;
 	}
 
@@ -1304,67 +1341,116 @@ static void check_node_single(struct yaml_dt_state *dt,
 		dt_fatal(dt, "exec failed with code %d (%s)\n",
 				err, strerror(-err));
 
+	if (vmret != 0)
+		goto cont;
+
+	dt_debug(dt, "select match at node %s against %s\n",
+		dn_fullname(np, namebuf, sizeof(namebuf)),
+		snp->name);
+
+	/* now running check */
+	vmret = ebpf_exec(&check_ctx->vm, np, 0, &err);
+	if (err)
+		dt_fatal(dt, "exec failed with code %d (%s)\n",
+				err, strerror(-err));
 	if (vmret == 0) {
-		dt_debug(dt, "select match at node %s against %s\n",
-			dn_fullname(np, namebuf, sizeof(namebuf)),
-			snp->name);
-
-		/* now running check */
-		vmret = ebpf_exec(&check_ctx->vm, np, 0, &err);
-		if (err)
-			dt_fatal(dt, "exec failed with code %d (%s)\n",
-					err, strerror(-err));
-		if (vmret == 0)
-			dt_info(dt, "%s%s:%s %s%s%s %sOK%s\n",
-				marker, snp->name, reset,
-				emph, dn_fullname(np, namebuf, sizeof(namebuf)),
-				reset, good, reset);
-		else {
-			dt_info(dt, "%s%s:%s %s%s%s %sFAIL (%lld)%s\n",
-				marker, snp->name, reset,
-				emph, dn_fullname(np, namebuf, sizeof(namebuf)),
-				reset, bad, (long long)vmret, reset);
-			cd = lookup_constraint_by_ret(dt, np, snp, vmret, &errmsg);
-			if (cd) {
-				errout = false;
-				if ((prop = dt_get_property(dt, np, cd->npp->name, 0)) &&
-				    (ref = dt_get_ref(dt, prop, 0))) {
-					tree_error_at_ref(to_tree(dt), ref, "%s\n",
-							errmsg);
-					errout = true;
-				}
-
-				if ((prop = dt_get_property(sdt, cd->npp, "constraint", 0)) &&
-				    (ref = dt_get_ref(sdt, prop, 0))) {
-					tree_error_at_ref(to_tree(sdt), ref,
-						"constraint that fails was defined here\n");
-					errout = true;
-				}
-
-				if (errout)
-					errmsg = NULL;
-
-				tree_error_at_node(to_tree(sdt), cd->npp,
-					"%s%sproperty was defined at %s\n",
-					errmsg ? errmsg : "",
-					errmsg ? ": " : "",
-					dn_fullname(cd->npp, namebuf, sizeof(namebuf)));
-
-			} else {
-				dump_constraints(dt, np, snp);
-
-				tree_error_at_node(to_tree(dt), np,
-					"node %s has failed verification (code=%lld)\n",
-					dn_fullname(np, namebuf, sizeof(namebuf)),
-					(long long)vmret);
-
-				tree_error_at_node(to_tree(sdt), snp,
-					"verification node @%s\n",
-					dn_fullname(snp, namebuf, sizeof(namebuf)));
-			}
-		}
+		dt_info(dt, "%s%s:%s %s%s%s %sOK%s\n",
+			marker, snp->name, reset,
+			emph, dn_fullname(np, namebuf, sizeof(namebuf)),
+			reset, good, reset);
+		goto cont;
 	}
 
+	idx = parse_constraint_ret(vmret, &errtype, &errmsg);
+
+	dt_info(dt, "%s%s:%s %s%s%s %sFAIL (%lld)%s\n",
+		marker, snp->name, reset,
+		emph, dn_fullname(np, namebuf, sizeof(namebuf)),
+		reset, bad, (long long)vmret, reset);
+
+	snprintf(namebuf, sizeof(namebuf), "c-%d", idx);
+	npt = node_get_child_by_name(to_tree(sdt), snp, "constraints", 0);
+	npc = node_get_child_by_name(to_tree(sdt), npt, namebuf, 0);
+	propname = dt_get_string(sdt, npc, "propname", 0, 0);
+	constraint = dt_get_string(sdt, npc, "constraint", 0, 0);
+	category = dt_get_string(sdt, npc, "category", 0, 0);
+	(void)category;
+
+	prop = dt_get_property(dt, np, propname, 0);
+	ref = dt_get_ref(dt, prop, 0);
+
+	switch (errtype) {
+	case cet_no_error:
+		break;
+	case cet_bad_property_type:
+		if (!ref || !propname)
+			break;
+		tree_error_at_ref(to_tree(dt), ref, "%s%s%s has bad type\n",
+				marker, propname, reset);
+		break;
+	case cet_missing_property:
+		if (!np || !propname)
+			break;
+		tree_error_at_node(to_tree(dt), np, "%s%s%s is missing\n",
+				marker, propname, reset);
+		break;
+	case cet_property_constraint_failed:
+		if (!ref || !propname || !npc)
+			break;
+
+		/* it's a rule, so count rule subconstraints */
+		if (!constraint) {
+			npcc = node_get_child_by_name(to_tree(sdt), npc,
+					"subconstraints", 0);
+			count = 0;
+			if (!npcc)
+				break;
+
+			for_each_child_of_node(npcc, npt) {
+				subtype = dt_get_string(sdt,
+						npt, "subtype", 0, 0);
+				if (subtype && !strcmp(subtype, "check-rule"))
+					count++;
+			}
+
+			for_each_child_of_node(npcc, npt) {
+
+				subtype = dt_get_string(sdt,
+						npt, "subtype", 0, 0);
+				if (!subtype || strcmp(subtype, "check-rule"))
+					continue;
+				constraint = dt_get_string(sdt,
+						npt, "constraint", 0, 0);
+				if (!constraint)
+					continue;
+
+				tree_error_at_ref(to_tree(dt), ref, "%s%s%s %s constraint:%s%s%s%s\n",
+						marker, propname, reset,
+						count == 1 ? "failed" : "possibly-failed",
+						!strchr(constraint, '\n') ? " " : "\n",
+						constr, constraint, reset);
+			}
+
+		} else {
+			tree_error_at_ref(to_tree(dt), ref, "%s%s%s failed constraint:%s%s%s%s\n",
+					marker, propname, reset,
+					!strchr(constraint, '\n') ? " " : "\n",
+					constr, constraint, reset);
+		}
+		break;
+	case cet_node_constraint_failed:
+		if (!np || !constraint)
+			break;
+		tree_error_at_node(to_tree(dt), np, "%s%s%s failed constraint:%s%s%s%s\n",
+				marker, np->name, reset,
+				!strchr(constraint, '\n') ? " " : "\n",
+				constr, constraint, reset);
+		break;
+	default:
+		break;
+	}
+
+cont:
 	for_each_child_of_node(np, child)
 		check_node_single(dt, child, snp, select_ctx, check_ctx);
 }
