@@ -1725,6 +1725,9 @@ static int item_expr(struct dts_state *ds, char c)
 		ds->expr_nest++;
 		return 0;
 	}
+	/* convert all spaces to actual space (handle weird spacing) */
+	if (isspace(c))
+		c = ' ';
 
 	accumulate(ds, c);
 	return 0;
@@ -1857,6 +1860,10 @@ static int item_macro_args(struct dts_state *ds, char c)
 		dts_error(ds, "bad macro expansion\n");
 		return -1;
 	}
+
+	/* convert all spaces to actual space (handle weird spacing) */
+	if (isspace(c))
+		c = ' ';
 
 	accumulate(ds, c);
 	return 0;
