@@ -1724,7 +1724,8 @@ static int dts_emit(struct yaml_dt_state *dt)
 		}
 	}
 
-	dts_emit_node(dt, tree_root(to_tree(dt)), 0);
+	if (tree_root(to_tree(dt)))
+		dts_emit_node(dt, tree_root(to_tree(dt)), 0);
 
 	return !ferror(dt->output) ? 0 : -1;
 }
