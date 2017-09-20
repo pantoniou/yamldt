@@ -139,6 +139,7 @@ static inline bool is_seqstart_atom(enum dts_emit_atom atom)
 
 struct dts_location {
 	const char *filename;
+	int start_index, end_index;
 	int start_line, start_col;
 	int end_line, end_col;
 };
@@ -212,6 +213,7 @@ struct dts_state {
 	int depth;
 	bool node_empty;
 	char last_c;
+	int index;
 	int line;
 	int col;
 	int tabs;
@@ -278,8 +280,10 @@ void dts_cleanup(struct dts_state *ds);
 int dts_feed(struct dts_state *ds, int c);
 const char *dts_get_filename(struct dts_state *ds);
 const char *dts_get_state(struct dts_state *ds);
+int dts_get_index(struct dts_state *ds);
 int dts_get_line(struct dts_state *ds);
 int dts_get_column(struct dts_state *ds);
+int dts_get_token_index(struct dts_state *ds);
 int dts_get_token_line(struct dts_state *ds);
 int dts_get_token_column(struct dts_state *ds);
 ;

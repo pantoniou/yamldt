@@ -179,6 +179,7 @@ static int accumulate(struct dts_state *ds, char c)
 
 	if (acc_get_size(&ds->acc_body) == 0) {
 		ds->acc_loc.filename = ds->filename;
+		ds->acc_loc.start_index = ds->index;
 		ds->acc_loc.start_line = ds->line;
 		ds->acc_loc.start_col = ds->col;
 	}
@@ -188,6 +189,7 @@ static int accumulate(struct dts_state *ds, char c)
 		return -1;
 	}
 
+	ds->acc_loc.end_index = ds->index;
 	ds->acc_loc.end_line = ds->line;
 	ds->acc_loc.end_col = ds->col;
 	return 0;
@@ -215,6 +217,7 @@ static int comment_accumulate(struct dts_state *ds, char c)
 
 	if (acc_get_size(&ds->acc_comm) == 0) {
 		ds->comm_loc.filename = ds->filename;
+		ds->comm_loc.start_index = ds->index;
 		ds->comm_loc.start_line = ds->line;
 		ds->comm_loc.start_col = ds->col;
 	}
@@ -223,6 +226,7 @@ static int comment_accumulate(struct dts_state *ds, char c)
 		dts_error(ds, "out of memory\n");
 		return -1;
 	}
+	ds->comm_loc.end_index = ds->index;
 	ds->comm_loc.end_line = ds->line;
 	ds->comm_loc.end_col = ds->col;
 	return 0;
@@ -331,6 +335,8 @@ item_from_accumulator(struct dts_state *ds, enum dts_emit_atom atom)
 	li->item.loc.filename = p;
 	strcpy(p, ds->filename);
 	p += strlen(li->item.loc.filename) + 1;
+	li->item.loc.start_index = ds->acc_loc.start_index;
+	li->item.loc.end_index = ds->acc_loc.end_index;
 	li->item.loc.start_line = ds->acc_loc.start_line;
 	li->item.loc.start_col = ds->acc_loc.start_col;
 	li->item.loc.end_line = ds->acc_loc.end_line;
@@ -365,6 +371,8 @@ item_from_comment_accumulator(struct dts_state *ds)
 	li->item.loc.filename = p;
 	strcpy(p, ds->filename);
 	p += strlen(li->item.loc.filename) + 1;
+	li->item.loc.start_index = ds->comm_loc.start_index;
+	li->item.loc.end_index = ds->comm_loc.end_index;
 	li->item.loc.start_line = ds->comm_loc.start_line;
 	li->item.loc.start_col = ds->comm_loc.start_col;
 	li->item.loc.end_line = ds->comm_loc.end_line;
@@ -2206,6 +2214,7 @@ int dts_setup(struct dts_state *ds, const char *filename, int tabs,
 	ds->filename = strdup(filename);
 	ds->fs = s_start;
 	ds->last_c = 0;
+	ds->index = 0;
 	ds->line = 1;
 	ds->col = 1;
 	ds->tabs = tabs;
@@ -2259,6 +2268,7 @@ int dts_feed(struct dts_state *ds, int c)
 		return ret;
 
 	ds->last_c = c;
+	ds->index++;
 	if (c == '\n') {
 		ds->line++;
 		ds->col = 1;
@@ -2278,6 +2288,11 @@ const char *dts_get_state(struct dts_state *ds)
 	return states_txt[ds->fs];
 }
 
+int dts_get_index(struct dts_state *ds)
+{
+	return ds->index;
+}
+
 int dts_get_line(struct dts_state *ds)
 {
 	return ds->line;
@@ -2286,6 +2301,11 @@ int dts_get_line(struct dts_state *ds)
 int dts_get_column(struct dts_state *ds)
 {
 	return ds->col;
+}
+
+int dts_get_token_index(struct dts_state *ds)
+{
+	return ds->acc_loc.start_index;
 }
 
 int dts_get_token_line(struct dts_state *ds)
