@@ -44,6 +44,7 @@
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <time.h>
 #include <stdbool.h>
@@ -259,15 +260,12 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 
 	ref = to_ref(dt_ref);
 
-	/* we could try to avoid the copy but.. it's easier for now to allocate */
+	p = malloc(len + 1);
+	assert(p);
+	memcpy(p, data, len);
+	((char *)p)[len] = '\0';	/* and always terminate */
 
-	/* if (data < dt->input_content || data >= dt->input_content + dt->input_size) { */
-		p = malloc(len + 1);
-		assert(p);
-		memcpy(p, data, len);
-		((char *)p)[len] = '\0';	/* and always terminate */
-	/* } else
-		p = (void *)data; */
+	dt_ref->alloc_data = p;
 
 	ref->data = p;
 	ref->len = len;
@@ -288,16 +286,13 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 
 void yaml_dt_ref_free(struct tree *t, struct ref *ref)
 {
-	struct yaml_dt_state *dt = to_dt(t);
 	struct dt_ref *dt_ref = to_dt_ref(ref);
-	void *p;
 
 	if (ref->xtag)
 		free(ref->xtag);
 
-	p = (void *)ref->data;
-	if (p < dt->input_content || p >= dt->input_content + dt->input_size)
-		free(p);
+	if (dt_ref->alloc_data)
+		free(dt_ref->alloc_data);
 
 	if (dt_ref->binary)
 		free(dt_ref->binary);
@@ -513,9 +508,10 @@ static void dt_document_end(struct yaml_dt_state *dt)
 	}
 }
 
+#if 0
 static int read_input_file(struct yaml_dt_state *dt, const char *file)
 {
-	struct input *in;
+	struct yaml_dt_input *in;
 	char *s, *e, *le;
 	size_t bufsz, nread, currline, adv, filesz;
 	FILE *fp;
@@ -622,6 +618,7 @@ static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
 		ignore_first_newline = false;
 	}
 }
+#endif
 
 int dt_emitter_setup(struct yaml_dt_state *dt)
 {
@@ -671,10 +668,151 @@ int dt_checker_check(struct yaml_dt_state *dt)
 	return dt->checker->cops->check(dt);
 }
 
+static struct yaml_dt_input *
+dt_input_create(struct yaml_dt_state *dt, const char *file,
+		struct yaml_dt_input *in_parent)
+{
+	struct yaml_dt_input *in;
+	char *s;
+	size_t bufsz, nread, adv, filesz, alloc;
+	FILE *fp;
+	struct stat st;
+
+	if (strcmp(file, "-")) {
+		fp = fopen(file, "rb");
+		if (!fp)
+			return NULL;
+	} else {
+		file = "<stdin>";
+		fp = stdin;
+	}
+
+	in = malloc(sizeof(*in));
+	assert(in);
+
+	memset(in, 0, sizeof(*in));
+	in->name = strdup(file);
+	assert(in->name);
+
+	INIT_LIST_HEAD(&in->includes);
+
+	/* get the file size if we can */
+	filesz = 0;
+	if (fstat(fileno(fp), &st) != -1 && S_ISREG(st.st_mode))
+		filesz = st.st_size;
+
+	/* for non regular files the advance is 64K */
+	adv = filesz ? filesz : 64 * 1024;
+
+	alloc = 0;
+	do {
+		if (in->size >= alloc) {
+			alloc += adv;
+			in->content = realloc(in->content, alloc);
+			assert(in->content);
+		}
+
+		s = in->content + in->size;
+		bufsz = alloc - in->size;
+
+		nread = fread(s, 1, bufsz, fp);
+		if (nread <= 0 && ferror(fp))
+			return NULL;
+		in->size += nread;
+
+		/* avoid extra calls to fread */
+		if (filesz && in->size >= filesz)
+			break;
+
+	} while (nread >= bufsz);
+
+	/* trim */
+	if (in->size && alloc != in->size) {
+		in->content = realloc(in->content, in->size);
+		assert(in->content);
+	}
+
+	fclose(fp);
+
+	in->parent = in_parent;
+	list_add_tail(&in->node, !in->parent ? &dt->inputs : &in_parent->includes);
+
+	if (!in_parent)
+		dt_debug(dt, "%s: read %zd bytes @%zd\n",
+				in->name, in->size, in->start);
+	else
+		dt_debug(dt, "%s: read %zd bytes @%zd - (parent %s @%zu)\n",
+				in->name, in->size, in->start,
+				in_parent->name, in_parent->pos);
+
+	return in;
+}
+
+static void dt_input_free(struct yaml_dt_state *dt, struct yaml_dt_input *in)
+{
+	struct yaml_dt_input *ini, *inin;
+
+	list_for_each_entry_safe(ini, inin, &in->includes, node) {
+		list_del(&ini->node);
+		dt_input_free(dt, ini);
+	}
+	free(in->name);
+	free(in->content);
+	free(in);
+}
+
+static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, size_t *size_read)
+{
+	struct yaml_dt_state *dt = data;
+	struct yaml_dt_config *cfg = &dt->cfg;
+	struct yaml_dt_input *in;
+	const char *name;
+	size_t nread;
+
+	if (size <= 0)
+		return 0;
+
+	in = dt->curr_in;
+	if (in && in->pos >= in->size) {
+		dt_debug(dt, "EOF at %s\n", in->name);
+		dt->curr_input_file++;
+		in = NULL;
+	}
+
+	/* have to read a file (that's not empty) */
+	while (!in || !in->size) {
+		if (in && !in->size)
+			dt->curr_input_file++;
+		if (dt->curr_input_file >= cfg->input_file_count) {
+			dt_debug(dt, "End of input\n");
+			*size_read = 0;
+			return 1;
+		}
+		name = cfg->input_file[dt->curr_input_file];
+		dt_debug(dt, "reading %s\n", name);
+		in = dt_input_create(dt, name, NULL);
+		if (!in) {
+			dt_info(dt, "Unable to read input file %s\n", name);
+			return 0;
+		}
+		dt->curr_in = in;
+	}
+
+	nread = size;
+	if (in->pos + nread > in->size)
+		nread = in->size - in->pos;
+
+	memcpy(buffer, in->content + in->pos, nread);
+	in->pos += nread;
+	*size_read = nread;
+
+	return 1;
+}
+
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker)
 {
-	int i, ret;
+	int ret;
 
 	memset(dt, 0, sizeof(*dt));
 	INIT_LIST_HEAD(&dt->children);
@@ -702,21 +840,8 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	} else
 		dt->output = stdout;
 
-	for (i = 0; i < cfg->input_file_count; i++) {
-		ret = read_input_file(dt, cfg->input_file[i]);
-		if (ret == -1) {
-			fprintf(stderr, "Could not initialize parser\n");
-			return -1;
-		}
-		if (i < (cfg->input_file_count - 1))
-			append_input_marker(dt, "---\n");
-	}
-
-	if (dt->input_size > 0) {
-		yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
-		yaml_parser_set_input_string(&dt->parser, dt->input_content,
-					dt->input_size);
-	}
+	yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
+	yaml_parser_set_input(&dt->parser, dt_yaml_read_handler, dt);
 
 	tree_init(to_tree(dt), emitter->tops);
 
@@ -788,7 +913,6 @@ void files_in_dir_with_suffix(const char *name, const char *suffix, char **bufp,
 	}
 	closedir(dir);
 }
-
 
 struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 		const char *input, const char *output,
@@ -875,7 +999,7 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 {
 	struct yaml_dt_state *child, *childn;
-	struct input *in, *inn;
+	struct yaml_dt_input *in, *inn;
 	bool rm_file;
 
 	list_for_each_entry_safe(child, childn, &dt->children, node)
@@ -900,8 +1024,7 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	list_for_each_entry_safe(in, inn, &dt->inputs, node) {
 		list_del(&in->node);
-		free(in->name);
-		free(in);
+		dt_input_free(dt, in);
 	}
 
 	if (dt->output && dt->output != stdout)
@@ -1765,9 +1888,6 @@ int dt_parse(struct yaml_dt_state *dt)
 	int err;
 	bool end;
 
-	if (dt->input_size <= 0)
-		return 0;
-
 	while (1) {
 
 		if (!yaml_parser_parse(&dt->parser, &event)) {
@@ -1790,6 +1910,7 @@ int dt_parse(struct yaml_dt_state *dt)
 	return dt->error_flag ? -1 : 0;
 }
 
+#if 0
 static void get_error_location(struct yaml_dt_state *dt,
 			size_t line, size_t column,
 		        char *filebuf, size_t filebufsize,
@@ -1799,7 +1920,7 @@ static void get_error_location(struct yaml_dt_state *dt,
 	char *s, *e, *ls, *le, *p, *pe;
 	size_t currline;
 	size_t lastline, tlastline;
-	struct input *in;
+	struct yaml_dt_input *in;
 	int i, len;
 
 	*filebuf = '\0';
@@ -1881,6 +2002,19 @@ static void get_error_location(struct yaml_dt_state *dt,
 	/* convert to presentation */
 	*linep = lastline;
 }
+#else
+static void get_error_location(struct yaml_dt_state *dt,
+			size_t line, size_t column,
+		        char *filebuf, size_t filebufsize,
+			char *linebuf, size_t linebufsize,
+			size_t *linep)
+{
+	*filebuf = '\0';
+	*linebuf = '\0';
+	*linep = 0;
+}
+
+#endif
 
 void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 {

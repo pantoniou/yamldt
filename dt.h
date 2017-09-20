@@ -92,6 +92,7 @@ struct dt_ref {
 	bool is_unsigned : 1;
 	struct node *npref;	/* r_anchor, r_path */
 	const char *use_label;
+	void *alloc_data;
 	void *binary;		/* to avoid costly conversions */
 	size_t binary_size;
 };
@@ -131,13 +132,19 @@ struct yaml_dt_config {
 	const char *codegen;
 };
 
-struct input {
+struct yaml_dt_input {
 	struct list_head node;
 	char *name;
+	void *content;
 	size_t size;
+	size_t pos;
+
+	struct yaml_dt_input *parent;
+	struct list_head includes;
+
+	size_t lines;
 	size_t start;
 	size_t start_line;
-	size_t lines;
 };
 
 struct yaml_dt_state;
@@ -188,7 +195,11 @@ struct yaml_dt_state {
 	size_t input_size;	/* including fake document markers */
 	size_t input_alloc;
 	size_t input_lines;
+
+	int curr_input_file;
+	struct yaml_dt_input *curr_in;
 	struct list_head inputs;
+
 	char **alloc_argv;
 
 	/* yaml parser state */
