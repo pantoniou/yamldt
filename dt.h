@@ -138,13 +138,15 @@ struct yaml_dt_input {
 	void *content;
 	size_t size;
 	size_t pos;
+	size_t lines;
 
 	struct yaml_dt_input *parent;
 	struct list_head includes;
 
-	size_t lines;
-	size_t start;
+	size_t start_pos;	/* included */
+	size_t end_pos;		/* not included */
 	size_t start_line;
+	size_t end_line;
 };
 
 struct yaml_dt_state;
@@ -191,12 +193,12 @@ struct yaml_dt_state {
 	char *output_compiler_tag;
 
 	FILE *output;
-	void *input_content;
-	size_t input_size;	/* including fake document markers */
-	size_t input_alloc;
-	size_t input_lines;
 
 	int curr_input_file;
+	size_t curr_input_pos;
+	size_t curr_input_line;
+	size_t last_input_pos;
+	size_t last_input_line;
 	struct yaml_dt_input *curr_in;
 	struct list_head inputs;
 

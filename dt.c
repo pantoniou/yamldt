@@ -33,6 +33,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#define _GNU_SOURCE
 #include "config.h"
 
 #include <stdio.h>
@@ -52,7 +53,6 @@
 #include <assert.h>
 #include <limits.h>
 
-#define _GNU_SOURCE
 #include <getopt.h>
 
 #include "utils.h"
@@ -508,118 +508,6 @@ static void dt_document_end(struct yaml_dt_state *dt)
 	}
 }
 
-#if 0
-static int read_input_file(struct yaml_dt_state *dt, const char *file)
-{
-	struct yaml_dt_input *in;
-	char *s, *e, *le;
-	size_t bufsz, nread, currline, adv, filesz;
-	FILE *fp;
-	struct stat st;
-
-	if (strcmp(file, "-")) {
-		fp = fopen(file, "rb");
-		if (!fp)
-			return -1;
-	} else {
-		file = "<stdin>";
-		fp = stdin;
-	}
-
-	in = malloc(sizeof(*in));
-	assert(in);
-
-	memset(in, 0, sizeof(*in));
-	in->name = strdup(file);
-	assert(in->name);
-	in->start = dt->input_size;
-
-	/* get the file size if we can */
-	filesz = 0;
-	if (fstat(fileno(fp), &st) != -1 && S_ISREG(st.st_mode))
-		filesz = st.st_size;
-
-	/* for non regular files the advance is 64K */
-	adv = filesz ? filesz : 64 * 1024;
-
-	do {
-		if (dt->input_size >= dt->input_alloc) {
-			dt->input_alloc += adv;
-			dt->input_content = realloc(dt->input_content,
-						    dt->input_alloc);
-			assert(dt->input_content);
-		}
-
-		s = dt->input_content + in->start + in->size;
-		bufsz = dt->input_alloc - dt->input_size;
-
-		nread = fread(s, 1, bufsz, fp);
-		if (nread <= 0 && ferror(fp))
-			return -1;
-		dt->input_size += nread;
-		in->size += nread;
-
-		/* avoid extra calls to fread */
-		if (filesz && in->size >= filesz)
-			break;
-
-	} while (nread >= bufsz);
-
-	dt_debug(dt, "%s: read %zd bytes @%zd\n",
-			in->name, in->size, in->start);
-
-	s = dt->input_content + in->start;
-	e = s + in->size;
-
-	in->start_line = dt->input_lines;
-
-	currline = 0;
-	while (s < e) {
-		le = strchr(s, '\n');
-		currline++;
-		if (!le)
-			break;
-		s = le + 1;
-	}
-
-	in->lines = currline;
-	dt->input_lines += currline;
-
-	dt_debug(dt, "%s: has %zd lines starting at line @%zd\n",
-			in->name, in->lines, in->start_line);
-
-	list_add_tail(&in->node, &dt->inputs);
-
-	fclose(fp);
-
-	return 0;
-}
-
-static void append_input_marker(struct yaml_dt_state *dt, const char *marker)
-{
-	int len = strlen(marker);
-	bool ignore_first_newline;
-	char c, *s;
-
-	s = dt->input_content + dt->input_size;
-	ignore_first_newline = dt->input_size > 0 && *s != '\n' && *marker == '\n';
-
-	if (dt->input_size + len > dt->input_alloc) {
-		dt->input_alloc += len;
-		dt->input_content = realloc(dt->input_content, dt->input_alloc);
-		assert(dt->input_content);
-	}
-	memcpy(dt->input_content + dt->input_size, marker, len);
-	dt->input_size += len;
-
-	while ((c = *marker++) != '\0') {
-		if (c == '\n' && !ignore_first_newline)
-			dt->input_lines++;
-		ignore_first_newline = false;
-	}
-}
-#endif
-
 int dt_emitter_setup(struct yaml_dt_state *dt)
 {
 	if (!dt->emitter || !dt->emitter->eops || !dt->emitter->eops->setup)
@@ -734,15 +622,19 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 
 	fclose(fp);
 
+	/* mark the start */
+	in->start_pos = dt->curr_input_pos;
+	in->start_line = dt->curr_input_line;
+
 	in->parent = in_parent;
 	list_add_tail(&in->node, !in->parent ? &dt->inputs : &in_parent->includes);
 
 	if (!in_parent)
-		dt_debug(dt, "%s: read %zd bytes @%zd\n",
-				in->name, in->size, in->start);
+		dt_debug(dt, "%s: read %zd bytes @%zu/%zu\n",
+				in->name, in->size, in->start_pos, in->start_line);
 	else
-		dt_debug(dt, "%s: read %zd bytes @%zd - (parent %s @%zu)\n",
-				in->name, in->size, in->start,
+		dt_debug(dt, "%s: read %zd bytes @%zu/%zu - (parent %s @%zu)\n",
+				in->name, in->size, in->start_pos, in->start_line,
 				in_parent->name, in_parent->pos);
 
 	return in;
@@ -767,7 +659,9 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 	struct yaml_dt_config *cfg = &dt->cfg;
 	struct yaml_dt_input *in;
 	const char *name;
-	size_t nread;
+	size_t nread, nlines;
+	const char *s, *e, *le, *ss;
+	bool addnl = false;
 
 	if (size <= 0)
 		return 0;
@@ -783,6 +677,13 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 	while (!in || !in->size) {
 		if (in && !in->size)
 			dt->curr_input_file++;
+
+		/* closing current input */
+		if (dt->curr_in) {
+			dt->curr_in->end_pos = dt->curr_input_pos;
+			dt->curr_in->end_line = dt->curr_input_line;
+		}
+
 		if (dt->curr_input_file >= cfg->input_file_count) {
 			dt_debug(dt, "End of input\n");
 			*size_read = 0;
@@ -802,9 +703,44 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 	if (in->pos + nread > in->size)
 		nread = in->size - in->pos;
 
+	/* try to read at a line boundary */
+	nlines = 0;
+	ss = in->content + in->pos;
+	s = ss;
+	e = s + nread;
+	while (s < e) {
+		le = memchr(s, '\n', e - s);
+		if (!le) {
+			/* if we have at least one line break there */
+			if (nlines > 0)
+				nread = s - ss;
+			else if (in->pos + nread >= in->size)
+				addnl = true;
+			break;
+		}
+		nlines++;
+		s = le + 1;
+	}
+
 	memcpy(buffer, in->content + in->pos, nread);
 	in->pos += nread;
 	*size_read = nread;
+
+	/* for when there's no newline at EOF */
+	if (addnl && nread < size) {
+		*(char *)(in->content + in->pos) = '\n';
+		in->pos++;
+		(*size_read)++;
+		nlines++;
+	}
+
+	/* keep last */
+	dt->last_input_pos = dt->curr_input_pos;
+	dt->last_input_line = dt->curr_input_line;
+
+	/* advance */
+	dt->curr_input_pos += nread;
+	dt->curr_input_line += nlines;
 
 	return 1;
 }
@@ -1038,9 +974,6 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	if (dt->output_compiler_tag)
 		free(dt->output_compiler_tag);
-
-	if (dt->input_content)
-		free(dt->input_content);
 
 	if (rm_file)
 		remove(dt->cfg.output_file);
@@ -1911,110 +1844,212 @@ int dt_parse(struct yaml_dt_state *dt)
 }
 
 #if 0
-static void get_error_location(struct yaml_dt_state *dt,
-			size_t line, size_t column,
-		        char *filebuf, size_t filebufsize,
-			char *linebuf, size_t linebufsize,
-			size_t *linep)
+static void dt_yaml_mark_print(struct yaml_dt_state *dt,
+			       const struct dt_yaml_mark *m)
 {
-	char *s, *e, *ls, *le, *p, *pe;
-	size_t currline;
-	size_t lastline, tlastline;
 	struct yaml_dt_input *in;
-	int i, len;
+	bool found;
+	size_t idx;
+	char *s, *e, *ls, *le, *start, *end, *p, *pe;
+	char *filep;
+	int lines, lastline, filepsz;
 
-	*filebuf = '\0';
-	*linebuf = '\0';
+	fprintf(stderr, "start: index=%zu line=%zu column=%zu\n",
+			m->start.index, m->start.line, m->start.column);
+	fprintf(stderr, "end: index=%zu line=%zu column=%zu\n",
+			m->end.index, m->end.line, m->end.column);
 
-	s = dt->input_content;
-	e = dt->input_content + dt->input_size;
+	idx = m->start.index;
 
-	currline = 0;
-	ls = s;
-	le = NULL;
-	lastline = 0;
-	while (ls < e && currline < line) {
+	/* first iterate over the regular input files */
+	in = NULL;
+	found = false;
+	list_for_each_entry(in, &dt->inputs, node) {
+		if (idx >= in->start_pos && idx < in->end_pos) {
+			found = true;
+			break;
+		}
+	}
 
-		/* get file marker (if it exists) */
-		p = ls;
+	/* not found? */
+	if (!found) {
+		fprintf(stderr, "Could not find corresponding base input\n");
+		return;
+	}
+
+	fprintf(stderr, "found at %s\n", in->name);
+
+	start = in->content;
+	end = start + in->size;
+
+	s = start + (m->start.index - in->start_pos);
+	assert(s < end);
+	e = start + (m->end.index - in->start_pos);
+	assert(e <= end);
+
+	fprintf(stderr, "found: ");
+	fwrite(s, e - s, 1, stderr);
+	fprintf(stderr, "\n");
+
+	/* get full line of the first marker */
+	ls = memrchr(start, '\n', s - start);
+	if (!ls)
+		ls = start;
+	else
+		ls++;
+	le = memchr(s, '\n', end - s);
+	if (!le)
+		le = end;
+
+	fprintf(stderr, "line: ");
+	fwrite(ls, le - ls, 1, stderr);
+	fprintf(stderr, "\n");
+
+	/* work back, until we find a file marker or end */
+	lines = 0;
+	s = ls;
+	filep = in->name;
+	filepsz = strlen(in->name);
+	if (s > start && s[-1] == '\n')
+		s--;
+	while (s > start) {
+		ls = memrchr(start, '\n', s - start);
+		if (!ls) {
+			ls = start;
+			p = ls;
+		} else
+			p = ls + 1;
+
+		fprintf(stderr, "check #%d: \"", lines);
+		fwrite(p, s - p, 1, stderr);
+		fprintf(stderr, "\"\n");
+
 		if (p[0] == '#' && isspace(p[1])) {
 			p += 2;
 			while (isspace(*p))
 				p++;
-			tlastline = strtol(p, &pe, 10);
+			lastline = strtol(p, &pe, 10) - 1;
 			if (pe > p && isspace(*pe)) {
 				while (isspace(*pe))
 					pe++;
 				p = pe + 1;
 				pe = strchr(p, '"');
 				if (pe) {
-					lastline = tlastline;
-					if ((pe - p) > (filebufsize - 1))
-						pe = p + filebufsize - 1;
-					memcpy(filebuf, p, pe - p);
-					filebuf[pe - p] = '\0';
+					filep = p;
+					filepsz = pe - p;
+					lines += lastline;
+					break;
 				}
 			}
-		} else
-			lastline++;
-
-		le = strchr(ls, '\n');
-		if (!le)
-			break;
-		ls = le + 1;
-		currline++;
-	}
-
-	if (ls < e && *ls) {
-		le = strchr(ls, '\n');
-		if (!le)
-			le = ls + strlen(ls);
-
-		if ((le - ls) > (linebufsize - 1))
-			le = ls + linebufsize - 1;
-		memcpy(linebuf, ls, le - ls);
-		linebuf[le - ls] = '\0';
-	}
-
-	/* no markers? iterate in the input list */
-	if (!*filebuf) {
-
-		filebuf[0] = '\0';
-		list_for_each_entry(in, &dt->inputs, node) {
-			if (line >= in->start_line &&
-			    line <= in->start_line + in->lines) {
-				strncat(filebuf, in->name, filebufsize);
-				lastline = line - in->start_line;
-				break;
-			}
 		}
-		filebuf[filebufsize - 1] = '\0';
 
+		s = ls;
+		lines++;
 	}
-	/* lastline++; */
-
-	/* convert linebuffer whitespace to spaces */
-	len = strlen(linebuf);
-	for (i = 0; i < len; i++)
-		if (isspace(linebuf[i]))
-			linebuf[i] = ' ';
-
-	/* convert to presentation */
-	*linep = lastline;
+	fprintf(stderr, "file: \"");
+	fwrite(filep, filepsz, 1, stderr);
+	fprintf(stderr, "\"\n");
+	fprintf(stderr, "line# %d\n", lines + 1);
 }
-#else
+#endif
+
 static void get_error_location(struct yaml_dt_state *dt,
-			size_t line, size_t column,
+			size_t idx,
 		        char *filebuf, size_t filebufsize,
 			char *linebuf, size_t linebufsize,
 			size_t *linep)
 {
+	struct yaml_dt_input *in;
+	bool found;
+	char *s, *ls, *le, *start, *end, *p, *pe;
+	char *filep;
+	int lines, lastline, filepsz, sz;
+
 	*filebuf = '\0';
 	*linebuf = '\0';
 	*linep = 0;
-}
 
-#endif
+	/* first iterate over the regular input files */
+	in = NULL;
+	found = false;
+	list_for_each_entry(in, &dt->inputs, node) {
+		if (idx >= in->start_pos && idx < in->end_pos) {
+			found = true;
+			break;
+		}
+	}
+
+	/* not found? */
+	if (!found)
+		dt_fatal(dt, "Could not find corresponding base input\n");
+
+	start = in->content;
+	end = start + in->size;
+
+	s = start + (idx - in->start_pos);
+	assert(s < end);
+
+	/* get full line of the first marker */
+	ls = memrchr(start, '\n', s - start);
+	if (!ls)
+		ls = start;
+	else
+		ls++;
+	le = memchr(s, '\n', end - s);
+	if (!le)
+		le = end;
+
+	sz = le - ls;
+	if (sz > linebufsize - 1)
+		sz = linebufsize  - 1;
+	memcpy(linebuf, ls, sz);
+	linebuf[sz] = '\0';
+
+	/* work back, until we find a file marker or end */
+	lines = 0;
+	s = ls;
+	filep = in->name;
+	filepsz = strlen(in->name);
+	if (s > start && s[-1] == '\n')
+		s--;
+	while (s > start) {
+		ls = memrchr(start, '\n', s - start);
+		if (!ls) {
+			ls = start;
+			p = ls;
+		} else
+			p = ls + 1;
+
+		if (p[0] == '#' && isspace(p[1])) {
+			p += 2;
+			while (isspace(*p))
+				p++;
+			lastline = strtol(p, &pe, 10) - 1;
+			if (pe > p && isspace(*pe)) {
+				while (isspace(*pe))
+					pe++;
+				p = pe + 1;
+				pe = strchr(p, '"');
+				if (pe) {
+					filep = p;
+					filepsz = pe - p;
+					lines += lastline;
+					break;
+				}
+			}
+		}
+
+		s = ls;
+		lines++;
+	}
+	sz = filepsz;
+	if (sz > filebufsize - 1)
+		sz = filebufsize - 1;
+	memcpy(filebuf, filep, sz);
+	filebuf[sz] = '\0';
+
+	*linep = lines + 1;
+}
 
 void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 {
@@ -2049,7 +2084,7 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 		end_line = dt->current_mark.end.line;
 		end_column = dt->current_mark.end.column;
 
-		get_error_location(dt, line, column,
+		get_error_location(dt, dt->current_mark.start.index,
 				filebuf, sizeof(filebuf),
 				linebuf, sizeof(linebuf),
 				&line);
@@ -2104,7 +2139,7 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	end_line = m->end.line;
 	end_column = m->end.column;
 
-	get_error_location(dt, line, column,
+	get_error_location(dt, m->start.index,
 			filebuf, sizeof(filebuf),
 			linebuf, sizeof(linebuf),
 			&line);
