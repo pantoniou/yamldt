@@ -163,6 +163,7 @@ enum dts_emit_type {
 	det_del_prop,
 	det_plugin,
 	det_node_empty,	/* special marker for empty node */
+	det_node_end,	/* mark end of node */
 };
 
 struct dts_ops;

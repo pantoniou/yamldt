@@ -245,7 +245,7 @@ static int get_comment_accumulator_size(struct dts_state *ds)
 static void goto_state(struct dts_state *ds, enum file_state fs)
 {
 	if (fs != ds->fs)
-		dts_info(ds, "state change from %s -> %s\n",
+		dts_debug(ds, "state change from %s -> %s\n",
 				states_txt[ds->fs],
 				states_txt[fs]);
 	ds->fs = fs;
@@ -596,6 +596,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		break;
 	case det_separator:
 	case det_node_empty:
+	case det_node_end:
 		break;
 	case det_memreserve:
 		i = 0;
@@ -1114,6 +1115,7 @@ static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
 			ds->refroot = false;
 			ds->start_root = false;
 		}
+		dts_emit(ds, det_node_end);
 		goto_state(ds, s_semicolon);
 		return 1;
 	}
