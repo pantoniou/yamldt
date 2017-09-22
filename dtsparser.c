@@ -271,7 +271,7 @@ static int handle_preproc(struct dts_state *ds, char c)
 	if (c != '#')
 		return 0;
 
-	if (!is_valid_preproc_state(ds->fs) || get_accumulator_size(ds))
+	if (get_accumulator_size(ds))
 		return 0;
 
 	/* preproc or property name starting with # */
@@ -861,6 +861,11 @@ static int slash(struct dts_state *ds, char c)
 			goto_state(ds, ds->pre_slash_fs);
 			break;
 		}
+		if (c == '{') {
+			ds->start_root = true;
+			goto_state(ds, s_nodes_and_properties_marker);
+			break;
+		}
 
 		if (!isalpha(c)) {
 			dts_error(ds, "bad slash directive\n");
@@ -952,13 +957,17 @@ static int preproc(struct dts_state *ds, char c)
 		return 0;
 	}
 	buf = get_accumulator(ds);
-	dts_debug(ds, "preproc directive: %s\n", buf);
-	li = item_from_accumulator(ds, dea_string);
-	if (!li)
-		return -1;
-	ret = dts_emit(ds, det_preproc);
-	if (ret)
-		return ret;
+
+	if (is_valid_preproc_state(ds->pre_preproc_fs)) {
+		dts_debug(ds, "preproc directive: %s\n", buf);
+		li = item_from_accumulator(ds, dea_string);
+		if (!li)
+			return -1;
+		ret = dts_emit(ds, det_preproc);
+		if (ret)
+			return ret;
+	} else
+		dts_debug(ds, "suppressed preproc directive: %s\n", buf);
 	reset_accumulator(ds);
 
 	/* mark that we've found preprocessor directives so macros possible */

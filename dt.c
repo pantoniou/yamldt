@@ -808,11 +808,11 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 	struct label *l;
 	bool found_existing;
 	const char *name, *label;
-	char *nname;
+	char *nname, *strunesc;
 	const struct dts_property_item *pi;
 	const struct dts_emit_item *ei;
 	enum ref_type rt;
-	int i, j, k, bits;
+	int i, j, k, bits, lenunesc;
 	const char *bits_tag, *tag;
 	const char *refdata;
 	int reflen;
@@ -1053,7 +1053,8 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 				/* in compatible mode we allow it */
 			}
 			l = label_add_nolink(to_tree(dt), np, label);
-			assert(l);	/* if it exists the lookup above should catch it */
+			if (!l)
+				break;
 
 			/* mark the location of the label */
 			dts_loc_to_yaml_mark(&data->pn.labels[i]->loc, &to_dt_label(l)->m);
@@ -1149,15 +1150,18 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 
 			for (k = 0; k < data->pn.nr_items; k++) {
 				pi = data->pn.items[k];
-				ei = data->pn.items[k]->elems[0];
 				j = data->pn.items[k]->nr_elems;
+				if (j > 0)
+					ei = data->pn.items[k]->elems[0];
+				else
+					ei = NULL;
 
 
 				bits = 0;
 				/* emit bits */
 				if (pi->bits)
 					bits = atoi(pi->bits->contents);
-				else if (ei->atom == dea_byte)
+				else if (ei && ei->atom == dea_byte)
 					bits = 8;
 
 				switch (bits) {
@@ -1210,6 +1214,15 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 						break;
 					case dea_string:
 						tag = "!str";
+
+						/* if something need to be unescaped do it */
+						if (reflen != esc_strlen(refdata)) {
+							lenunesc = esc_strlen(refdata);
+							strunesc = alloca(lenunesc + 1);
+							esc_getstr(refdata, strunesc, lenunesc + 1);
+							refdata = strunesc;
+							reflen = lenunesc;
+						}
 						break;
 					case dea_stringref:
 						tag = "!pathref";

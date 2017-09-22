@@ -250,7 +250,7 @@ static int d2y_emit_bits(struct d2y_state *d2y,
 
 	if (!pi->bits) {
 		/* for unadorned items that are bytes */
-		if (ei->atom == dea_byte)
+		if (ei && ei->atom == dea_byte)
 			fprintf(d2y->outfp, "!int8 ");
 		return 0;
 	}
@@ -700,8 +700,11 @@ static int d2y_emit(struct dts_state *ds, int depth,
 
 		for (k = 0; k < data->pn.nr_items; k++) {
 			pi = data->pn.items[k];
-			ei = data->pn.items[k]->elems[0];
 			j = data->pn.items[k]->nr_elems;
+			if (j > 0)
+				ei = data->pn.items[k]->elems[0];
+			else
+				ei = NULL;
 
 			d2y_emit_bits(d2y, pi, ei);
 			if (j > 1)
