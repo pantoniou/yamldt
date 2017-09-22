@@ -894,10 +894,20 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		if (data->del_node->atom != dea_name)
 			break;
 		prop = prop_get_by_name(to_tree(dt), np, name, 0);
-		if (!dt->current_np_ref) {
-			if (prop)
-				prop_del(to_tree(dt), prop);
+		if (prop) {
+			prop_del(to_tree(dt), prop);
+			break;
 		}
+
+		if (np && dt->current_np_ref) {
+			prop = prop_alloc(to_tree(dt), name);
+			prop->is_delete = true;
+			prop->np = np;
+			list_add_tail(&prop->node, &np->properties);
+			break;
+		}
+
+		dt_fatal(dt, "failed to delete property %s\n", name);
 		break;
 
 	case det_include:
