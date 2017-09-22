@@ -685,6 +685,7 @@ void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 
 int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 {
+	char namebuf[NODE_FULLNAME_MAX];
 	struct label *l;
 	struct node *child, *npref;
 	int ret;
@@ -696,9 +697,10 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 		npref = __node_lookup_by_label(t, tree_root(t),
 				l->label, strlen(l->label), np);
 		if (npref) {
-			tree_error_at_node(t, np,
-				"duplicate label %s\n",
-				l->label);
+			tree_error_at_label(t, l,
+				"duplicate label %s at node %s\n",
+				l->label,
+				dn_fullname(np, namebuf, sizeof(namebuf)));
 			return -1;
 		}
 	}

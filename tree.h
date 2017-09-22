@@ -124,6 +124,9 @@ struct tree_ops {
 	void (*error_at_ref)(struct tree *t, struct ref *ref,
 			const char *fmt, ...)
 			__attribute__ ((__format__ (__printf__, 3, 0)));
+	void (*error_at_label)(struct tree *t, struct label *l,
+			const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 3, 0)));
 };
 
 struct tree {
@@ -281,6 +284,11 @@ const char *dn_fullname(struct node *np, char *buf, int bufsize);
 	do { \
 		if (_t->ops->error_at_ref) \
 			_t->ops->error_at_ref(_t, _ref, _fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_error_at_label(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->error_at_label) \
+			_t->ops->error_at_label(_t, _ref, _fmt, ##__VA_ARGS__); \
 	} while(0)
 
 #endif

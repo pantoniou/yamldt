@@ -208,6 +208,7 @@ static const struct tree_ops dtb_tree_ops = {
 	.error_at_node		= yaml_dt_tree_error_at_node,
 	.error_at_property	= yaml_dt_tree_error_at_property,
 	.error_at_ref		= yaml_dt_tree_error_at_ref,
+	.error_at_label		= yaml_dt_tree_error_at_label,
 };
 
 static void prop_set_data(struct property *prop, bool append,

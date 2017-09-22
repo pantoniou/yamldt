@@ -109,6 +109,7 @@ static const struct tree_ops yaml_tree_ops = {
 	.error_at_node		= yaml_dt_tree_error_at_node,
 	.error_at_property	= yaml_dt_tree_error_at_property,
 	.error_at_ref		= yaml_dt_tree_error_at_ref,
+	.error_at_label		= yaml_dt_tree_error_at_label,
 };
 
 static void ref_output_single(struct tree *t, FILE *fp,

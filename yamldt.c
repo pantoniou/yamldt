@@ -79,6 +79,7 @@ static struct option opts[] = {
 	{ "silent",		no_argument,	   0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
+	{ "input-format",	required_argument, 0,  0  },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -89,20 +90,21 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 	printf(
 "yamldt [options] <input-file> [<input-file>...]\n"
 " options are:\n"
-"   -o, --output        Output file\n"
-"   -d, --debug         Debug messages\n"
-"   -c                  Don't resolve references (object mode)\n"
-"   -C, --compatible    Compatible mode\n"
-"   -s, --dts           DTS mode\n"
-"   -y, --yaml          YAML mode\n"
-"   -S, --schema        Use schema (all yaml files in dir/)\n"
-"   -g, --codegen       Code generator configuration file\n"
-"       --save-temps    Save temporary files\n"
-"       --schema-save   Save schema to given file\n"
-"       --silent        Be really silent\n"
-"       --color         [auto|off|on]\n"
-"   -h, --help          Help\n"
-"   -v, --version       Display version\n"
+"   -o, --output          Output file\n"
+"   -d, --debug           Debug messages\n"
+"   -c                    Don't resolve references (object mode)\n"
+"   -C, --compatible      Compatible mode\n"
+"   -s, --dts             DTS mode\n"
+"   -y, --yaml            YAML mode\n"
+"   -S, --schema          Use schema (all yaml files in dir/)\n"
+"   -g, --codegen         Code generator configuration file\n"
+"       --save-temps      Save temporary files\n"
+"       --schema-save     Save schema to given file\n"
+"       --silent          Be really silent\n"
+"       --color           [auto|off|on]\n"
+"       --input-format=X  Force input to given format [dts|yaml|auto]\n"
+"   -h, --help            Help\n"
+"   -v, --version         Display version\n"
 		);
 }
 
@@ -228,6 +230,10 @@ int main(int argc, char *argv[])
 				cfg->schema_save = optarg;
 				continue;
 			}
+			if (!strcmp(s, "input-format")) {
+				cfg->input_format = optarg;
+				continue;
+			}
 		}
 
 		switch (cc) {
@@ -278,6 +284,16 @@ int main(int argc, char *argv[])
 
 	if (!input_output_optional && !cfg->output_file) {
 		fprintf(stderr, "Missing output file\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!cfg->input_format)
+		cfg->input_format = "auto";
+
+	if (strcmp(cfg->input_format, "auto") &&
+	    strcmp(cfg->input_format, "yaml") &&
+	    strcmp(cfg->input_format, "dts")) {
+		fprintf(stderr, "bad input-format %s\n", cfg->input_format);
 		return EXIT_FAILURE;
 	}
 

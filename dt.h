@@ -65,6 +65,11 @@ struct dt_yaml_mark {
 	yaml_mark_t end;
 };
 
+static inline bool dt_mark_is_unset(const struct dt_yaml_mark *m)
+{
+	return m->start.index == 0 && m->end.index == 0;
+}
+
 struct dt_node {
 	struct node n;
 	struct dt_yaml_mark m;
@@ -132,6 +137,7 @@ struct yaml_dt_config {
 	const char *schema;
 	const char *schema_save;
 	const char *codegen;
+	const char *input_format;
 };
 
 struct yaml_dt_input {
@@ -335,6 +341,9 @@ void yaml_dt_tree_error_at_property(struct tree *t, struct property *prop,
 		const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 3, 0)));
 void yaml_dt_tree_error_at_ref(struct tree *t, struct ref *ref,
+		const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 3, 0)));
+void yaml_dt_tree_error_at_label(struct tree *t, struct label *l,
 		const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 3, 0)));
 

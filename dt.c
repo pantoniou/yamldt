@@ -462,6 +462,30 @@ void yaml_dt_tree_error_at_ref(struct tree *t,
 	to_dt(t)->error_flag = true;
 }
 
+void yaml_dt_tree_error_at_label(struct tree *t,
+			         struct label *l, const char *fmt, ...)
+{
+	va_list ap;
+	char str[1024];
+	int len;
+	const struct dt_yaml_mark *m;
+
+	va_start(ap, fmt);
+	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	va_end(ap);
+	str[sizeof(str) - 1] = '\0';
+
+	len = strlen(str);
+	while (len > 1 && str[len - 1] == '\n')
+		str[--len] = '\0';
+
+	m = &to_dt_label(l)->m;
+	if (dt_mark_is_unset(m))
+		m = &to_dt_node(l->np)->m;
+	dt_print_at_msg(to_dt(t), m, "error", str);
+	to_dt(t)->error_flag = true;
+}
+
 static void dt_stream_start(struct yaml_dt_state *dt)
 {
 	/* initialize */
@@ -802,20 +826,77 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		/* nothing */
 		break;
 	case det_del_node:
+		name = data->del_node->contents;
+		np = dt->current_np;
+
 		switch (data->del_node->atom) {
 		case dea_name:
+
+			if (!np)
+				dt_fatal(dt, "can't delete node out of node context\n");
+
+			if (!dt->current_np_ref) {
+				npt = node_get_child_by_name(to_tree(dt),
+							    np, name, 0);
+				if (npt) {
+					dt_debug(dt, "deleting child %s\n",
+						dn_fullname(npt, &namebuf[0], sizeof(namebuf)));
+					node_del(to_tree(dt), npt);
+				}
+			} else {
+				prop = prop_alloc(to_tree(dt), name);
+				prop->np = np;
+				prop->is_delete = true;
+				list_add_tail(&prop->node, &np->properties);
+			}
 			break;
 		case dea_ref:
 		case dea_pathref:
+			if (dt->current_np)
+				dt_fatal(dt, "ref/pathref delete in node context\n");
+
+			/* for a ref prefix with '*' */
+			if (data->del_node->atom == dea_ref) {
+				nname = alloca(strlen(name) + 2);
+				nname[0] = '*';
+				strcpy(nname + 1, name);
+				name = nname;
+			};
+
+			np = node_alloc(to_tree(dt), name, NULL);
+			np->is_delete = true;
+
+			dts_loc_to_yaml_mark(&data->del_node->loc,
+					     &to_dt_node(np)->m);
+
+			list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
+
+			dt_debug(dt, "adding delete ref %s\n", name);
+
+			/* if we can apply the ref now, do it */
+			if (tree_apply_single_ref_node(to_tree(dt), np,
+				dt->cfg.object, dt->cfg.compatible)) {
+
+				list_del(&np->node);
+				node_free(to_tree(dt), np);
+				np = NULL;
+			}
+
 			break;
 		default:
 			break;
 		}
 		break;
 	case det_del_prop:
+		name = data->del_node->contents;
+		np = dt->current_np;
 		/* only handle delete names */
-		if (data->del_node->atom == dea_name) {
-			;
+		if (data->del_node->atom != dea_name)
+			break;
+		prop = prop_get_by_name(to_tree(dt), np, name, 0);
+		if (!dt->current_np_ref) {
+			if (prop)
+				prop_del(to_tree(dt), prop);
 		}
 		break;
 
@@ -974,6 +1055,9 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 			l = label_add_nolink(to_tree(dt), np, label);
 			assert(l);	/* if it exists the lookup above should catch it */
 
+			/* mark the location of the label */
+			dts_loc_to_yaml_mark(&data->pn.labels[i]->loc, &to_dt_label(l)->m);
+
 			/* in compatible mode we add the label at the head */
 			if (!dt->cfg.compatible)
 				list_add_tail(&l->node, &np->labels);
@@ -987,7 +1071,7 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		np = dt->current_np;
 		assert(np);
 
-		if (dt->current_np_ref && dt->depth == 0) {
+		if (dt->current_np_ref && depth == 0) {
 			dt->current_np_ref = false;
 
 			if (tree_apply_single_ref_node(to_tree(dt), np,
@@ -1174,7 +1258,18 @@ static const struct dts_ops dt_dts_ops = {
 
 static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in)
 {
+	struct yaml_dt_config *cfg = &dt->cfg;
 	const char *s, *start, *ls, *le, *p;
+
+	if (!strcmp(cfg->input_format, "yaml"))
+		return false;
+
+	if (!strcmp(cfg->input_format, "dts")) {
+		in->dts = true;
+		return true;
+	}
+
+	/* anything else is auto */
 
 	start = in->content;
 
