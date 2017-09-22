@@ -997,13 +997,6 @@ static int hash(struct dts_state *ds, char c)
 	buf = get_accumulator(ds);
 	dts_debug(ds, "hash: %s\n", buf);
 
-	/* some form of line marker (# N ... ) */
-	if (get_accumulator_size(ds) == 0 || isspace(c)) {
-		accumulate(ds, c);
-		goto_state(ds, s_preproc);
-		return 0;
-	}
-
 	/* if a match, it's a preprocessor command */
 	ss = preproc_commands;
 	while ((s = *ss++)) {
@@ -1013,6 +1006,14 @@ static int hash(struct dts_state *ds, char c)
 			return 0;
 		}
 	}
+
+	/* some form of line marker (# N ... ) */
+	if (get_accumulator_size(ds) == 1 && isspace(c)) {
+		accumulate(ds, c);
+		goto_state(ds, s_preproc);
+		return 0;
+	}
+
 
 	/* nope it's something else; pass it along */
 	goto_state(ds, ds->pre_preproc_fs);
