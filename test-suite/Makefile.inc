@@ -9,6 +9,7 @@ CPPFLAGS ?= -I ./ -I $(TOPDIR)/test-suite \
 	 -I $(TOPDIR)/include \
 	 -I $(TOPDIR)/include/dt-bindings/input \
 	 -nostdinc -undef -D__DTS__ -x assembler-with-cpp
+YAMLDT_CPPFLAGS ?= $(CPPFLAGS) # -traditional-cpp -Wtraditional
 DTC ?= dtc
 DTCFLAGS ?= -q
 FDTDUMP ?= fdtdump
@@ -34,6 +35,7 @@ YAMLS    := $(addsuffix .yaml, $(filter-out $(basename $(BLACKLIST)),$(basename 
 DTSS     := $(addsuffix .dts, $(filter-out $(basename $(BLACKLIST)),$(basename $(BOARDS))))
 DTCYAMLS := $(addsuffix .dtc.yaml, $(basename $(BOARDS)))
 DIFFS    := $(addsuffix .diff, $(basename $(YAMLS)))
+YDIFFS   := $(addsuffix .y.diff, $(basename $(YAMLS)))
 DTBS     := $(addsuffix .dtb, $(basename $(YAMLS)))
 YAMLDTBS := $(addsuffix .yaml.dtb, $(basename $(YAMLS)))
 FDTDUMPS := $(addsuffix .fdtdump, $(basename $(DTBS))) $(addsuffix .fdtdump, $(basename $(YAMLDTBS)))
@@ -42,21 +44,28 @@ CPPS     := $(addsuffix .cpp, $(basename $(DTBS))) $(addsuffix .yaml.cpp, $(base
 BLACKYAMLS    := $(addsuffix .yaml, $(BLACKLIST))
 BLACKDTSS     := $(addsuffix .dts, $(BLACKLIST))
 BLACKDIFFS    := $(addsuffix .diff, $(BLACKLIST))
+BLACKYDIFFS   := $(addsuffix .y.diff, $(BLACKLIST))
 
 %.diff: %.yaml.fdtdump %.fdtdump
 	cmp -s $^ || (diff -u $^ | tee $@; false)
+
+%.y.diff: %.ydtc.fdtdump %.fdtdump
+	-cmp -s $^ || (diff -u $^ | tee $@)
 
 %.cpp.dts: %.dts
 	$(CPP) $(CPPFLAGS) $< > $@
 
 %.cpp.yaml: %.yaml
-	$(CPP) $(CPPFLAGS) $< > $@
+	$(CPP) $(YAMLDT_CPPFLAGS) $< > $@
 
 %.dtb: %.dts
 	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
+%.ydtc.dtb: %.dts
+	$(CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) --input-format=dts - -o $@
+
 %.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
-	$(CPP) $(CPPFLAGS) $^ | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
+	$(CPP) $(YAMLDT_CPPFLAGS) $^ | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.dtc.yaml: %.dts
 	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O yaml - -o $@
@@ -72,13 +81,16 @@ BLACKDIFFS    := $(addsuffix .diff, $(BLACKLIST))
 
 # .NOTPARALLEL:
 
-check: $(DIFFS)
+check: $(DIFFS) $(YDIFFS)
 
 clean:
-	rm -f $(DIFFS) $(DTBS) $(YAMLDTBS) $(FDTDUMPS) $(CPPS) $(YAMLS)
+	rm -f $(YAMLS)
 	find ./ -name '*.yaml' -print | xargs rm -f
 	find ./ -name '*.yamli' -print | xargs rm -f
 	rm -f *.cpp.yaml *.cpp.dts
+	rm -f *.dtb
+	rm -f *.diff
+	rm -f *.fdtdump
 	rm -f $(SCHEMA)
 
 $(YAMLS): $(DTSS)
@@ -88,7 +100,7 @@ genyamls:
 	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(DTSS) || true
 	@echo "dts2yaml DONE"
 
-checkblack: $(BLACKDIFFS)
+checkblack: $(BLACKDIFFS) $(BLACKYDIFFS)
 
 genblackyamls:
 	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(BLACKDTSS) || true

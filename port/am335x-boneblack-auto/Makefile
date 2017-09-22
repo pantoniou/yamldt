@@ -28,17 +28,25 @@ DDEPFLAGS = -MT $@ -MMD -MP -MF $*.Dd
 
 DTBS     := $(addsuffix .dtb, $(basename $(YAMLS)))
 DTCDTBS  := $(addsuffix .dtc.dtb, $(basename $(YAMLS)))
+YDTCDTBS := $(addsuffix .ydtc.dtb, $(basename $(YAMLS)))
 FDTDUMPS := $(addsuffix .fdtdump, $(basename $(DTBS))) \
 	    $(addsuffix .fdtdump, $(basename $(DTCDTBS)))
 CPPS     := $(addsuffix .cpp.yaml, $(basename $(YAMLS)))
 DIFFS    := $(addsuffix .diff, $(basename $(YAMLS)))
+YDIFFS   := $(addsuffix .y.diff, $(basename $(YAMLS)))
 YDEPS    := $(addsuffix .Yd, $(basename $(YAMLS)))
 DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 
 %.diff: %.dtc.fdtdump %.fdtdump
 	-cmp -s $^ || (diff -u $^ | tee $@)
 
+%.y.diff: %.ydtc.fdtdump %.fdtdump
+	-cmp -s $^ || (diff -u $^ | tee $@)
+
 %.cpp.yaml: %.yaml
+	$(CPP) $(CPPFLAGS) -D__DTS__ $< > $@
+
+%.cpp.dts: %.dts
 	$(CPP) $(CPPFLAGS) -D__DTS__ $< > $@
 
 %.dtb: %.yaml
@@ -48,6 +56,10 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 %.dtc.dtb: %.dts
 	$(CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
 		$(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
+
+%.ydtc.dtb: %.dts
+	$(CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
+		$(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.fdtdump: %.dtb
 	$(FDTDUMP) $(FDTDUMPFLAGS) 2>/dev/null $< >$@
@@ -60,11 +72,12 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 
 all: $(DTBS)
 
-check: $(DTCDTBS) $(DTBS) $(DIFFS)
+check: $(DTCDTBS) $(DTBS) $(DIFFS) $(YDIFFS)
 
 clean:
 	rm -f $(DTBS) $(FDTDUMPS) $(CPPS) $(YDEPS) \
-	      $(DTCDTBS) $(DDEPS) $(YAMLS) $(YAMLIS)
+	      $(DTCDTBS) $(DDEPS) $(YAMLS) $(YAMLIS) \
+	      *.dtb *.diff *.fdtdump
 
 validate: check
 
