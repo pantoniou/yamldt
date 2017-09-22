@@ -854,28 +854,6 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 
 		dts_loc_to_yaml_mark(&data->pn.name->loc, &m);
 
-		if (is_root) {
-			if (depth != 0)
-				dt_fatal(dt, "root is not at depth 0 (%d)\n", depth);
-
-			np = tree_root(to_tree(dt));
-			if (!np) {
-				np = node_alloc(to_tree(dt), "", NULL);
-				dt->current_np = np;
-				tree_set_root(to_tree(dt), np);
-
-				/* mark as the last map */
-				to_dt_node(np)->m = m;
-
-				dt_debug(dt, "* created root\n");
-			} else
-				dt_debug(dt, "* using root\n");
-
-			dt->current_np = np;
-			dt->depth = 0;
-			break;
-		}
-
 		/* reference? */
 		if (data->pn.name->atom == dea_ref || data->pn.name->atom == dea_pathref) {
 			if (depth != 0)
@@ -884,12 +862,16 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 			dt_fatal(dt, "can't process unknown type of node\n");
 
 		/* add one for the implicit root */
-		depth++;
+		if (!is_root)
+			depth++;
 
 		found_existing = false;
 		np = dt->current_np;
 
-		if (np) {
+		if (is_root) {
+			np = tree_root(to_tree(dt));
+			found_existing = !!np;
+		} else if (np) {
 			/* note that we match on deleted too */
 			for_each_child_of_node_withdel(dt->current_np, np) {
 				/* match on same name or root */
@@ -912,7 +894,8 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 				nname[0] = '*';
 				strcpy(nname + 1, name);
 				name = nname;
-			}
+			} else if (is_root)
+				name = "";
 
 			np = node_alloc(to_tree(dt), name, NULL);
 
@@ -920,8 +903,11 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 			to_dt_node(np)->m = m;
 
 			if (data->pn.name->atom == dea_name) {
-				np->parent = dt->current_np;
-				list_add_tail(&np->node, &np->parent->children);
+				if (!is_root) {
+					np->parent = dt->current_np;
+					list_add_tail(&np->node, &np->parent->children);
+				} else
+					tree_set_root(to_tree(dt), np);
 			} else {
 				np->parent = NULL;
 				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
@@ -1138,8 +1124,10 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 			}
 		}
 
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
+		if (!found_existing) {
+			prop->np = np;
+			list_add_tail(&prop->node, &np->properties);
+		}
 
 		break;
 	default:
@@ -1892,9 +1880,11 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	dt->current_mark.start = event->start_mark;
 	dt->current_mark.end = event->end_mark;
 
-	span->m.end = event->end_mark;
-	span->end_pos = span->start_pos +
-			(span->m.end.index - span->m.start.index);
+	if (span && !span->in->dts) {
+		span->m.end = event->end_mark;
+		span->end_pos = span->start_pos +
+				(span->m.end.index - span->m.start.index);
+	}
 
 	switch (type) {
 	case YAML_NO_EVENT:
@@ -2425,7 +2415,7 @@ int dt_parse_dts(struct yaml_dt_state *dt)
 			span->m.end.column = 0;
 		} else
 			span->m.end.column++;
-		span->end_pos = in->pos + 1;
+		span->end_pos = span->start_pos + in->pos + 1;
 		dt->curr_span_mark.end = span->m.end;
 
 		err = dts_feed(&dt->ds, c);
