@@ -2705,6 +2705,10 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 		reset = RESET;
 	}
 
+	/* if no mark, use the current one */
+	if (!m)
+		m = &dt->current_mark;
+
 	line = m->start.line;
 	column = m->start.column;
 	end_line = m->end.line;
