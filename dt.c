@@ -625,20 +625,10 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 
 	fclose(fp);
 
-	/* mark the start */
-	in->start_pos = dt->curr_input_pos;
-	in->start_line = dt->curr_input_line;
-
 	in->parent = in_parent;
 	list_add_tail(&in->node, !in->parent ? &dt->inputs : &in_parent->includes);
 
-	if (!in_parent)
-		dt_debug(dt, "%s: read %zd bytes @%zu/%zu\n",
-				in->name, in->size, in->start_pos, in->start_line);
-	else
-		dt_debug(dt, "%s: read %zd bytes @%zu/%zu - (parent %s @%zu)\n",
-				in->name, in->size, in->start_pos, in->start_line,
-				in_parent->name, in_parent->pos);
+	dt_debug(dt, "%s: read %zd bytes\n", in->name, in->size);
 
 	return in;
 }
@@ -654,6 +644,35 @@ static void dt_input_free(struct yaml_dt_state *dt, struct yaml_dt_input *in)
 	free(in->name);
 	free(in->content);
 	free(in);
+}
+
+static struct yaml_dt_span *
+dt_span_create(struct yaml_dt_state *dt, const struct yaml_dt_input *in)
+{
+	struct yaml_dt_span *span;
+
+	span = malloc(sizeof(*span));
+	assert(span);
+
+	memset(span, 0, sizeof(*span));
+	span->in = in;
+
+	/* default is with an empty span at current pos */
+	span->m.start.index = dt->curr_input_pos;
+	span->m.start.line = dt->curr_input_line;
+	span->m.start.column = 0;
+	span->m.end = span->m.start;
+	span->start_pos = in->pos;
+	span->end_pos = in->pos;
+
+	list_add_tail(&span->node, &dt->spans);
+
+	return span;
+}
+
+static void dt_span_free(struct yaml_dt_state *dt, struct yaml_dt_span *span)
+{
+	free(span);
 }
 
 static void dt_dts_debug(struct dts_state *ds, const char *fmt, ...)
@@ -742,7 +761,6 @@ static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
 
 static void dts_loc_to_yaml_mark(const struct dts_location *loc, struct dt_yaml_mark *m)
 {
-	m->filename = loc->filename;
 	m->start.index = loc->start_index;
 	m->start.line = loc->start_line;
 	m->start.column = loc->start_col - 1;
@@ -757,6 +775,8 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 	char namebuf[NODE_FULLNAME_MAX];
 	struct yaml_dt_state *dt = dts_to_dt(ds);
 	struct dt_yaml_mark m;
+	struct yaml_dt_input *in;
+	struct yaml_dt_span *span;
 	bool is_root;
 	struct node *np, *npt;
 	struct property *prop;
@@ -805,6 +825,21 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 			return -1;
 		}
 
+		dt_debug(dt, "include %s\n", data->include->contents);
+		assert(dt->curr_in);
+		in = dt_input_create(dt, data->include->contents, dt->curr_in);
+		assert(in);
+		dt->curr_in = in;
+
+		assert(dt->curr_span);
+		span = dt_span_create(dt, in);
+		assert(span);
+
+		/* the end of this span is the start of the new one */
+		dt->curr_span->m.end = span->m.start;
+
+		dt->curr_span = span;
+
 		break;
 
 	case det_memreserve:
@@ -812,6 +847,9 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 
 	case det_node:
 		name = data->pn.name->contents;
+
+		dt_debug(dt, "node name=%s depth=%d\n", name, depth);
+
 		is_root = data->pn.name->atom == dea_name && !strcmp(name, "/");
 
 		dts_loc_to_yaml_mark(&data->pn.name->loc, &m);
@@ -852,9 +890,6 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		np = dt->current_np;
 
 		if (np) {
-			fprintf(stderr, "node=%s depth=%d parent=%s\n", name, depth,
-					dn_fullname(np, namebuf, sizeof(namebuf)));
-
 			/* note that we match on deleted too */
 			for_each_child_of_node_withdel(dt->current_np, np) {
 				/* match on same name or root */
@@ -1150,7 +1185,6 @@ static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in
 		return false;
 
 	in->dts = true;
-	fprintf(stderr, "DTS file %s\n", in->name);
 
 	return true;
 }
@@ -1160,6 +1194,7 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 	struct yaml_dt_state *dt = data;
 	struct yaml_dt_config *cfg = &dt->cfg;
 	struct yaml_dt_input *in;
+	struct yaml_dt_span *span;
 	const char *name;
 	size_t nread, nlines;
 	const char *s, *e, *le, *ss;
@@ -1169,22 +1204,18 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 		return 0;
 
 	in = dt->curr_in;
+	span = dt->curr_span;
 	if (in && in->pos >= in->size) {
 		dt_debug(dt, "EOF at %s\n", in->name);
 		dt->curr_input_file++;
 		in = NULL;
+		span = NULL;
 	}
 
 	/* have to read a file (that's not empty) */
 	while (!in || !in->size || in->dts) {
 		if (in && !in->size)
 			dt->curr_input_file++;
-
-		/* closing current input */
-		if (dt->curr_in) {
-			dt->curr_in->end_pos = dt->curr_input_pos;
-			dt->curr_in->end_line = dt->curr_input_line;
-		}
 
 		if (dt->curr_input_file >= cfg->input_file_count) {
 			dt_debug(dt, "End of input\n");
@@ -1199,6 +1230,11 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 			return 0;
 		}
 		dt->curr_in = in;
+
+		span = dt_span_create(dt, in);
+		assert(span);
+
+		dt->curr_span = span;
 
 		/* TODO clean this up with input detection */
 		if (dt_yaml_parse_dts(dt, in))
@@ -1267,6 +1303,7 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	memcpy(&dt->cfg, cfg, sizeof(*cfg));
 
 	INIT_LIST_HEAD(&dt->inputs);
+	INIT_LIST_HEAD(&dt->spans);
 
 	/* no output file? if the emitter doesn't need it /dev/null */
 	if (!dt->cfg.output_file)
@@ -1442,6 +1479,7 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 {
 	struct yaml_dt_state *child, *childn;
 	struct yaml_dt_input *in, *inn;
+	struct yaml_dt_span *span, *spann;
 	bool rm_file;
 
 	list_for_each_entry_safe(child, childn, &dt->children, node)
@@ -1468,6 +1506,11 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	if (dt->current_event)
 		yaml_event_delete(dt->current_event);
+
+	list_for_each_entry_safe(span, spann, &dt->spans, node) {
+		list_del(&span->node);
+		dt_span_free(dt, span);
+	}
 
 	list_for_each_entry_safe(in, inn, &dt->inputs, node) {
 		list_del(&in->node);
@@ -1832,10 +1875,10 @@ property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 
 static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 {
-	struct yaml_dt_input *in = dt->curr_in;
+	yaml_event_type_t type = event->type;
+	struct yaml_dt_span *span = dt->curr_span;
 	struct node *np;
 	struct property *prop;
-	yaml_event_type_t type = event->type;
 	bool found_existing;
 	char *label;
 	struct label *l;
@@ -1846,9 +1889,12 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	assert(!dt->current_event);
 	dt->current_event = event;
 
-	dt->current_mark.filename = in->name;
 	dt->current_mark.start = event->start_mark;
 	dt->current_mark.end = event->end_mark;
+
+	span->m.end = event->end_mark;
+	span->end_pos = span->start_pos +
+			(span->m.end.index - span->m.start.index);
 
 	switch (type) {
 	case YAML_NO_EVENT:
@@ -2328,13 +2374,15 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
 {
-	struct yaml_dt_input *in = dt->curr_in;
+	struct yaml_dt_span *span = dt->curr_span;
 	yaml_event_t event;
 	struct dt_yaml_mark m;
 
 	if (!yaml_parser_parse(&dt->parser, &event)) {
-		m.filename = in ? in->name : "";
 		m.start = m.end = dt->parser.problem_mark;
+		span->m.end = m.end;
+		span->end_pos = span->start_pos +
+				(span->m.end.index - span->m.start.index);
 		dt_error_at(dt, &m, "%s\n", dt->parser.problem);
 		return -1;
 	}
@@ -2351,9 +2399,10 @@ int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
 int dt_parse_dts(struct yaml_dt_state *dt)
 {
 	struct yaml_dt_input *in = dt->curr_in;
+	struct yaml_dt_span *span = dt->curr_span;
 	int err, c;
 
-	if (!in || !in->dts)
+	if (!in || !span || !in->dts)
 		return 0;
 
 	if (!dt->dts_initialized) {
@@ -2365,21 +2414,50 @@ int dt_parse_dts(struct yaml_dt_state *dt)
 
 	err = 0;
 	while (!err && in->pos < in->size) {
+
 		c = *((char *)in->content + in->pos);
+
+		dt->curr_span_mark.start = span->m.end;
+		/* mark the end of the span */
+		span->m.end.index++;
+		if (c == '\n') {
+			span->m.end.line++;
+			span->m.end.column = 0;
+		} else
+			span->m.end.column++;
+		span->end_pos = in->pos + 1;
+		dt->curr_span_mark.end = span->m.end;
+
 		err = dts_feed(&dt->ds, c);
 
+		/* if no error, advance */
 		if (!err) {
 			in->pos++;
 			dt->curr_input_pos++;
-			if (c == '\n')
+			if (c == '\n') {
 				dt->curr_input_line++;
+				dt->curr_input_column = 0;
+			} else
+				dt->curr_input_column++;
 		}
+
+		in = dt->curr_in;
+		span = dt->curr_span;
+
+		/* pop (creating spans on the way out) */
+		while (in->pos >= in->size && in->parent) {
+			in = in->parent;
+			span = dt_span_create(dt, in);
+			assert(span);
+		}
+
+		dt->curr_in = in;
+		dt->curr_span = span;
+
 	}
-	if (!err) {
+
+	if (!err)
 		dts_feed(&dt->ds, EOF);
-		in->end_pos = dt->curr_input_pos;
-		in->end_line = dt->curr_input_line;
-	}
 
 	return err;
 }
@@ -2405,123 +2483,14 @@ int dt_parse(struct yaml_dt_state *dt)
 	return dt->error_flag ? -1 : 0;
 }
 
-#if 0
-static void dt_yaml_mark_print(struct yaml_dt_state *dt,
-			       const struct dt_yaml_mark *m)
-{
-	struct yaml_dt_input *in;
-	bool found;
-	size_t idx;
-	char *s, *e, *ls, *le, *start, *end, *p, *pe;
-	char *filep;
-	int lines, lastline, filepsz;
-
-	fprintf(stderr, "start: index=%zu line=%zu column=%zu\n",
-			m->start.index, m->start.line, m->start.column);
-	fprintf(stderr, "end: index=%zu line=%zu column=%zu\n",
-			m->end.index, m->end.line, m->end.column);
-
-	idx = m->start.index;
-
-	/* first iterate over the regular input files */
-	in = NULL;
-	found = false;
-	list_for_each_entry(in, &dt->inputs, node) {
-		if (idx >= in->start_pos && idx < in->end_pos) {
-			found = true;
-			break;
-		}
-	}
-
-	/* not found? */
-	if (!found) {
-		fprintf(stderr, "Could not find corresponding base input\n");
-		return;
-	}
-
-	fprintf(stderr, "found at %s\n", in->name);
-
-	start = in->content;
-	end = start + in->size;
-
-	s = start + (m->start.index - in->start_pos);
-	assert(s < end);
-	e = start + (m->end.index - in->start_pos);
-	assert(e <= end);
-
-	fprintf(stderr, "found: ");
-	fwrite(s, e - s, 1, stderr);
-	fprintf(stderr, "\n");
-
-	/* get full line of the first marker */
-	ls = memrchr(start, '\n', s - start);
-	if (!ls)
-		ls = start;
-	else
-		ls++;
-	le = memchr(s, '\n', end - s);
-	if (!le)
-		le = end;
-
-	fprintf(stderr, "line: ");
-	fwrite(ls, le - ls, 1, stderr);
-	fprintf(stderr, "\n");
-
-	/* work back, until we find a file marker or end */
-	lines = 0;
-	s = ls;
-	filep = in->name;
-	filepsz = strlen(in->name);
-	if (s > start && s[-1] == '\n')
-		s--;
-	while (s > start) {
-		ls = memrchr(start, '\n', s - start);
-		if (!ls) {
-			ls = start;
-			p = ls;
-		} else
-			p = ls + 1;
-
-		fprintf(stderr, "check #%d: \"", lines);
-		fwrite(p, s - p, 1, stderr);
-		fprintf(stderr, "\"\n");
-
-		if (p[0] == '#' && isspace(p[1])) {
-			p += 2;
-			while (isspace(*p))
-				p++;
-			lastline = strtol(p, &pe, 10) - 1;
-			if (pe > p && isspace(*pe)) {
-				while (isspace(*pe))
-					pe++;
-				p = pe + 1;
-				pe = strchr(p, '"');
-				if (pe) {
-					filep = p;
-					filepsz = pe - p;
-					lines += lastline;
-					break;
-				}
-			}
-		}
-
-		s = ls;
-		lines++;
-	}
-	fprintf(stderr, "file: \"");
-	fwrite(filep, filepsz, 1, stderr);
-	fprintf(stderr, "\"\n");
-	fprintf(stderr, "line# %d\n", lines + 1);
-}
-#endif
-
 static void get_error_location(struct yaml_dt_state *dt,
 			size_t idx,
 		        char *filebuf, size_t filebufsize,
 			char *linebuf, size_t linebufsize,
 			size_t *linep)
 {
-	struct yaml_dt_input *in;
+	const struct yaml_dt_input *in;
+	const struct yaml_dt_span *span;
 	bool found;
 	char *s, *ls, *le, *start, *end, *p, *pe;
 	char *filep;
@@ -2532,11 +2501,22 @@ static void get_error_location(struct yaml_dt_state *dt,
 	*linebuf = '\0';
 	*linep = 0;
 
+	/*
+	fprintf(stderr, "looking for %zu at spans\n", idx);
+	list_for_each_entry(span, &dt->spans, node) {
+		fprintf(stderr, "%zu-%zu: %s %zu-%zu\n",
+				span->m.start.index, span->m.end.index,
+				span->in->name,
+				span->start_pos, span->end_pos);
+	}
+	fprintf(stderr, "\n");
+	*/
+
 	/* first iterate over the regular input files */
-	in = NULL;
+	span = NULL;
 	found = false;
-	list_for_each_entry(in, &dt->inputs, node) {
-		if (idx >= in->start_pos && idx < in->end_pos) {
+	list_for_each_entry(span, &dt->spans, node) {
+		if (idx >= span->m.start.index && idx < span->m.end.index) {
 			found = true;
 			break;
 		}
@@ -2544,17 +2524,15 @@ static void get_error_location(struct yaml_dt_state *dt,
 
 	/* not found? */
 	if (!found) {
-		fprintf(stderr, "Could not find corresponding base input idx=%zu\n", idx);
-		list_for_each_entry(in, &dt->inputs, node) {
-			fprintf(stderr, "%s: %zu-%zu\n", in->name, in->start_pos, in->end_pos);
-		}
+		fprintf(stderr, "Could not find corresponding span idx=%zu\n", idx);
 		return;
 	}
+	in = span->in;
 
 	start = in->content;
 	end = start + in->size;
 
-	s = start + (idx - in->start_pos);
+	s = start + span->start_pos + (idx - span->m.start.index);
 	assert(s < end);
 
 	/* get full line of the first marker */
@@ -2707,7 +2685,7 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 
 	/* if no mark, use the current one */
 	if (!m)
-		m = &dt->current_mark;
+		m = &dt->curr_span_mark;
 
 	line = m->start.line;
 	column = m->start.column;

@@ -61,7 +61,6 @@
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
 
 struct dt_yaml_mark {
-	const char *filename;
 	yaml_mark_t start;
 	yaml_mark_t end;
 };
@@ -141,17 +140,19 @@ struct yaml_dt_input {
 	void *content;
 	size_t size;
 	size_t pos;
-	size_t lines;
 
 	struct yaml_dt_input *parent;
 	struct list_head includes;
 
-	size_t start_pos;	/* included */
-	size_t end_pos;		/* not included */
-	size_t start_line;
-	size_t end_line;
-
 	bool dts;		/* set to true when DTS source */
+};
+
+struct yaml_dt_span {
+	struct list_head node;
+	const struct yaml_dt_input *in;
+	size_t start_pos;
+	size_t end_pos;
+	struct dt_yaml_mark m;
 };
 
 struct yaml_dt_state;
@@ -202,10 +203,16 @@ struct yaml_dt_state {
 	int curr_input_file;
 	size_t curr_input_pos;
 	size_t curr_input_line;
+	size_t curr_input_column;
 	size_t last_input_pos;
 	size_t last_input_line;
+	size_t last_input_column;
+
 	struct yaml_dt_input *curr_in;
 	struct list_head inputs;
+	struct yaml_dt_span *curr_span;
+	struct dt_yaml_mark curr_span_mark;
+	struct list_head spans;
 
 	char **alloc_argv;
 
