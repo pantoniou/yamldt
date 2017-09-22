@@ -309,7 +309,7 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 	if (err != 0) {
 		if (ref->type == r_anchor || ref->type == r_path) {
 			tree_error_at_ref(to_tree(dt), ref,
-				"Can't resolve reference to %s %s\n",
+				"can't resolve reference to %s %s\n",
 				refname[0] == '/' ? "path" : "label",
 				refname);
 			return;
@@ -467,7 +467,7 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 				refname[refnamelen] = '\0';
 
 				tree_error_at_ref(to_tree(dt), ref,
-					"can't resolve reference to %s %s\n",
+					"can't lookup %s %s\n",
 					refname[0] == '/' ? "path" : "label",
 					refname);
 
@@ -1604,7 +1604,7 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 				fputc('\'', fp);
 
 			if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
-				fprintf(fp, " %02x", to_dt_ref(reft)->is_int ?
+				fprintf(fp, "%02x", to_dt_ref(reft)->is_int ?
 					    (unsigned int)to_dt_ref(reft)->val & 0xff : 0);
 			else
 				fwrite(reft->data, reft->len, 1, fp);
