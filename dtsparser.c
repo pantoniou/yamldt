@@ -1086,6 +1086,10 @@ static int nodes_and_properties_marker_common(struct dts_state *ds, char c)
 			goto_state(ds, s_property);
 		return 1;
 	case '{':
+		if (!get_accumulator_size(ds)) {
+			dts_error(ds, "missing node name\n");
+			return -1;
+		}
 		buf = get_accumulator(ds);
 		dts_debug(ds, "new node: \"%s\" depth %d\n", buf, ds->depth);
 		li = item_from_accumulator(ds, dea_name);
