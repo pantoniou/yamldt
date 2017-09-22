@@ -843,6 +843,35 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		break;
 
 	case det_memreserve:
+
+		np = tree_root(to_tree(dt));
+		if (!np) {
+			/* sigh, create root */
+			np = node_alloc(to_tree(dt), "", NULL);
+
+			/* mark as the last map */
+			dts_loc_to_yaml_mark(&data->memreserves[0]->loc,
+					&to_dt_node(np)->m);
+			tree_set_root(to_tree(dt), np);
+		}
+
+		prop = prop_alloc(to_tree(dt), "/memreserve/");
+
+		for (i = 0; i < 2; i++) {
+			ref = ref_alloc(to_tree(dt), r_scalar,
+					data->memreserves[i]->contents,
+					strlen(data->memreserves[i]->contents),
+					"!int64");
+			ref->prop = prop;
+			list_add_tail(&ref->node, &prop->refs);
+
+			dts_loc_to_yaml_mark(&data->memreserves[i]->loc,
+					     &to_dt_ref(ref)->m);
+		}
+
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
 		break;
 
 	case det_node:
