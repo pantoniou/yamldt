@@ -596,7 +596,7 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 	do {
 		if (in->size >= alloc) {
 			alloc += adv;
-			in->content = realloc(in->content, alloc);
+			in->content = realloc(in->content, alloc + 1);
 			assert(in->content);
 		}
 
@@ -607,6 +607,7 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 		if (nread <= 0 && ferror(fp))
 			return NULL;
 		in->size += nread;
+		s[nread] = '\0';	/* always terminate with zero */
 
 		/* avoid extra calls to fread */
 		if (filesz && in->size >= filesz)
@@ -616,8 +617,10 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 
 	/* trim */
 	if (in->size && alloc != in->size) {
-		in->content = realloc(in->content, in->size);
+		in->content = realloc(in->content, in->size + 1);
 		assert(in->content);
+		/* always terminate with zero */
+		*((char *)in->content + in->size) = '\0';
 	}
 
 	fclose(fp);
@@ -653,6 +656,505 @@ static void dt_input_free(struct yaml_dt_state *dt, struct yaml_dt_input *in)
 	free(in);
 }
 
+static void dt_dts_debug(struct dts_state *ds, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 2, 0)));
+
+static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
+		const struct dts_location *loc, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 4, 0)));
+
+#define dts_to_dt(_t) 	container_of(_t, struct yaml_dt_state, ds)
+
+static void dt_dts_debug(struct dts_state *ds, const char *fmt, ...)
+{
+	struct yaml_dt_state *dt = dts_to_dt(ds);
+	FILE *fp;
+	char *buf, *s;
+	size_t size;
+	va_list ap;
+
+	fp = open_memstream(&buf, &size);
+	assert(fp);
+
+	va_start(ap, fmt);
+	vfprintf(fp, fmt, ap);
+	va_end(ap);
+
+	fclose(fp);
+
+	/* strip trailing newlines */
+	s = buf + size;
+	while (s > buf && s[-1] == '\n')
+		*--s = '\0';
+
+	dt_debug(dt, "dts: %s\n", buf);
+	free(buf);
+}
+
+static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
+		const struct dts_location *loc, const char *fmt, ...)
+{
+	struct yaml_dt_state *dt = dts_to_dt(ds);
+	struct dt_yaml_mark m;
+	FILE *fp;
+	char *buf, *s;
+	size_t size;
+	va_list ap;
+
+	fp = open_memstream(&buf, &size);
+	assert(fp);
+
+	va_start(ap, fmt);
+	vfprintf(fp, fmt, ap);
+	va_end(ap);
+
+	fclose(fp);
+
+	/* strip trailing newlines */
+	s = buf + size;
+	while (s > buf && s[-1] == '\n')
+		*--s = '\0';
+
+	memset(&m, 0, sizeof(m));
+
+	if (loc) {
+		m.start.index = loc->start_index;
+		m.start.line = loc->start_line;
+		m.start.column = loc->start_col;
+		m.end.index = loc->end_index;
+		m.end.line = loc->end_line;
+		m.end.column = loc->end_col;
+	}
+
+	switch (type) {
+	case dmt_info:
+		dt_info(dt, "dts: %s\n", buf);
+		break;
+	case dmt_warning:
+		dt_warning_at(dt, loc ? &m : NULL, "dts: %s\n", buf);
+		break;
+	case dmt_error:
+		dt_error_at(dt, loc ? &m : NULL, "dts: %s\n", buf);
+		break;
+	}
+	free(buf);
+}
+
+static void dts_loc_to_yaml_mark(const struct dts_location *loc, struct dt_yaml_mark *m)
+{
+	m->filename = loc->filename;
+	m->start.index = loc->start_index;
+	m->start.line = loc->start_line;
+	m->start.column = loc->start_col - 1;
+	m->end.index = loc->end_index;
+	m->end.line = loc->end_line;
+	m->end.column = loc->end_col;
+}
+
+static int dt_dts_emit(struct dts_state *ds, int depth,
+		enum dts_emit_type type, const struct dts_emit_data *data)
+{
+	char namebuf[NODE_FULLNAME_MAX];
+	struct yaml_dt_state *dt = dts_to_dt(ds);
+	struct dt_yaml_mark m;
+	bool is_root;
+	struct node *np, *npt;
+	struct property *prop;
+	struct ref *ref;
+	struct label *l;
+	bool found_existing;
+	const char *name, *label;
+	char *nname;
+	const struct dts_property_item *pi;
+	const struct dts_emit_item *ei;
+	enum ref_type rt;
+	int i, j, k, bits;
+	const char *bits_tag, *tag;
+	const char *refdata;
+	int reflen;
+	char bytebuf[4 + 1];	/* 0xFF */
+
+	switch (type) {
+	case det_separator:
+	case det_comment:
+	case det_preproc:
+	case det_node_empty:
+		/* nothing */
+		break;
+	case det_del_node:
+		switch (data->del_node->atom) {
+		case dea_name:
+			break;
+		case dea_ref:
+		case dea_pathref:
+			break;
+		default:
+			break;
+		}
+		break;
+	case det_del_prop:
+		/* only handle delete names */
+		if (data->del_node->atom == dea_name) {
+			;
+		}
+		break;
+
+	case det_include:
+		if (data->include->atom != dea_string) {
+			dts_error(ds, "bad include atom\n");
+			return -1;
+		}
+
+		break;
+
+	case det_memreserve:
+		break;
+
+	case det_node:
+		name = data->pn.name->contents;
+		is_root = data->pn.name->atom == dea_name && !strcmp(name, "/");
+
+		dts_loc_to_yaml_mark(&data->pn.name->loc, &m);
+
+		if (is_root) {
+			if (depth != 0)
+				dt_fatal(dt, "root is not at depth 0 (%d)\n", depth);
+
+			np = tree_root(to_tree(dt));
+			if (!np) {
+				np = node_alloc(to_tree(dt), "", NULL);
+				dt->current_np = np;
+				tree_set_root(to_tree(dt), np);
+
+				/* mark as the last map */
+				to_dt_node(np)->m = m;
+
+				dt_debug(dt, "* created root\n");
+			} else
+				dt_debug(dt, "* using root\n");
+
+			dt->current_np = np;
+			dt->depth = 0;
+			break;
+		}
+
+		/* reference? */
+		if (data->pn.name->atom == dea_ref || data->pn.name->atom == dea_pathref) {
+			if (depth != 0)
+				dt_fatal(dt, "ref with depth not 0 (%d)\n", depth);
+		} else if (data->pn.name->atom != dea_name)
+			dt_fatal(dt, "can't process unknown type of node\n");
+
+		/* add one for the implicit root */
+		depth++;
+
+		found_existing = false;
+		np = dt->current_np;
+
+		if (np) {
+			fprintf(stderr, "node=%s depth=%d parent=%s\n", name, depth,
+					dn_fullname(np, namebuf, sizeof(namebuf)));
+
+			/* note that we match on deleted too */
+			for_each_child_of_node_withdel(dt->current_np, np) {
+				/* match on same name or root */
+				if (!strcmp(name, np->name) ||
+					(name[0] == '/' && np->name[0] == '\0')) {
+					found_existing = true;
+					/* resurrect? */
+					if (np->deleted)
+						np->deleted = false;
+					break;
+				}
+			}
+		}
+
+		if (!found_existing) {
+
+			/* tack on * on ref */
+			if (data->pn.name->atom == dea_ref) {
+				nname = alloca(strlen(name) + 2);
+				nname[0] = '*';
+				strcpy(nname + 1, name);
+				name = nname;
+			}
+
+			np = node_alloc(to_tree(dt), name, NULL);
+
+			/* mark as the last map */
+			to_dt_node(np)->m = m;
+
+			if (data->pn.name->atom == dea_name) {
+				np->parent = dt->current_np;
+				list_add_tail(&np->node, &np->parent->children);
+			} else {
+				np->parent = NULL;
+				list_add_tail(&np->node, tree_ref_nodes(to_tree(dt)));
+			}
+		}
+
+		dt_debug(dt, "%s node @%s\n",
+				found_existing ? "using existing" : "creating",
+				dn_fullname(np, namebuf, sizeof(namebuf)));
+
+		dt->current_np = np;
+		dt->depth = depth;
+
+		if (data->pn.name->atom != dea_name)
+			dt->current_np_ref = true;
+
+		for (i = 0; i < data->pn.nr_labels; i++) {
+			label = data->pn.labels[i]->contents;
+
+			/* check if label is duplicate */
+			npt = node_lookup_by_label(to_tree(dt), label, strlen(label));
+			if (npt) {
+				/* duplicate label on the same node is a NOP */
+				if (npt == np)
+					continue;
+				/* in non-compatible mode we warn */
+				if (!dt->cfg.compatible) {
+					dt_warning_at(dt, &dt->current_mark,
+						"node %s with duplicate label %s; removing\n",
+						name, label);
+					continue;
+				}
+				/* in compatible mode we allow it */
+			}
+			l = label_add_nolink(to_tree(dt), np, label);
+			assert(l);	/* if it exists the lookup above should catch it */
+
+			/* in compatible mode we add the label at the head */
+			if (!dt->cfg.compatible)
+				list_add_tail(&l->node, &np->labels);
+			else
+				list_add(&l->node, &np->labels);
+		}
+		break;
+
+	case det_node_end:
+
+		np = dt->current_np;
+		assert(np);
+
+		if (dt->current_np_ref && dt->depth == 0) {
+			dt->current_np_ref = false;
+
+			if (tree_apply_single_ref_node(to_tree(dt), np,
+				dt->cfg.object, dt->cfg.compatible)) {
+
+				list_del(&np->node);
+				node_free(to_tree(dt), np);
+			}
+			np = NULL;
+		} else
+			np = np->parent;
+
+		if (dt->depth >= 1)
+			dt->depth--;
+
+		if (np)
+			dt_debug(dt, "now at node @%s (depth=%d)\n",
+					dn_fullname(np, namebuf, sizeof(namebuf)),
+					dt->depth);
+		else
+			dt_debug(dt, "now outside node context\n");
+
+		dt->current_np = np;
+		break;
+
+	case det_property:
+
+		name = data->pn.name->contents;
+		dts_loc_to_yaml_mark(&data->pn.name->loc, &m);
+
+		np = dt->current_np;
+		if (!np)
+			dt_fatal(dt, "property when no node\n");
+
+		found_existing = false;
+		for_each_property_of_node_withdel(np, prop) {
+			if (!strcmp(prop->name, name)) {
+				found_existing = true;
+				/* bring it back to life */
+				if (prop->deleted) {
+					prop->deleted = false;
+					prop->is_delete = false;
+				}
+				break;
+			}
+		}
+		if (!found_existing)
+			prop = NULL;
+
+		if (!prop)
+			prop = prop_alloc(to_tree(dt), name);
+		else
+			prop_ref_clear(to_tree(dt), prop);
+		assert(prop);
+
+		to_dt_property(prop)->m = m;
+
+		dt_debug(dt, "%s property %s at %s\n",
+			found_existing ? "existing" : "new",
+			prop->name[0] ? prop->name : "-",
+			np ? dn_fullname(np, namebuf, sizeof(namebuf)) : "<NULL>");
+
+		/* single (true) boolean value */
+		if (!data->pn.nr_items) {
+			ref = ref_alloc(to_tree(dt), r_scalar,
+					"true", strlen("true"),
+					NULL);
+			ref->prop = prop;
+			list_add_tail(&ref->node, &prop->refs);
+
+			/* the ref mark is the name of the property */
+			to_dt_ref(ref)->m = m;
+
+		} else {
+
+			for (k = 0; k < data->pn.nr_items; k++) {
+				pi = data->pn.items[k];
+				ei = data->pn.items[k]->elems[0];
+				j = data->pn.items[k]->nr_elems;
+
+
+				bits = 0;
+				/* emit bits */
+				if (pi->bits)
+					bits = atoi(pi->bits->contents);
+				else if (ei->atom == dea_byte)
+					bits = 8;
+
+				switch (bits) {
+				case 8:
+					bits_tag = "!int8";
+					break;
+				case 16:
+					bits_tag = "!int16";
+					break;
+				case 32:
+					bits_tag = "!int32";
+					break;
+				case 64:
+					bits_tag = "!int64";
+					break;
+				default:
+					bits_tag = NULL;
+					break;
+				}
+
+				for (i = 0; i < j; i++) {
+					ei = pi->elems[i];
+
+					tag = NULL;
+					rt = r_scalar;	/* default is scalar */
+
+					/* default is using the same content */
+					refdata = ei->contents;
+					reflen = strlen(ei->contents);
+
+					switch (ei->atom) {
+					case dea_int:
+					case dea_expr:
+						tag = bits_tag;
+						break;
+					case dea_byte:
+						tag = "!int8";
+						/* tack on hex prefix if it's not there */
+						if (reflen <= 2) {
+							bytebuf[0] = '0';
+							bytebuf[1] = 'x';
+							memcpy(bytebuf + 2, refdata, reflen);
+							bytebuf[2 + reflen] = '\0';
+							refdata = bytebuf;
+							reflen = strlen(bytebuf);
+						}
+						break;
+					case dea_char:
+						tag = "!char";
+						break;
+					case dea_string:
+						tag = "!str";
+						break;
+					case dea_stringref:
+						tag = "!pathref";
+						rt = r_path;
+						break;
+					case dea_ref:
+					case dea_pathref:
+						tag = "!anchor";
+						rt = r_anchor;
+						break;
+					default:
+						tag = NULL;
+						break;
+					}
+
+					ref = ref_alloc(to_tree(dt), rt,
+							refdata, reflen, tag);
+					ref->prop = prop;
+					list_add_tail(&ref->node, &prop->refs);
+
+					/* track */
+					dts_loc_to_yaml_mark(&ei->loc,
+							&to_dt_ref(ref)->m);
+				}
+			}
+		}
+
+		prop->np = np;
+		list_add_tail(&prop->node, &np->properties);
+
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static const struct dts_ops dt_dts_ops = {
+	.debugf		= dt_dts_debug,
+	.messagef	= dt_dts_message,
+	.emit		= dt_dts_emit,
+};
+
+static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in)
+{
+	const char *s, *start, *ls, *le, *p;
+
+	start = in->content;
+
+	/* NOTE content is always terminated by zero */
+	/* so this is guaranteed to work */
+	s = strstr(start, "/dts-v1/");
+	if (!s)
+		return false;
+
+	/* okay, now find the line this is on */
+	ls = memrchr(start, '\n', s - start);
+	if (!ls)
+		ls = start;
+	else
+		ls++;
+
+	le = strchr(s, '\n');
+	if (!le)
+		le = start + in->size;
+
+	p = ls;
+	while (isspace(*p))
+		p++;
+	if (le - p < 8 /* /dts-v1/ */ || memcmp(p, "/dts-v1/", 8))
+		return false;
+
+	in->dts = true;
+	fprintf(stderr, "DTS file %s\n", in->name);
+
+	return true;
+}
+
 static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, size_t *size_read)
 {
 	struct yaml_dt_state *dt = data;
@@ -674,7 +1176,7 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 	}
 
 	/* have to read a file (that's not empty) */
-	while (!in || !in->size) {
+	while (!in || !in->size || in->dts) {
 		if (in && !in->size)
 			dt->curr_input_file++;
 
@@ -697,6 +1199,10 @@ static int dt_yaml_read_handler(void *data, unsigned char *buffer, size_t size, 
 			return 0;
 		}
 		dt->curr_in = in;
+
+		/* TODO clean this up with input detection */
+		if (dt_yaml_parse_dts(dt, in))
+			dt->curr_input_file++;
 	}
 
 	nread = size;
@@ -940,6 +1446,11 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	list_for_each_entry_safe(child, childn, &dt->children, node)
 		dt_cleanup(child, abnormal);
+
+	if (dt->dts_initialized) {
+		dts_cleanup(&dt->ds);
+		dt->dts_initialized = false;
+	}
 
 	if (dt->map_key)
 		free(dt->map_key);
@@ -1319,8 +1830,9 @@ property_prepare(struct yaml_dt_state *dt, yaml_event_t *event,
 	return prop;
 }
 
-static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
+static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 {
+	struct yaml_dt_input *in = dt->curr_in;
 	struct node *np;
 	struct property *prop;
 	yaml_event_type_t type = event->type;
@@ -1334,6 +1846,7 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	assert(!dt->current_event);
 	dt->current_event = event;
 
+	dt->current_mark.filename = in->name;
 	dt->current_mark.start = event->start_mark;
 	dt->current_mark.end = event->end_mark;
 
@@ -1811,35 +2324,84 @@ static int process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	}
 
 	dt->current_event = NULL;
+}
+
+int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
+{
+	struct yaml_dt_input *in = dt->curr_in;
+	yaml_event_t event;
+	struct dt_yaml_mark m;
+
+	if (!yaml_parser_parse(&dt->parser, &event)) {
+		m.filename = in ? in->name : "";
+		m.start = m.end = dt->parser.problem_mark;
+		dt_error_at(dt, &m, "%s\n", dt->parser.problem);
+		return -1;
+	}
+
+	process_yaml_event(dt, &event);
+
+	*token_type = event.type;
+
+	yaml_event_delete(&event);
+
 	return 0;
+}
+
+int dt_parse_dts(struct yaml_dt_state *dt)
+{
+	struct yaml_dt_input *in = dt->curr_in;
+	int err, c;
+
+	if (!in || !in->dts)
+		return 0;
+
+	if (!dt->dts_initialized) {
+		err = dts_setup(&dt->ds, in->name, 8, &dt_dts_ops);
+		if (err)
+			dt_fatal(dt, "Unable to setup DTS parser\n");
+		dt->dts_initialized = true;
+	}
+
+	err = 0;
+	while (!err && in->pos < in->size) {
+		c = *((char *)in->content + in->pos);
+		err = dts_feed(&dt->ds, c);
+
+		if (!err) {
+			in->pos++;
+			dt->curr_input_pos++;
+			if (c == '\n')
+				dt->curr_input_line++;
+		}
+	}
+	if (!err) {
+		dts_feed(&dt->ds, EOF);
+		in->end_pos = dt->curr_input_pos;
+		in->end_line = dt->curr_input_line;
+	}
+
+	return err;
 }
 
 int dt_parse(struct yaml_dt_state *dt)
 {
-	yaml_event_t event;
-	struct dt_yaml_mark m;
+	yaml_token_type_t token_type;
 	int err;
-	bool end;
 
-	while (1) {
+	/* we must start with stream start */
+	err = dt_parse_yaml(dt, &token_type);
+	if (err || token_type != YAML_STREAM_START_TOKEN)
+		dt_fatal(dt, "YAML parser not starting with stream start\n");
 
-		if (!yaml_parser_parse(&dt->parser, &event)) {
-			m.start = m.end = dt->parser.problem_mark;
-			dt_error_at(dt, &m, "%s\n", dt->parser.problem);
-			return -1;
-		}
+	do {
+		dt_parse_dts(dt);
 
-		err = process_yaml_event(dt, &event);
-		if (err)
-			dt_fatal(dt, "Error processing event: %d\n", err);
-
-		end = event.type == YAML_STREAM_END_EVENT;
-
-		yaml_event_delete(&event);
-
-		if (end)
+		err = dt_parse_yaml(dt, &token_type);
+		if (err == 0 && token_type == YAML_STREAM_END_TOKEN)
 			break;
-	}
+	} while (err == 0);
+
 	return dt->error_flag ? -1 : 0;
 }
 
@@ -1963,7 +2525,8 @@ static void get_error_location(struct yaml_dt_state *dt,
 	bool found;
 	char *s, *ls, *le, *start, *end, *p, *pe;
 	char *filep;
-	int lines, lastline, filepsz, sz;
+	int i, lines, lastline, filepsz, sz;
+	char c;
 
 	*filebuf = '\0';
 	*linebuf = '\0';
@@ -1980,8 +2543,13 @@ static void get_error_location(struct yaml_dt_state *dt,
 	}
 
 	/* not found? */
-	if (!found)
-		dt_fatal(dt, "Could not find corresponding base input\n");
+	if (!found) {
+		fprintf(stderr, "Could not find corresponding base input idx=%zu\n", idx);
+		list_for_each_entry(in, &dt->inputs, node) {
+			fprintf(stderr, "%s: %zu-%zu\n", in->name, in->start_pos, in->end_pos);
+		}
+		return;
+	}
 
 	start = in->content;
 	end = start + in->size;
@@ -2002,7 +2570,12 @@ static void get_error_location(struct yaml_dt_state *dt,
 	sz = le - ls;
 	if (sz > linebufsize - 1)
 		sz = linebufsize  - 1;
-	memcpy(linebuf, ls, sz);
+	for (i = 0; i < sz; i++) {
+		c = ls[i];
+		if (isspace(c))
+			c = ' ';
+		linebuf[i] = c;
+	}
 	linebuf[sz] = '\0';
 
 	/* work back, until we find a file marker or end */
@@ -2084,13 +2657,13 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 		end_line = dt->current_mark.end.line;
 		end_column = dt->current_mark.end.column;
 
+		if (end_line != line)
+			end_column = strlen(linebuf) + 1;
+
 		get_error_location(dt, dt->current_mark.start.index,
 				filebuf, sizeof(filebuf),
 				linebuf, sizeof(linebuf),
 				&line);
-
-		if (end_line != line)
-			end_column = strlen(linebuf) + 1;
 
 		fprintf(stderr, "%s%s:%zd:%zd: %s%s%s\n %s\n %*s%s^%s",
 				emph, filebuf, line, column + 1,
@@ -2098,9 +2671,7 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 				linebuf,
 				(int)column, "", marker, reset);
 		if (column > 0 && end_column > 0) {
-			fprintf(stderr, "column=%zd end_column=%zd\n",
-					column, end_column);
-			while (++column < end_column - 1)
+			while (++column < end_column)
 				fprintf(stderr, "~");
 		}
 		fprintf(stderr, "\n");
@@ -2139,19 +2710,19 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	end_line = m->end.line;
 	end_column = m->end.column;
 
+	if (end_line != line)
+		end_column = strlen(linebuf) + 1;
+
 	get_error_location(dt, m->start.index,
 			filebuf, sizeof(filebuf),
 			linebuf, sizeof(linebuf),
 			&line);
 
-	if (end_line != line)
-		end_column = strlen(linebuf) + 1;
-
 	fprintf(stderr, "%s%s:%zd:%zd: %s%s:%s %s%s\n %s\n %*s%s^",
 			emph, filebuf, line, column + 1,
 			kind, type, emph, msg, reset,
 			linebuf, (int)column, "", marker);
-	while (++column < end_column - 1)
+	while (++column < end_column)
 		fprintf(stderr, "~");
 	fprintf(stderr, "%s\n", reset);
 }

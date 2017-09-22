@@ -22,7 +22,8 @@ yamldt_SOURCES = yamldt.c \
 		 syexpr.c syexpr.h \
 		 base64.c base64.h \
 		 hkdf.c hmac.c sha1.c sha224-256.c sha384-512.c usha.c \
-		 sha.h sha-private.h
+		 sha.h sha-private.h \
+		 dtsparser.c dtsparser.h
 yamldt_LDADD = -lm $(LIBYAML_LIBS)
 
 if EXEC_EBPF
@@ -72,7 +73,8 @@ ebpfrun_SOURCES = ebpfrun.c \
 		  nullgen.c nullgen.h \
 		  nullcheck.c nullcheck.h \
 		  syexpr.c syexpr.h \
-		  base64.c base64.h
+		  base64.c base64.h \
+		  dtsparser.c dtsparser.h
 ebpfrun_LDADD = -lm $(LIBYAML_LIBS)
 
 ebpfcompile_CFLAGS = $(LIBELF_CFLAGS)

@@ -55,10 +55,13 @@
 
 #include "tree.h"
 
+#include "dtsparser.h"
+
 /* should be enough */
 #define YAMLDL_PROP_SEQ_TAG_DEPTH_MAX	128
 
 struct dt_yaml_mark {
+	const char *filename;
 	yaml_mark_t start;
 	yaml_mark_t end;
 };
@@ -147,6 +150,8 @@ struct yaml_dt_input {
 	size_t end_pos;		/* not included */
 	size_t start_line;
 	size_t end_line;
+
+	bool dts;		/* set to true when DTS source */
 };
 
 struct yaml_dt_state;
@@ -239,6 +244,10 @@ struct yaml_dt_state {
 	const struct yaml_dt_checker *checker;
 	void *checker_state;
 	void *checker_cfg;
+
+	/* dts parser */
+	struct dts_state ds;
+	bool dts_initialized;
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)
