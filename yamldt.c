@@ -66,6 +66,7 @@
 #include "dtbcheck.h"
 
 static struct option opts[] = {
+	{ "quiet",		no_argument,	   0, 'q' },
 	{ "output",	 	required_argument, 0, 'o' },
 	{ "debug",	 	no_argument,	   0, 'd' },
 	{ "",			no_argument,	   0, 'c' },
@@ -76,7 +77,6 @@ static struct option opts[] = {
 	{ "codegen",		required_argument, 0, 'g' },
 	{ "save-temps",		no_argument, 	   0,  0  },
 	{ "schema-save",	required_argument, 0,  0  },
-	{ "silent",		no_argument,	   0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
 	{ "input-format",	required_argument, 0,  0  },
@@ -94,6 +94,7 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 	printf(
 "yamldt [options] <input-file> [<input-file>...]\n"
 " options are:\n"
+"   -q, --quiet           Suppress; -q (warnings) -qq (errors) -qqq (everything)\n"
 "   -o, --output          Output file\n"
 "   -d, --debug           Debug messages\n"
 "   -c                    Don't resolve references (object mode)\n"
@@ -104,7 +105,6 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "   -g, --codegen         Code generator configuration file\n"
 "       --save-temps      Save temporary files\n"
 "       --schema-save     Save schema to given file\n"
-"       --silent          Be really silent\n"
 "       --color           [auto|off|on]\n"
 "       --input-format=X  Force input to given format [dts|yaml|auto]\n"
 "       --reserve=X       Make space for X reserve map entries\n"
@@ -211,16 +211,12 @@ int main(int argc, char *argv[])
 
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"o:dcvCys@S:g:h?", opts, &option_index)) != -1) {
+			"qo:dcvCys@S:g:h?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
 			if (!s)
 				continue;
-			if (!strcmp(s, "silent")) {
-				cfg->silent = true;
-				continue;
-			}
 			if (!strcmp(s, "color")) {
 				if (!strcmp(optarg, "auto"))
 					cfg->color = -1;
@@ -261,6 +257,9 @@ int main(int argc, char *argv[])
 		}
 
 		switch (cc) {
+		case 'q':
+			cfg->quiet++;
+			break;
 		case 'o':
 			cfg->output_file = optarg;
 			break;

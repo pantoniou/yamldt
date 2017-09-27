@@ -118,7 +118,6 @@ struct yaml_dt_config {
 	int input_file_count;
 	const char *output_file;
 	bool debug;
-	bool silent;
 	int color;
 	bool save_temps;
 
@@ -129,6 +128,7 @@ struct yaml_dt_config {
 	bool compatible;
 	bool dts;
 	bool symbols;
+	unsigned int quiet;
 	unsigned int reserve;
 	unsigned int space;
 	unsigned int align;

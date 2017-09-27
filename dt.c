@@ -1545,9 +1545,10 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.debug = dt->cfg.debug;
-	cfg.silent = dt->cfg.silent;
 	cfg.color = dt->cfg.color;
 	cfg.output_file = output ? output : "/dev/null";
+	cfg.quiet = dt->cfg.quiet;
+	/* we don't copy the other configuration params */
 
 	/* directory mode */
 	i = strlen(input);
@@ -2808,6 +2809,12 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	size_t line, column, end_line, end_column;
 	const char *emph = "", *kind = "", *marker = "", *reset = "";
 
+	/* handle quiet */
+	if (dt->cfg.quiet >= 3 ||
+	    (dt->cfg.quiet >= 2 && !strcmp(type, "error")) ||
+	    (dt->cfg.quiet >= 1 && !strcmp(type, "warning")))
+		return;
+
 	if ((dt->cfg.color == -1 && isatty(STDERR_FILENO)) || dt->cfg.color == 1) {
 		emph = WHITE;
 		if (!strcmp(type, "error"))
@@ -2911,7 +2918,7 @@ void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
 
-	if (!dt->cfg.debug)
+	if (!dt->cfg.debug || dt->cfg.quiet)
 		return;
 
 	va_start(ap, fmt);
@@ -2923,7 +2930,7 @@ void dt_info(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
 
-	if (dt->cfg.silent)
+	if (dt->cfg.quiet)
 		return;
 
 	va_start(ap, fmt);
@@ -2934,6 +2941,9 @@ void dt_info(struct yaml_dt_state *dt, const char *fmt, ...)
 void dt_error(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
+
+	if (dt->cfg.quiet >= 2)
+		return;
 
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
