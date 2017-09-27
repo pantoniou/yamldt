@@ -129,6 +129,10 @@ struct yaml_dt_config {
 	bool compatible;
 	bool dts;
 	bool symbols;
+	unsigned int reserve;
+	unsigned int space;
+	unsigned int align;
+	unsigned int pad;
 
 	/* for YAML */
 	bool yaml;

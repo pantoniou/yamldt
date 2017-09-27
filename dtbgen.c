@@ -115,12 +115,6 @@ struct dtb_emit_state {
 	} area[dt_area_max + 1];
 
 	struct list_head fixups;
-
-	/* copy from config */
-	bool compatible;
-	bool object;
-	bool dts;
-	bool symbols;
 };
 
 #define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
@@ -462,7 +456,7 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 			else
 				np = node_lookup_by_label(to_tree(dt), ref->data, ref->len);
 
-			if (!np && !dtb->object) {
+			if (!np && !dt->cfg.object) {
 				refnamelen = ref->len > sizeof(refname) ? sizeof(refname) : ref->len;
 				memcpy(refname, ref->data, refnamelen);
 				refname[refnamelen] = '\0';
@@ -544,14 +538,13 @@ static bool is_node_referenced(struct yaml_dt_state *dt,
 
 static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 {
-	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct dtb_node *dtbnp = to_dtb_node(np);
 	struct node *child;
 	struct property *prop;
 	fdt32_t phandle;
 
 	if (dtbnp->phandle != 0 &&
-	   (dtb->object || dtb->symbols ||
+	   (dt->cfg.object || dt->cfg.symbols ||
 	    is_node_referenced(dt, tree_root(to_tree(dt)), np))) {
 		prop = prop_alloc(to_tree(dt), "phandle");
 
@@ -1025,7 +1018,7 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt,
 
 		is_memreserve = np == root &&
 				!strcmp(prop->name, "/memreserve/");
-		is_name = dtb->compatible && !strcmp(prop->name, "name");
+		is_name = dt->cfg.compatible && !strcmp(prop->name, "name");
 
 		dtbprop = to_dtb_prop(prop);
 
@@ -1071,7 +1064,6 @@ static void dtb_handle_special_properties(struct yaml_dt_state *dt,
 
 static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 {
-	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *root;
 
 	assert(dt);
@@ -1080,7 +1072,7 @@ static void dtb_resolve_phandle_refs(struct yaml_dt_state *dt)
 	if (!root)
 		return;
 
-	if (dtb->compatible) {
+	if (dt->cfg.compatible) {
 		resolve(dt, root, RF_CONTENT);
 		resolve(dt, root, RF_PHANDLES);
 		resolve(dt, root, RF_LABELS);
@@ -1325,12 +1317,10 @@ static void dtb_build_string_table_compatible(struct yaml_dt_state *dt)
 
 static void dtb_build_string_table(struct yaml_dt_state *dt)
 {
-	struct dtb_emit_state *dtb = to_dtb(dt);
-
 	if (!tree_root(to_tree(dt)))
 		return;
 
-	if (!dtb->compatible)
+	if (!dt->cfg.compatible)
 		dtb_build_string_table_minimal(dt);
 	else
 		dtb_build_string_table_compatible(dt);
@@ -1376,7 +1366,6 @@ static void dtb_flatten_node(struct yaml_dt_state *dt)
 
 static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 {
-	struct dtb_emit_state *dtb = to_dtb(dt);
 	struct node *root, *np, *child;
 	struct property *prop;
 	struct dtb_property *dtbprop;
@@ -1403,7 +1392,7 @@ static fdt32_t guess_boot_cpuid(struct yaml_dt_state *dt)
 			}
 
 			/* compatible mode is wrong, but whatever */
-			if (dtb->compatible)
+			if (dt->cfg.compatible)
 				return 0;
 		}
 	}
@@ -1422,18 +1411,17 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dtb->next_phandle = 1;
 	dt->emitter_state = dtb;
 
-	dtb->compatible = dt->cfg.compatible;
-	dtb->object = dt->cfg.object;
-	dtb->dts = dt->cfg.dts;
-	dtb->symbols = dt->cfg.symbols;
-
 	INIT_LIST_HEAD(&dtb->fixups);
 
 	dt_debug(dt, "DTB emitter configuration:\n");
-	dt_debug(dt, " compatible = %s\n", dtb->compatible ? "true" : "false");
-	dt_debug(dt, " object     = %s\n", dtb->object ? "true" : "false");
-	dt_debug(dt, " dts        = %s\n", dtb->dts ? "true" : "false");
-	dt_debug(dt, " symbols    = %s\n", dtb->symbols ? "true" : "false");
+	dt_debug(dt, " compatible = %s\n", dt->cfg.compatible ? "true" : "false");
+	dt_debug(dt, " object     = %s\n", dt->cfg.object ? "true" : "false");
+	dt_debug(dt, " dts        = %s\n", dt->cfg.dts ? "true" : "false");
+	dt_debug(dt, " symbols    = %s\n", dt->cfg.symbols ? "true" : "false");
+	dt_debug(dt, " reserve    = %u\n", dt->cfg.reserve);
+	dt_debug(dt, " space      = %u\n", dt->cfg.space);
+	dt_debug(dt, " align      = %u\n", dt->cfg.align);
+	dt_debug(dt, " pad        = %u\n", dt->cfg.pad);
 	return 0;
 }
 
@@ -1699,7 +1687,7 @@ static int dts_emit(struct yaml_dt_state *dt)
 
 	fprintf(fp, "/dts-v1/;\n");
 
-	if (dtb->object)
+	if (dt->cfg.object)
 		fprintf(fp, "/plugin/;\n");
 
 	prop = dtb->memreserve_prop;
@@ -1739,27 +1727,29 @@ int dtb_emit(struct yaml_dt_state *dt)
 	unsigned int totalsize, size_fdt_hdr, size_dt_strings, size_dt_struct,
 		     size_mem_rsvmap;
 	int size;
+	unsigned int i, padsize;
+	void *zeropad = NULL;
 
 	dtb_handle_special_properties(dt, tree_root(to_tree(dt)));
 
-	if (dtb->object)
+	if (dt->cfg.object)
 		dtb_create_overlay_structure(dt);
 
-	tree_apply_ref_nodes(to_tree(dt), dtb->object, dtb->compatible);
-	if (!dtb->object)
+	tree_apply_ref_nodes(to_tree(dt), dt->cfg.object, dt->cfg.compatible);
+	if (!dt->cfg.object)
 		tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */
-	if (dtb->dts)
+	if (dt->cfg.dts)
 		return dts_emit(dt);
 
 	dtb_append_auto_properties(dt);
 
-	if (dtb->object || dtb->symbols)
+	if (dt->cfg.object || dt->cfg.symbols)
 		dtb_add_symbols(dt);
 
-	if (dtb->object) {
+	if (dt->cfg.object) {
 		dtb_add_fixups(dt);
 		dtb_add_local_fixups(dt);
 	}
@@ -1775,6 +1765,11 @@ int dtb_emit(struct yaml_dt_state *dt)
 	if (prop && (size = to_dtb_prop(prop)->size) > 0)
 		dt_emit_data(dt, dt_mem_rsvmap,
 				to_dtb_prop(prop)->data, size, false);
+	/* add extra memreserves */
+	for (i = 0; i < dt->cfg.reserve; i++) {
+		dt_emit_64(dt, dt_mem_rsvmap, 0, false);
+		dt_emit_64(dt, dt_mem_rsvmap, 0, false);
+	}
 
 	/* terminate reserve entry */
 	dt_emit_64(dt, dt_mem_rsvmap, 0, false);
@@ -1787,6 +1782,20 @@ int dtb_emit(struct yaml_dt_state *dt)
 
 	totalsize = size_fdt_hdr + size_mem_rsvmap +
 		    size_dt_struct + size_dt_strings;
+
+	/* perform padding, minimum size and alignment */
+	padsize = 0;
+	if (dt->cfg.space > 0 && totalsize < dt->cfg.space)
+		padsize = dt->cfg.space - totalsize;
+	if (!padsize && dt->cfg.pad > 0)
+		padsize = dt->cfg.pad;
+	if (dt->cfg.align > 0)
+		padsize = ALIGN(totalsize + padsize, dt->cfg.align) - totalsize;
+	if (padsize > 0) {
+		totalsize += padsize;
+		zeropad = alloca(padsize);
+		memset(zeropad, 0, padsize);
+	}
 
 	memset(&fdth, 0, sizeof(fdth));
 	fdth.magic = cpu_to_fdt32(FDT_MAGIC);
@@ -1808,6 +1817,8 @@ int dtb_emit(struct yaml_dt_state *dt)
 	       dtb->area[dt_struct].size, 1, dt->output);
 	fwrite(dtb->area[dt_strings].data,
 	       dtb->area[dt_strings].size, 1, dt->output);
+	if (zeropad)
+		fwrite(zeropad, padsize, 1, dt->output);
 
 	return !ferror(dt->output) ? 0 : -1;
 }

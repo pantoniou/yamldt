@@ -80,6 +80,10 @@ static struct option opts[] = {
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
 	{ "input-format",	required_argument, 0,  0  },
+	{ "reserve",		required_argument, 0,  0, },
+	{ "space",		required_argument, 0,  0, },
+	{ "align",		required_argument, 0,  0, },
+	{ "pad",		required_argument, 0,  0, },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -103,6 +107,10 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "       --silent          Be really silent\n"
 "       --color           [auto|off|on]\n"
 "       --input-format=X  Force input to given format [dts|yaml|auto]\n"
+"       --reserve=X       Make space for X reserve map entries\n"
+"       --space=X         Make the DTB blob at least X bytes long\n"
+"       --align=X         Make the DTB blob align to X bytes\n"
+"       --pad=X           Pad the DTB blob with X bytes\n"
 "   -h, --help            Help\n"
 "   -v, --version         Display version\n"
 		);
@@ -234,6 +242,22 @@ int main(int argc, char *argv[])
 				cfg->input_format = optarg;
 				continue;
 			}
+			if (!strcmp(s, "reserve")) {
+				cfg->reserve = strtoul(optarg, NULL, 0);
+				continue;
+			}
+			if (!strcmp(s, "space")) {
+				cfg->space = strtoul(optarg, NULL, 0);
+				continue;
+			}
+			if (!strcmp(s, "align")) {
+				cfg->align = strtoul(optarg, NULL, 0);
+				continue;
+			}
+			if (!strcmp(s, "pad")) {
+				cfg->pad = strtoul(optarg, NULL, 0);
+				continue;
+			}
 		}
 
 		switch (cc) {
@@ -294,6 +318,11 @@ int main(int argc, char *argv[])
 	    strcmp(cfg->input_format, "yaml") &&
 	    strcmp(cfg->input_format, "dts")) {
 		fprintf(stderr, "bad input-format %s\n", cfg->input_format);
+		return EXIT_FAILURE;
+	}
+
+	if (cfg->space && cfg->pad) {
+		fprintf(stderr, "Can't set both space and pad\n");
 		return EXIT_FAILURE;
 	}
 
