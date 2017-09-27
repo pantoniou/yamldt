@@ -67,7 +67,9 @@
 
 static struct option opts[] = {
 	{ "quiet",		no_argument,	   0, 'q' },
-	{ "output",	 	required_argument, 0, 'o' },
+	{ "in-format",		required_argument, 0, 'I' },
+	{ "out-format",		required_argument, 0, 'O' },
+	{ "out",	 	required_argument, 0, 'o' },
 	{ "debug",	 	no_argument,	   0, 'd' },
 	{ "",			no_argument,	   0, 'c' },
 	{ "compatible",		no_argument,	   0, 'C' },
@@ -79,7 +81,6 @@ static struct option opts[] = {
 	{ "schema-save",	required_argument, 0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
-	{ "input-format",	required_argument, 0,  0  },
 	{ "reserve",		required_argument, 0,  0, },
 	{ "space",		required_argument, 0,  0, },
 	{ "align",		required_argument, 0,  0, },
@@ -95,7 +96,8 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "yamldt [options] <input-file> [<input-file>...]\n"
 " options are:\n"
 "   -q, --quiet           Suppress; -q (warnings) -qq (errors) -qqq (everything)\n"
-"   -o, --output          Output file\n"
+"   -I, --in-format=X     Input format type X=[auto|yaml|dts]\n"
+"   -o, --out=X           Output file\n"
 "   -d, --debug           Debug messages\n"
 "   -c                    Don't resolve references (object mode)\n"
 "   -C, --compatible      Compatible mode\n"
@@ -106,7 +108,6 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 "       --save-temps      Save temporary files\n"
 "       --schema-save     Save schema to given file\n"
 "       --color           [auto|off|on]\n"
-"       --input-format=X  Force input to given format [dts|yaml|auto]\n"
 "       --reserve=X       Make space for X reserve map entries\n"
 "       --space=X         Make the DTB blob at least X bytes long\n"
 "       --align=X         Make the DTB blob align to X bytes\n"
@@ -119,15 +120,13 @@ static void help(struct list_head *emitters, struct list_head *checkers)
 int main(int argc, char *argv[])
 {
 	struct yaml_dt_state dt_state, *dt = &dt_state;
-	int err;
-	int i, cc, option_index = 0;
+	int err, cc, option_index = 0;
 	struct yaml_dt_config cfg_data, *cfg = &cfg_data;
 	struct list_head emitters;
-	struct yaml_dt_emitter *e, *selected_emitter = NULL;
 	struct list_head checkers;
-	struct yaml_dt_checker *c, *selected_checker = NULL;
-	const char *s, *t;
-	const char * const *ss;
+	struct yaml_dt_emitter *selected_emitter = NULL;
+	struct yaml_dt_checker *selected_checker = NULL;
+	const char *s;
 	bool input_output_optional = false;
 
 	memset(dt, 0, sizeof(*dt));
@@ -138,80 +137,20 @@ int main(int argc, char *argv[])
 	list_add_tail(&yaml_emitter.node, &emitters);
 	list_add_tail(&null_emitter.node, &emitters);
 
+	/* setup checkers */
 	INIT_LIST_HEAD(&checkers);
 	list_add_tail(&null_checker.node, &checkers);
 	list_add_tail(&dtb_checker.node, &checkers);
 
 	memset(cfg, 0, sizeof(*cfg));
+	cfg->color = -1;
 
 	/* get and consume common options */
 	option_index = -1;
 	optind = 0;
-	opterr = 0;	/* do not print error for invalid option */
-	cfg->color = -1;
-
-	/* try to find output file argument */
-	for (i = 1; i < argc; i++) {
-		s = &argv[i][0];
-		if ((cc = *s++) != '-')
-			continue;
-		/* no other options from o */
-		if ((cc = *s) == 'o') {
-			t = strchr(s, '=');
-			if (t)
-				cfg->output_file = t + 1;
-			else if (i + 1 < argc)
-				cfg->output_file = argv[i + 1];
-		}
-		if (cfg->output_file)
-			break;
-	}
-
-	/* try to select an emitter by asking first */
-	list_for_each_entry(e, &emitters, node) {
-		if (e->eops && e->eops->select && e->eops->select(argc, argv)) {
-			selected_emitter = e;
-			break;
-		}
-	}
-
-	/* no bites, try to search for suffix match */
-	if (!selected_emitter && cfg->output_file &&
-			(s = strrchr(cfg->output_file, '.'))) {
-		list_for_each_entry(e, &emitters, node) {
-			if (!e->suffixes)
-				continue;
-
-			for (ss = e->suffixes; *ss; ss++)
-				if (!strcmp(*ss, s))
-					break;
-
-			if (*ss) {
-				selected_emitter = e;
-				break;
-			}
-		}
-	}
-
-	/* if all fails, fallback to dtb emitter */
-	if (!selected_emitter)
-		selected_emitter = &dtb_emitter;
-
-	/* try to select an checker by asking first */
-	list_for_each_entry(c, &checkers, node) {
-		if (c->cops && c->cops->select && c->cops->select(argc, argv)) {
-			selected_checker = c;
-			break;
-		}
-	}
-
-	/* if all fails, fallback to null checker */
-	if (!selected_checker)
-		selected_checker = &null_checker;
-
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:dcvCys@S:g:h?", opts, &option_index)) != -1) {
+			"qo:I:O:dcvCys@S:g:h?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -232,10 +171,6 @@ int main(int argc, char *argv[])
 			}
 			if (!strcmp(s, "schema-save")) {
 				cfg->schema_save = optarg;
-				continue;
-			}
-			if (!strcmp(s, "input-format")) {
-				cfg->input_format = optarg;
 				continue;
 			}
 			if (!strcmp(s, "reserve")) {
@@ -262,6 +197,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'o':
 			cfg->output_file = optarg;
+			break;
+		case 'I':
+			cfg->input_format = optarg;
+			break;
+		case 'O':
+			cfg->output_format = optarg;
 			break;
 		case 'd':
 			cfg->debug = true;
@@ -320,6 +261,18 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	if (!cfg->output_format)
+		cfg->output_format = "auto";
+
+	if (strcmp(cfg->output_format, "auto") &&
+	    strcmp(cfg->output_format, "yaml") &&
+	    strcmp(cfg->output_format, "dts") &&
+	    strcmp(cfg->output_format, "dtb") &&
+	    strcmp(cfg->output_format, "null")) {
+		fprintf(stderr, "bad output-format %s\n", cfg->output_format);
+		return EXIT_FAILURE;
+	}
+
 	if (cfg->space && cfg->pad) {
 		fprintf(stderr, "Can't set both space and pad\n");
 		return EXIT_FAILURE;
@@ -327,6 +280,46 @@ int main(int argc, char *argv[])
 
 	cfg->input_file = argv + optind;
 	cfg->input_file_count = argc - optind;
+
+	/* guess input/output formats */
+	if (!strcmp(cfg->input_format, "auto") && cfg->input_file_count > 0) {
+		s = strrchr(cfg->input_file[0], '.');
+		if (s && !strcmp(s, ".yaml"))
+			cfg->input_format = "yaml";
+		else if (s && !strcmp(s, ".dts"))
+			cfg->input_format = "dts";
+	}
+
+	if (!strcmp(cfg->output_format, "auto") && cfg->output_file) {
+		s = strrchr(cfg->output_file, '.');
+		if (s && !strcmp(s, ".yaml"))
+			cfg->output_format = "yaml";
+		else if (s && !strcmp(s, ".dtb"))
+			cfg->output_format = "dtb";
+		else if (s && !strcmp(s, ".dts"))
+			cfg->output_format = "dts";
+		else
+			cfg->output_format = "dtb";	/* default is DTB */
+	}
+
+	if (!input_output_optional && !strcmp(cfg->output_format, "auto")) {
+		fprintf(stderr, "Output required but can't deduce output format\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!strcmp(cfg->output_format, "dtb") ||
+	    !strcmp(cfg->output_format, "dts"))
+		selected_emitter = &dtb_emitter;
+	else if (!strcmp(cfg->output_format, "yaml"))
+		selected_emitter = &yaml_emitter;
+	else
+		selected_emitter = &null_emitter;
+
+	/* when selecting a dtb schema, we use the dtb checker */
+	if (cfg->schema)
+		selected_checker = &dtb_checker;
+	else
+		selected_checker = &null_checker;
 
 	err = dt_setup(dt, cfg, selected_emitter, selected_checker);
 	if (err)

@@ -1969,20 +1969,7 @@ static void dtb_dump(struct yaml_dt_state *dt)
 	}
 }
 
-static bool dtb_select(int argc, char **argv)
-{
-	int i;
-
-	/* explicit dtbs mode select */
-	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '-' && argv[i][1] == 's')
-			return true;
-	}
-	return false;
-}
-
 static const struct yaml_dt_emitter_ops dtb_emitter_ops = {
-	.select		= dtb_select,
 	.setup		= dtb_setup,
 	.cleanup	= dtb_cleanup,
 	.emit		= dtb_emit,

@@ -62,7 +62,7 @@ BLACKYDIFFS   := $(addsuffix .y.diff, $(BLACKLIST))
 	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
 %.ydtc.dtb: %.dts
-	$(CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) --input-format=dts - -o $@
+	$(CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I dts -O dtb - -o $@
 
 %.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
 	$(CPP) $(YAMLDT_CPPFLAGS) $^ | $(YAMLDT) $(YAMLDTFLAGS) - -o $@

@@ -1521,20 +1521,7 @@ int dtbchk_check(struct yaml_dt_state *dt)
 
 #endif
 
-static bool dtbchk_select(int argc, char **argv)
-{
-	int i;
-
-	/* explicit dtbchk mode select */
-	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '-' && argv[i][1] == 'S')
-			return true;
-	}
-	return false;
-}
-
 static const struct yaml_dt_checker_ops dtb_checker_ops = {
-	.select		= dtbchk_select,
 	.setup		= dtbchk_setup,
 	.cleanup	= dtbchk_cleanup,
 #ifdef CAN_RUN_EBPF

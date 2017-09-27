@@ -126,20 +126,7 @@ int null_emit(struct yaml_dt_state *dt)
 	return 0;
 }
 
-static bool null_select(int argc, char **argv)
-{
-	int i;
-
-	/* explicit null mode select */
-	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '-' && argv[i][1] == 'n')
-			return true;
-	}
-	return false;
-}
-
 static const struct yaml_dt_emitter_ops null_emitter_ops = {
-	.select		= null_select,
 	.setup		= null_setup,
 	.cleanup	= null_cleanup,
 	.emit		= null_emit,

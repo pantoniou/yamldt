@@ -1548,6 +1548,8 @@ struct yaml_dt_state *dt_parse_single(struct yaml_dt_state *dt,
 	cfg.color = dt->cfg.color;
 	cfg.output_file = output ? output : "/dev/null";
 	cfg.quiet = dt->cfg.quiet;
+	cfg.input_format = "yaml";	/* by definition here */
+	cfg.output_format = "yaml";
 	/* we don't copy the other configuration params */
 
 	/* directory mode */

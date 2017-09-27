@@ -67,13 +67,7 @@ int nullchk_check(struct yaml_dt_state *dt)
 	return 0;
 }
 
-static bool nullchk_select(int argc, char **argv)
-{
-	return false;
-}
-
 static const struct yaml_dt_checker_ops null_checker_ops = {
-	.select		= nullchk_select,
 	.setup		= nullchk_setup,
 	.cleanup	= nullchk_cleanup,
 	.check		= nullchk_check,

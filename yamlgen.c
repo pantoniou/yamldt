@@ -435,20 +435,7 @@ int yaml_emit(struct yaml_dt_state *dt)
 	return 0;
 }
 
-static bool yaml_select(int argc, char **argv)
-{
-	int i;
-
-	/* explicit yaml mode select */
-	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '-' && argv[i][1] == 'y')
-			return true;
-	}
-	return false;
-}
-
 static const struct yaml_dt_emitter_ops yaml_emitter_ops = {
-	.select		= yaml_select,
 	.setup		= yaml_setup,
 	.cleanup	= yaml_cleanup,
 	.emit		= yaml_emit,

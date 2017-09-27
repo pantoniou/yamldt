@@ -142,6 +142,7 @@ struct yaml_dt_config {
 	const char *schema_save;
 	const char *codegen;
 	const char *input_format;
+	const char *output_format;
 };
 
 struct yaml_dt_input {
@@ -169,7 +170,6 @@ struct yaml_dt_state;
 struct yaml_dt_config;
 
 struct yaml_dt_emitter_ops {
-	bool (*select)(int argc, char **argv);
 	int (*setup)(struct yaml_dt_state *dt);
 	void (*cleanup)(struct yaml_dt_state *dt);
 	int (*emit)(struct yaml_dt_state *dt);
@@ -184,9 +184,6 @@ struct yaml_dt_emitter {
 };
 
 struct yaml_dt_checker_ops {
-	bool (*select)(int argc, char **argv);
-	int (*parseopts)(int *argcp, char **argv, int *optindp,
-			 const struct yaml_dt_config *cfg, void **ccfg);
 	int (*setup)(struct yaml_dt_state *dt);
 	void (*cleanup)(struct yaml_dt_state *dt);
 	int (*check)(struct yaml_dt_state *dt);
