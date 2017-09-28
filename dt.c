@@ -683,6 +683,9 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 
 	dt_debug(dt, "%s: read %zd bytes\n", in->name, in->size);
 
+	if (dt->dep_output)
+		fprintf(dt->dep_output, " %s", in->name);
+
 	return in;
 }
 
@@ -1491,6 +1494,18 @@ int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg,
 	} else
 		dt->output = stdout;
 
+	if (dt->cfg.depname && strcmp(dt->cfg.depname, "-")) {
+		dt->dep_output = fopen(dt->cfg.depname, "wa");
+		if (!dt->dep_output) {
+			fprintf(stderr, "Failed to open %s for dependencies\n",
+					dt->cfg.depname);
+			return -1;
+		}
+		fprintf(dt->dep_output, "%s:", dt->cfg.output_file);
+	} else if (dt->cfg.depname)
+		dt->dep_output = stdout;
+
+
 	yaml_parser_set_encoding(&dt->parser, YAML_UTF8_ENCODING);
 	yaml_parser_set_input(&dt->parser, dt_yaml_read_handler, dt);
 
@@ -1695,6 +1710,11 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	if (dt->output && dt->output != stdout)
 		fclose(dt->output);
+
+	if (dt->dep_output && dt->dep_output != stdout) {
+		fputc('\n', dt->dep_output);
+		fclose(dt->dep_output);
+	}
 
 	yaml_parser_delete(&dt->parser);
 	fflush(stdout);

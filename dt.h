@@ -130,12 +130,14 @@ struct yaml_dt_config {
 	/* for dtb */
 	bool compatible;
 	bool symbols;
+	bool force_boot_cpuid;
 	unsigned int quiet;
 	unsigned int reserve;
 	unsigned int space;
 	unsigned int align;
 	unsigned int pad;
 	unsigned int out_version;
+	unsigned int boot_cpuid;
 	const char *depname;
 	const char *schema;
 	const char *schema_save;
@@ -262,6 +264,7 @@ struct yaml_dt_state {
 	/* dts parser */
 	struct dts_state ds;
 	bool dts_initialized;
+	FILE *dep_output;
 };
 
 #define to_dt(_t) 	container_of(_t, struct yaml_dt_state, tree)

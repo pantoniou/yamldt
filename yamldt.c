@@ -89,6 +89,7 @@ static struct option opts[] = {
 	{ "sort",		no_argument,       0, 's' },
 	{ "force",		no_argument,       0, 'f' },
 	{ "include",		required_argument, 0, 'i' },
+	{ "boot-cpu",		required_argument, 0, 'b' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -119,6 +120,7 @@ static void help(void)
 "   -H, --phandle=X       Set phandle format [legacy|epapr|both]\n"
 "   -W, --warning=X       Enable/disable warning (NOP)\n"
 "   -E, --error=X         Enable/disable error (NOP)\n"
+"   -b, --boot-cpu=X      Force boot cpuid to X\n"
 "   -h, --help            Help\n"
 "   -v, --version         Display version\n"
 		);
@@ -168,7 +170,8 @@ int main(int argc, char *argv[])
 	optind = 0;
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:I:O:d:V:R:S:a:p:H:W:E:sfi:cC@g:vh?", opts, &option_index)) != -1) {
+			"qo:I:O:d:V:R:S:a:p:H:W:E:sfi:b:cC@g:vh?",
+			opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -258,6 +261,10 @@ int main(int argc, char *argv[])
 			ie->include = optarg;
 			list_add_tail(&ie->node, &includes);
 			include_count++;
+			break;
+		case 'b':
+			cfg->boot_cpuid = strtoul(optarg, NULL, 0);
+			cfg->force_boot_cpuid = true;
 			break;
 		case 'c':
 			cfg->object = true;

@@ -1748,6 +1748,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 	int size;
 	unsigned int i, padsize;
 	void *zeropad = NULL;
+	fdt32_t boot_cpuid;
 
 	dtb_handle_special_properties(dt, tree_root(to_tree(dt)));
 
@@ -1825,7 +1826,9 @@ int dtb_emit(struct yaml_dt_state *dt)
 	fdth.off_mem_rsvmap = cpu_to_fdt32(size_fdt_hdr);
 	fdth.version = cpu_to_fdt32(17);
 	fdth.last_comp_version = cpu_to_fdt32(16);
-	fdth.boot_cpuid_phys = cpu_to_fdt32(guess_boot_cpuid(dt));
+	boot_cpuid = !dt->cfg.force_boot_cpuid ?
+			guess_boot_cpuid(dt) : dt->cfg.boot_cpuid;
+	fdth.boot_cpuid_phys = cpu_to_fdt32(boot_cpuid);
 	fdth.size_dt_strings = cpu_to_fdt32(size_dt_strings);
 	fdth.size_dt_struct = cpu_to_fdt32(size_dt_struct);
 
