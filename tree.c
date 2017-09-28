@@ -58,7 +58,6 @@ struct ref *ref_alloc(struct tree *t, enum ref_type type,
 	ref = t->ops->ref_alloc(t, type, data, len, xtag);
 	if (!ref)
 		return NULL;
-	ref->type = type;
 
 	return ref;
 }

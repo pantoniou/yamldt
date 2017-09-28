@@ -170,7 +170,7 @@ static int (*states[])(struct dts_state *ds, char c);
 static void reset_accumulator(struct dts_state *ds)
 {
 	acc_reset(&ds->acc_body);
-	memset(&ds->acc_loc, 0, sizeof(ds->acc_loc));
+	ds->acc_loc.filename = NULL;
 }
 
 static int accumulate(struct dts_state *ds, char c)
@@ -208,7 +208,7 @@ static int get_accumulator_size(struct dts_state *ds)
 static void reset_comment_accumulator(struct dts_state *ds)
 {
 	acc_reset(&ds->acc_comm);
-	memset(&ds->comm_loc, 0, sizeof(ds->comm_loc));
+	ds->comm_loc.filename = NULL;
 }
 
 static int comment_accumulate(struct dts_state *ds, char c)
@@ -326,7 +326,7 @@ item_from_accumulator(struct dts_state *ds, enum dts_emit_atom atom)
 		dts_error(ds, "out of memory\n");
 		return NULL;
 	}
-	memset(li, 0, sizeof(*li));
+
 	p = li->data;
 	li->item.atom = atom;
 	li->item.contents = p;
@@ -362,7 +362,7 @@ item_from_comment_accumulator(struct dts_state *ds)
 		dts_error(ds, "out of memory\n");
 		return NULL;
 	}
-	memset(li, 0, sizeof(*li));
+
 	p = li->data;
 	li->item.atom = dea_comment;
 	li->item.contents = p;
@@ -440,7 +440,6 @@ static int dts_generate_property_items(struct dts_state *ds,
 				dts_error(ds, "out of memory");
 				return -1;
 			}
-			memset(pli, 0, size);
 			pli->item.bits = NULL;
 			pli->item.nr_elems = nr_elems;
 
@@ -504,7 +503,6 @@ static int dts_generate_property_items(struct dts_state *ds,
 				dts_error(ds, "out of memory");
 				return -1;
 			}
-			memset(pli, 0, size);
 			pli->item.bits = li_bits ? &li_bits->item : NULL;
 			pli->item.nr_elems = nr_elems;
 
@@ -542,7 +540,6 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		depth--;
 
 	INIT_LIST_HEAD(&pi_list);
-	memset(&d, 0, sizeof(d));
 
 	switch (type) {
 	case det_incbin:
@@ -551,6 +548,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		reset_item_list(ds);
 		return 0;
 	case det_del_node:
+		d.del_node = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom != dea_comment) {
 				d.del_node = &li->item;
@@ -560,6 +558,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		assert(d.del_node);
 		break;
 	case det_del_prop:
+		d.del_prop = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom != dea_comment) {
 				d.del_prop = &li->item;
@@ -569,6 +568,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		assert(d.del_prop);
 		break;
 	case det_include:
+		d.include = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom == dea_string) {
 				d.include = &li->item;
@@ -578,6 +578,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		assert(d.include);
 		break;
 	case det_comment:
+		d.comment = NULL;
 		if (!list_is_singular(&ds->items)) {
 			dts_error(ds, "bad comment emit\n");
 			return -1;
@@ -586,6 +587,7 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		d.comment = &li->item;
 		break;
 	case det_preproc:
+		d.preproc = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom == dea_string) {
 				d.preproc = &li->item;
@@ -599,6 +601,8 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 	case det_node_end:
 		break;
 	case det_memreserve:
+		d.memreserves[0] = NULL;
+		d.memreserves[1] = NULL;
 		i = 0;
 		list_for_each_entry(li, &ds->items, node) {
 			/* verify not more than two and is an int */
@@ -611,7 +615,11 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		}
 		break;
 	case det_node:
+		d.pn.name = NULL;
 		d.pn.nr_labels = 0;
+		d.pn.labels = NULL;
+		d.pn.nr_items = 0;
+		d.pn.items = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			switch (li->item.atom) {
 			case dea_comment:
@@ -653,6 +661,11 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 		break;
 
 	case det_property:
+		d.pn.name = NULL;
+		d.pn.nr_labels = 0;
+		d.pn.labels = NULL;
+		d.pn.nr_items = 0;
+		d.pn.items = NULL;
 		list_for_each_entry(li, &ds->items, node) {
 			if (li->item.atom == dea_name) {
 				/* impossible but verify */
@@ -2216,7 +2229,7 @@ static int (*states[])(struct dts_state *ds, char c) = {
 };
 
 int dts_setup(struct dts_state *ds, const char *filename, int tabs,
-		const struct dts_ops *ops)
+	      bool debug, const struct dts_ops *ops)
 {
 	if (!ops)
 		return -1;
@@ -2235,6 +2248,7 @@ int dts_setup(struct dts_state *ds, const char *filename, int tabs,
 	ds->line = 1;
 	ds->col = 1;
 	ds->tabs = tabs;
+	ds->debug = debug;
 
 	ds->ops = ops;
 
@@ -2249,7 +2263,6 @@ void dts_cleanup(struct dts_state *ds)
 		free(ds->filename);
 	acc_cleanup(&ds->acc_body);
 	acc_cleanup(&ds->acc_comm);
-	memset(ds, 0, sizeof(*ds));
 }
 
 int dts_feed(struct dts_state *ds, int c)

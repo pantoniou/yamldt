@@ -89,14 +89,19 @@ struct dt_ref {
 	struct dt_yaml_mark m;
 	const char *tag;	/* tag after implicit resolve */
 	unsigned long long val;
-	bool is_int : 1;
-	bool is_str : 1;
-	bool is_bool : 1;
-	bool is_null : 1;
-	bool is_resolved : 1;
-	bool is_builtin_tag : 1;
-	bool is_hex : 1;
-	bool is_unsigned : 1;
+	union {
+		struct {
+			bool is_int : 1;
+			bool is_str : 1;
+			bool is_bool : 1;
+			bool is_null : 1;
+			bool is_resolved : 1;
+			bool is_builtin_tag : 1;
+			bool is_hex : 1;
+			bool is_unsigned : 1;
+		};
+		unsigned int is_flags;
+	};
 	struct node *npref;	/* r_anchor, r_path */
 	const char *use_label;
 	void *alloc_data;

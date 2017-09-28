@@ -109,11 +109,14 @@ static int parse_int(const char *str, int len, unsigned long long *valp,
 	struct sy_state state, *sy = &state;
 	struct sy_config cfg;
 
-	memset(&cfg, 0, sizeof(cfg));
 	cfg.size = sy_workbuf_size_max(len);
 	if (cfg.size > 4096)
 		cfg.size = 4096;	/* do not allow pathological cases */
 	cfg.workbuf = alloca(cfg.size);
+#ifdef SY_DEBUG
+	cfg.debugf = NULL;
+	cfg.debugarg = NULL;
+#endif
 
 	sy_init(sy, &cfg);
 
@@ -256,16 +259,15 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 
 	dt_ref = malloc(size);
 	assert(dt_ref);
-	memset(dt_ref, 0, size);
 
 	ref = to_ref(dt_ref);
+	ref->type = type;
+	ref->prop = NULL;
 
 	p = malloc(len + 1);
 	assert(p);
 	memcpy(p, data, len);
 	((char *)p)[len] = '\0';	/* and always terminate */
-
-	dt_ref->alloc_data = p;
 
 	ref->data = p;
 	ref->len = len;
@@ -275,11 +277,23 @@ yaml_dt_ref_alloc(struct tree *t, enum ref_type type,
 		if (!ref->xtag_builtin) {
 			ref->xtag = strdup(xtag);
 			assert(ref->xtag);
-		}
+		} else
+			ref->xtag = NULL;
+	} else {
+		ref->xtag = NULL;
+		ref->xtag_builtin = NULL;
 	}
 
 	/* always mark for debugging */
 	dt_ref->m = dt->current_mark;
+
+	dt_ref->alloc_data = p;
+	dt_ref->tag = NULL;
+	dt_ref->is_flags = 0;
+	dt_ref->npref = NULL;
+	dt_ref->use_label = NULL;
+	dt_ref->binary = NULL;
+	dt_ref->binary_size = 0;
 
 	return ref;
 }
@@ -309,9 +323,11 @@ struct property *yaml_dt_prop_alloc(struct tree *t, const char *name, int size)
 	assert(size >= sizeof(*dt_prop));
 	dt_prop = malloc(size);
 	assert(dt_prop);
-	memset(dt_prop, 0, size);
 
 	prop = to_property(dt_prop);
+	prop->np = NULL;
+	prop->is_delete = false;
+	prop->deleted = false;
 
 	prop->name = strdup(name);
 	assert(prop->name);
@@ -338,12 +354,12 @@ struct label *yaml_dt_label_alloc(struct tree *t, const char *name, int size)
 	assert(size >= sizeof(*dt_l));
 	dt_l = malloc(size);
 	assert(dt_l);
-	memset(dt_l, 0, size);
 
 	l = to_label(dt_l);
-
+	l->np = NULL;
 	l->label = strdup(name);
 	assert(l->label);
+	l->len = strlen(name);
 
 	dt_l->m = dt->current_mark;
 
@@ -369,9 +385,12 @@ struct node *yaml_dt_node_alloc(struct tree *t, const char *name,
 	assert(size >= sizeof(*dt_np));
 	dt_np = malloc(size);
 	assert(dt_np);
-	memset(dt_np, 0, size);
 
 	np = to_node(dt_np);
+
+	np->parent = NULL;
+	np->is_delete = false;
+	np->deleted = false;
 
 	np->name = strdup(name);
 	assert(np->name);
@@ -629,7 +648,11 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 	in = malloc(sizeof(*in));
 	assert(in);
 
-	memset(in, 0, sizeof(*in));
+	in->content = NULL;
+	in->size = 0;
+	in->pos = 0;
+	in->dts = false;
+
 	in->name = strdup(file);
 	assert(in->name);
 	if (tmpfile)
@@ -710,7 +733,8 @@ dt_span_create(struct yaml_dt_state *dt, const struct yaml_dt_input *in)
 	span = malloc(sizeof(*span));
 	assert(span);
 
-	memset(span, 0, sizeof(*span));
+	span->start_pos = 0;
+	span->end_pos = 0;
 	span->in = in;
 
 	/* default is with an empty span at current pos */
@@ -2604,7 +2628,8 @@ int dt_parse_dts(struct yaml_dt_state *dt)
 		return 0;
 
 	if (!dt->dts_initialized) {
-		err = dts_setup(&dt->ds, in->name, 8, &dt_dts_ops);
+		err = dts_setup(&dt->ds, in->name, 8, dt->cfg.debug,
+				&dt_dts_ops);
 		if (err)
 			dt_fatal(dt, "Unable to setup DTS parser\n");
 		dt->dts_initialized = true;

@@ -218,6 +218,7 @@ struct dts_state {
 	int line;
 	int col;
 	int tabs;
+	bool debug;
 
 	int expr_nest;
 
@@ -237,7 +238,7 @@ struct dts_ops {
 
 #define dts_debug(_ds, _fmt, ...) \
 	do { \
-		if ((_ds)->ops->debugf) \
+		if ((_ds)->debug && (_ds)->ops->debugf) \
 			(_ds)->ops->debugf((_ds), (_fmt), \
 				##__VA_ARGS__); \
 	} while(0)
@@ -275,7 +276,7 @@ struct dts_ops {
 	dts_message_at(_ds, dmt_error, _loc, _fmt, ##__VA_ARGS__)
 
 int dts_setup(struct dts_state *ds, const char *filename, int tabs,
-		const struct dts_ops *ops);
+	      bool debug, const struct dts_ops *ops);
 void dts_cleanup(struct dts_state *ds);
 
 int dts_feed(struct dts_state *ds, int c);

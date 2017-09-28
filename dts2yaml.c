@@ -790,7 +790,7 @@ static int convert_one(const char *filename, const char *outfilename,
 	d2y->includes = includes;
 	acc_setup(&d2y->acc_file);
 
-	ret = dts_setup(ds, filename, tabs, &d2y_ops);
+	ret = dts_setup(ds, filename, tabs, debug, &d2y_ops);
 	if (ret) {
 		fprintf(stderr, "Failed to setup dts parser on %s\n",
 				filename);

@@ -69,8 +69,6 @@ struct dtb_node {
 	/* DTB generation */
 	unsigned int phandle;
 	bool marker : 1;	/* generic marker */
-	bool reference_check_done : 1;
-	bool referenced : 1;
 };
 #define to_dtb_node(_n) 	\
 	container_of(container_of(_n, struct dt_node, n), struct dtb_node, dt)
@@ -157,6 +155,8 @@ static struct property *dtb_prop_alloc(struct tree *t, const char *name)
 
 	dtbprop = to_dtb_prop(prop);
 	dtbprop->offset = -1;
+	dtbprop->data = NULL;
+	dtbprop->size = 0;
 
 	return prop;
 }
@@ -715,7 +715,6 @@ static void add_fixup(struct yaml_dt_state *dt, struct ref *ref)
 
 	f = malloc(sizeof(*f));
 	assert(f);
-	memset(f, 0, sizeof(*f));
 	INIT_LIST_HEAD(&f->refs);
 	list_add_tail(&dtbref->ovnode, &f->refs);
 	list_add_tail(&f->node, &dtb->fixups);
@@ -1290,7 +1289,6 @@ static void dtb_build_string_table_minimal(struct yaml_dt_state *dt)
 
 	propt = malloc(count * sizeof(*propt));
 	assert(propt);
-	memset(propt, 0, count * sizeof(*propt));
 	fill_prop_table(dt, root, propt, 0);
 
 	dt_debug(dt, "#%d properties found\n", count);
@@ -1530,7 +1528,6 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 	if (dtb->memreserve_prop)
 		prop_free(to_tree(dt), dtb->memreserve_prop);
 
-	memset(dtb, 0, sizeof(*dtb));
 	free(dtb);
 }
 

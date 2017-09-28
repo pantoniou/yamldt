@@ -761,7 +761,6 @@ void sy_init(struct sy_state *sy, const struct sy_config *cfg)
 {
 	intptr_t p;
 
-	memset(sy, 0, sizeof(*sy));
 	sy->last_token = NONE;
 	sy->pos = -1;
 	sy->errcode = 0;
@@ -770,9 +769,11 @@ void sy_init(struct sy_state *sy, const struct sy_config *cfg)
 
 	/* align to sy_val_v_t */
 	sy->valq = (void *)ALIGN(p, sizeof(sy_val_v_t));
+	sy->valq_next = 0;
 
 	/* op is always aligned (since it's char type */
 	sy->opstack = cfg->workbuf + cfg->size;
+	sy->opstack_next = 0;
 
 #ifdef SY_DEBUG
 	sy->debugf = cfg->debugf;
