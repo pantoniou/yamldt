@@ -1,6 +1,6 @@
 # yamldt
 
-+`yamldt` is a YAML/DTS to DT blob generator/compiler and validator.
+`yamldt` is a YAML/DTS to DT blob generator/compiler and validator.
 The YAML schema is functionaly equivalent to DTS and supports all DTS features,
 while as a DTS compiler is bit-exact compatible with DTC.
 
