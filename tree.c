@@ -127,6 +127,7 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 			       const char *label)
 {
 	struct label *l;
+	struct list_head *lh;
 
 	assert(t && np && label);
 
@@ -139,6 +140,11 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 	l = label_alloc(t, label);
 	l->np = np;
 	l->len = strlen(label);
+
+	l->hash = label_hash(label, strlen(label));
+	lh = &t->lhash[l->hash % ARRAY_SIZE(t->lhash)];
+	list_add_tail(&l->hnode, lh);
+
 	return l;
 }
 
@@ -158,6 +164,8 @@ void label_free(struct tree *t, struct label *l)
 
 	if (l->np)
 		list_del(&l->node);
+
+	list_del(&l->hnode);
 
 	t->ops->label_free(t, l);
 }
@@ -232,36 +240,27 @@ void node_del(struct tree *t, struct node *np)
 	np->deleted = true;
 }
 
-static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
-		const char *label, int len, struct node *npskip)
-{
-	struct node *child, *found;
-	struct label *l;
-
-	for_each_label_of_node(np, l) {
-		if (l->len == len &&
-		    !memcmp(l->label, label, len))
-			return np;
-	}
-
-	for_each_child_of_node(np, child) {
-		found = __node_lookup_by_label(t, child, label, len, npskip);
-		if (found && found != npskip)
-			return found;
-	}
-	return NULL;
-}
-
 struct node *node_lookup_by_label(struct tree *t,
 		const char *label, int len)
 {
+	uint32_t hval;
+	struct list_head *lh;
+	struct label *l;
+
 	if (!t || !label)
 		return NULL;
 
 	if (len < 0)
 		len = strlen(label);
 
-	return __node_lookup_by_label(t, t->root, label, len, NULL);
+	hval = label_hash(label, len);
+	lh = &t->lhash[hval % ARRAY_SIZE(t->lhash)];
+	list_for_each_entry(l, lh, hnode) {
+		if (l->hash == hval && l->len == len &&
+		    !memcmp(l->label, label, len))
+			return l->np;
+	}
+	return NULL;
 }
 
 struct node *node_get_child_by_name(struct tree *t,
@@ -461,6 +460,8 @@ const char *dn_fullname(struct node *np, char *buf, int size)
 
 void tree_init(struct tree *t, const struct tree_ops *ops)
 {
+	int i;
+
 	assert(t && ops &&
 		ops->ref_alloc &&
 		ops->ref_free &&
@@ -474,6 +475,9 @@ void tree_init(struct tree *t, const struct tree_ops *ops)
 	t->root = NULL;
 	INIT_LIST_HEAD(&t->ref_nodes);
 	t->ops = ops;
+
+	for (i = 0; i < ARRAY_SIZE(t->lhash); i++)
+		INIT_LIST_HEAD(&t->lhash[i]);
 }
 
 void tree_cleanup(struct tree *t)
@@ -686,30 +690,37 @@ void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 
 int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 {
+	struct label *l, *ln;
+	struct list_head *lh;
 	char namebuf[NODE_FULLNAME_MAX];
-	struct label *l;
-	struct node *child, *npref;
-	int ret;
+	char namebufn[NODE_FULLNAME_MAX];
+	int i;
 
 	if (!np)
 		return 0;
 
-	for_each_label_of_node(np, l) {
-		npref = __node_lookup_by_label(t, tree_root(t),
-				l->label, strlen(l->label), np);
-		if (npref) {
-			tree_error_at_label(t, l,
-				"duplicate label %s at node %s\n",
-				l->label,
-				dn_fullname(np, namebuf, sizeof(namebuf)));
-			return -1;
-		}
-	}
+	/* duplicate labels hash to the same chain */
+	for (i = 0; i < ARRAY_SIZE(t->lhash); i++) {
+		lh = &t->lhash[i];
+		list_for_each_entry(l, lh, hnode) {
+			list_for_each_entry(ln, lh, hnode) {
+				if (ln == l ||
+				    l->hash != ln->hash ||
+				    l->len != ln->len ||
+				    memcmp(l->label, ln->label, l->len))
+					continue;
 
-	for_each_child_of_node(np, child) {
-		ret = tree_detect_duplicate_labels(t, child);
-		if (ret)
-			return ret;
+				dn_fullname(l->np, namebuf, sizeof(namebuf));
+				dn_fullname(ln->np, namebufn, sizeof(namebufn));
+				tree_error_at_label(t, ln,
+					"duplicate label %s at \"%s\"\n",
+					l->label, namebufn);
+				tree_error_at_label(t, l,
+					"duplicate label %s is defined also at \"%s\"\n",
+					l->label, namebuf);
+				return -1;
+			}
+		}
 	}
 
 	return 0;

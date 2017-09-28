@@ -73,6 +73,8 @@ struct label {
 	struct node *np;
 	char *label;
 	size_t len;
+	struct list_head hnode;	/* for hashing */
+	uint32_t hash;
 };
 
 enum ref_type {
@@ -130,11 +132,35 @@ struct tree_ops {
 			__attribute__ ((__format__ (__printf__, 3, 0)));
 };
 
+#ifndef LABEL_HASH_SIZE
+#define LABEL_HASH_SIZE	251	/* the largest prime less than 255 */
+#endif
+
 struct tree {
 	struct node *root;
 	struct list_head ref_nodes;
 	const struct tree_ops *ops;
+	struct list_head lhash[LABEL_HASH_SIZE];
 };
+
+/* FVN-1 hash */
+static inline uint32_t label_hash(const char *label, size_t len)
+{
+	uint32_t hval;
+
+	/* initial FV1 hash value */
+	hval = 0x811c9dc5;
+	while (len > 0) {
+		/* multiply by the 32 bit FNV magic prime mod 2^32 */
+		hval += (hval << 1) + (hval << 4) +
+			(hval << 7) + (hval << 8) +
+			(hval << 24);
+		/* xor the bottom with the current octet */
+		hval ^= (uint32_t)*label++;
+		len--;
+	}
+	return hval;
+}
 
 static inline struct node *tree_root(struct tree *t)
 {
