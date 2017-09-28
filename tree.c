@@ -141,6 +141,7 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 	l->len = strlen(label);
 
 	l->hash = label_hash(label, strlen(label));
+	l->duplicate = false;
 	lh = &t->lhash[l->hash % ARRAY_SIZE(t->lhash)];
 	list_add_tail(&l->hnode, lh);
 
@@ -693,7 +694,7 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 	struct list_head *lh;
 	char namebuf[NODE_FULLNAME_MAX];
 	char namebufn[NODE_FULLNAME_MAX];
-	int i;
+	int i, err = 0;
 
 	if (!np)
 		return 0;
@@ -702,7 +703,12 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 	for (i = 0; i < ARRAY_SIZE(t->lhash); i++) {
 		lh = &t->lhash[i];
 		list_for_each_entry(l, lh, hnode) {
+			if (l->duplicate)
+				continue;
 			list_for_each_entry(ln, lh, hnode) {
+				if (ln->duplicate)
+					continue;
+
 				if (ln == l ||
 				    l->hash != ln->hash ||
 				    l->len != ln->len ||
@@ -717,10 +723,13 @@ int tree_detect_duplicate_labels(struct tree *t, struct node *np)
 				tree_error_at_label(t, l,
 					"duplicate label %s is defined also at \"%s\"\n",
 					l->label, namebuf);
-				return -1;
+				l->duplicate = true;
+				ln->duplicate = true;
+				if (!err)
+					err = -1;
 			}
 		}
 	}
 
-	return 0;
+	return err;
 }

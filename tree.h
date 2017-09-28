@@ -75,6 +75,7 @@ struct label {
 	size_t len;
 	struct list_head hnode;	/* for hashing */
 	uint32_t hash;
+	bool duplicate : 1;
 };
 
 enum ref_type {
