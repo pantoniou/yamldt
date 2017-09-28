@@ -130,6 +130,7 @@ struct yaml_dt_config {
 	/* for dtb */
 	bool compatible;
 	bool symbols;
+	bool auto_alias;
 	bool force_boot_cpuid;
 	unsigned int quiet;
 	unsigned int reserve;

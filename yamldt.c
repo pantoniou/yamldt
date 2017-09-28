@@ -80,6 +80,7 @@ static struct option opts[] = {
 	{ "schema-save",	required_argument, 0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
+	{ "auto-alias",		no_argument, 	   0, 'A' },
 	{ "reserve",		required_argument, 0, 'R' },
 	{ "space",		required_argument, 0, 'S' },
 	{ "align",		required_argument, 0, 'a' },
@@ -113,6 +114,8 @@ static void help(void)
 "       --schema-save     Save schema to given file\n"
 "       --color           [auto|off|on]\n"
 "       --debug           Debug messages\n"
+"   -@, --symbols         Generate symbols node\n"
+"   -A, --auto-alias      Generate aliases for all labels\n"
 "   -R, --reserve=X       Make space for X reserve map entries\n"
 "   -S, --space=X         Make the DTB blob at least X bytes long\n"
 "   -a, --align=X         Make the DTB blob align to X bytes\n"
@@ -170,7 +173,7 @@ int main(int argc, char *argv[])
 	optind = 0;
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:I:O:d:V:R:S:a:p:H:W:E:sfi:b:cC@g:vh?",
+			"qo:I:O:d:V:R:S:a:p:H:W:E:sfi:b:cC@Ag:vh?",
 			opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
@@ -274,6 +277,9 @@ int main(int argc, char *argv[])
 			break;
 		case '@':
 			cfg->symbols = true;
+			break;
+		case 'A':
+			cfg->auto_alias = true;
 			break;
 		case 'g':
 			cfg->codegen = optarg;

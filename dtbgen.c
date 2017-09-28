@@ -581,7 +581,7 @@ static void dtb_append_auto_properties(struct yaml_dt_state *dt)
 }
 
 static void add_symbols(struct yaml_dt_state *dt, struct node *np,
-		struct node **symbols_np)
+		struct node **symbols_np, struct node **alias_np)
 {
 	struct node *child;
 	struct property *prop;
@@ -596,21 +596,39 @@ static void add_symbols(struct yaml_dt_state *dt, struct node *np,
 		    strlen("yaml_pseudo__")))
 			continue;
 
-		prop = prop_alloc(to_tree(dt), l->label);
-
 		name = dn_fullname(np, namebuf, sizeof(namebuf));
 
-		prop_append(prop, name, strlen(name), true);
+		if (dt->cfg.symbols) {
+			prop = prop_alloc(to_tree(dt), l->label);
+			prop_append(prop, name, strlen(name), true);
 
-		/* if it doesn't exist add __symbols__ */
-		if (!*symbols_np) {
-			*symbols_np = node_alloc(to_tree(dt), "__symbols__", NULL);
-			(*symbols_np)->parent = tree_root(to_tree(dt));
-			list_add_tail(&(*symbols_np)->node, &tree_root(to_tree(dt))->children);
+			/* if it doesn't exist add __symbols__ */
+			if (!*symbols_np) {
+				*symbols_np = node_alloc(to_tree(dt), "__symbols__", NULL);
+				(*symbols_np)->parent = tree_root(to_tree(dt));
+				list_add_tail(&(*symbols_np)->node, &tree_root(to_tree(dt))->children);
+			}
+
+			prop->np = *symbols_np;
+			list_add_tail(&prop->node, &(*symbols_np)->properties);
 		}
 
-		prop->np = *symbols_np;
-		list_add_tail(&prop->node, &(*symbols_np)->properties);
+		if (dt->cfg.auto_alias) {
+			prop = prop_alloc(to_tree(dt), l->label);
+			prop_append(prop, name, strlen(name), true);
+
+			/* if it doesn't exist add __symbols__ */
+			if (!*alias_np) {
+				*alias_np = node_alloc(to_tree(dt),
+						"aliases", NULL);
+				(*alias_np)->parent = tree_root(to_tree(dt));
+				list_add_tail(&(*alias_np)->node,
+						&tree_root(to_tree(dt))->children);
+			}
+
+			prop->np = *alias_np;
+			list_add_tail(&prop->node, &(*alias_np)->properties);
+		}
 	}
 
 	for_each_child_of_node(np, child) {
@@ -621,18 +639,24 @@ static void add_symbols(struct yaml_dt_state *dt, struct node *np,
 		    !strcmp(child->name, "__local_fixups__"))
 		    continue;
 
-		add_symbols(dt, child, symbols_np);
+		add_symbols(dt, child, symbols_np, alias_np);
 	}
 }
 
 static void dtb_add_symbols(struct yaml_dt_state *dt)
 {
-	struct node *symbols_np = NULL;
+	struct tree *t = to_tree(dt);
+	struct node *symbols_np;
+	struct node *alias_np;
+	struct node *root;
 
-	if (!tree_root(to_tree(dt)))
+	root = tree_root(t);
+	if (!root)
 		return;
 
-	add_symbols(dt, tree_root(to_tree(dt)), &symbols_np);
+	symbols_np = node_get_child_by_name(t, root, "__symbols__", 0);
+	alias_np = node_get_child_by_name(t, root, "aliases", 0);
+	add_symbols(dt, root, &symbols_np, &alias_np);
 }
 
 static void add_fixup(struct yaml_dt_state *dt, struct ref *ref)
@@ -1766,7 +1790,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 
 	dtb_append_auto_properties(dt);
 
-	if (dt->cfg.object || dt->cfg.symbols)
+	if (dt->cfg.object || dt->cfg.symbols || dt->cfg.auto_alias)
 		dtb_add_symbols(dt);
 
 	if (dt->cfg.object) {
