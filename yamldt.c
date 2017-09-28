@@ -111,6 +111,7 @@ static void help(void)
 "   -S, --space=X         Make the DTB blob at least X bytes long\n"
 "   -a, --align=X         Make the DTB blob align to X bytes\n"
 "   -p, --pad=X           Pad the DTB blob with X bytes\n"
+"   -H, --phandle=X       Set phandle format [legacy|epapr|both]\n"
 "   -h, --help            Help\n"
 "   -v, --version         Display version\n"
 		);
@@ -149,7 +150,7 @@ int main(int argc, char *argv[])
 	optind = 0;
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:I:O:d:V:R:S:a:p:cC@g:vh?", opts, &option_index)) != -1) {
+			"qo:I:O:d:V:R:S:a:p:H:cC@g:vh?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -212,6 +213,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'p':
 			cfg->pad = strtoul(optarg, NULL, 0);
+			break;
+		case 'H':
+			cfg->phandle_format = optarg;
 			break;
 		case 'c':
 			cfg->object = true;
@@ -317,6 +321,16 @@ int main(int argc, char *argv[])
 
 	if (cfg->out_version != 17) {
 		fprintf(stderr, "We only support version 17 of the DTB format\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!cfg->phandle_format)
+		cfg->phandle_format = "epapr";
+
+	if (strcmp(cfg->phandle_format, "legacy") &&
+	    strcmp(cfg->phandle_format, "epapr") &&
+	    strcmp(cfg->phandle_format, "both")) {
+		fprintf(stderr, "Illegal phandle format %s\n", cfg->phandle_format);
 		return EXIT_FAILURE;
 	}
 

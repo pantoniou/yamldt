@@ -139,6 +139,7 @@ struct yaml_dt_config {
 	const char *codegen;
 	const char *input_format;
 	const char *output_format;
+	const char *phandle_format;
 };
 
 struct yaml_dt_input {

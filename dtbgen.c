@@ -107,6 +107,8 @@ struct dtb_emit_state {
 	/* DTB generation state */
 	unsigned int next_phandle;
 	struct property *memreserve_prop;
+	bool legacy_phandles : 1;
+	bool epapr_phandles : 1;
 
 	struct {
 		void *data;
@@ -536,24 +538,34 @@ static bool is_node_referenced(struct yaml_dt_state *dt,
 	return false;
 }
 
-static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
+static void add_phandle_prop(struct yaml_dt_state *dt, struct node *np,
+			     const char *propname)
 {
-	struct dtb_node *dtbnp = to_dtb_node(np);
-	struct node *child;
 	struct property *prop;
 	fdt32_t phandle;
 
+	prop = prop_alloc(to_tree(dt), "phandle");
+	phandle = cpu_to_fdt32(to_dtb_node(np)->phandle);
+	prop_append(prop, &phandle, sizeof(fdt32_t), false);
+	prop->np = np;
+	list_add_tail(&prop->node, &np->properties);
+}
+
+static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
+{
+	struct dtb_emit_state *dtb = to_dtb(dt);
+	struct yaml_dt_config *cfg = &dt->cfg;
+	struct dtb_node *dtbnp = to_dtb_node(np);
+	struct node *child;
+
 	if (dtbnp->phandle != 0 &&
-	   (dt->cfg.object || dt->cfg.symbols ||
+	   (cfg->object || cfg->symbols ||
 	    is_node_referenced(dt, tree_root(to_tree(dt)), np))) {
-		prop = prop_alloc(to_tree(dt), "phandle");
 
-		phandle = cpu_to_fdt32(dtbnp->phandle);
-
-		prop_append(prop, &phandle, sizeof(fdt32_t), false);
-
-		prop->np = np;
-		list_add_tail(&prop->node, &np->properties);
+		if (dtb->legacy_phandles)
+			add_phandle_prop(dt, np, "linux,phandle");
+		if (dtb->epapr_phandles)
+			add_phandle_prop(dt, np, "phandle");
 	}
 
 	for_each_child_of_node(np, child)
@@ -1409,6 +1421,12 @@ int dtb_setup(struct yaml_dt_state *dt)
 	memset(dtb, 0, sizeof(*dtb));
 
 	dtb->next_phandle = 1;
+
+	dtb->legacy_phandles = !strcmp(dt->cfg.phandle_format, "legacy") ||
+			       !strcmp(dt->cfg.phandle_format, "both");
+	dtb->epapr_phandles = !strcmp(dt->cfg.phandle_format, "epapr") ||
+			      !strcmp(dt->cfg.phandle_format, "both");
+
 	dt->emitter_state = dtb;
 
 	INIT_LIST_HEAD(&dtb->fixups);
@@ -1421,6 +1439,8 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dt_debug(dt, " space      = %u\n", dt->cfg.space);
 	dt_debug(dt, " align      = %u\n", dt->cfg.align);
 	dt_debug(dt, " pad        = %u\n", dt->cfg.pad);
+	dt_debug(dt, " legacy-ph  = %s\n", dtb->legacy_phandles ? "true" : "false");
+	dt_debug(dt, " epapr-ph   = %s\n", dtb->epapr_phandles ? "true" : "false");
 	return 0;
 }
 
