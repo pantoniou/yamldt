@@ -282,17 +282,8 @@ static int handle_preproc(struct dts_state *ds, char c)
 	return 1;
 }
 
-static bool is_valid_int(const char *buf)
+static int is_string_or_char_done(const char *buf, int len, char c, char termc)
 {
-	/* must exist */
-	if (strlen(buf) == 0)
-		return false;
-	return true;
-}
-
-static int is_string_or_char_done(const char *buf, char c, char termc)
-{
-	int len = strlen(buf);
 	char *tbuf = alloca(len + 1 + 1);
 	int elen;
 
@@ -318,8 +309,9 @@ item_from_accumulator(struct dts_state *ds, enum dts_emit_atom atom)
 	int data_size;
 	struct dts_emit_list_item *li;
 	const char *buf = get_accumulator(ds);
+	int len = get_accumulator_size(ds);
 
-	data_size = strlen(buf) + 1 + strlen(ds->filename) + 1;
+	data_size = len + 1 + ds->filename_len + 1;
 
 	li = malloc(sizeof(*li) + data_size);
 	if (!li) {
@@ -330,11 +322,13 @@ item_from_accumulator(struct dts_state *ds, enum dts_emit_atom atom)
 	p = li->data;
 	li->item.atom = atom;
 	li->item.contents = p;
-	strcpy(p, buf);
-	p += strlen(li->item.contents) + 1;
+	memcpy(p, buf, len);
+	p += len;
+	*p++ = '\0';
 	li->item.loc.filename = p;
-	strcpy(p, ds->filename);
-	p += strlen(li->item.loc.filename) + 1;
+	memcpy(p, ds->filename, ds->filename_len);
+	p += ds->filename_len;
+	*p++ = '\0';
 	li->item.loc.start_index = ds->acc_loc.start_index;
 	li->item.loc.end_index = ds->acc_loc.end_index;
 	li->item.loc.start_line = ds->acc_loc.start_line;
@@ -354,8 +348,9 @@ item_from_comment_accumulator(struct dts_state *ds)
 	int data_size;
 	struct dts_emit_list_item *li;
 	const char *buf = get_comment_accumulator(ds);
+	int len = get_comment_accumulator_size(ds);
 
-	data_size = strlen(buf) + 1 + strlen(ds->filename) + 1;
+	data_size = len + 1 + ds->filename_len + 1;
 
 	li = malloc(sizeof(*li) + data_size);
 	if (!li) {
@@ -366,11 +361,14 @@ item_from_comment_accumulator(struct dts_state *ds)
 	p = li->data;
 	li->item.atom = dea_comment;
 	li->item.contents = p;
-	strcpy(p, buf);
-	p += strlen(li->item.contents) + 1;
+	memcpy(p, buf, len);
+	p += len;
+	*p++ = '\0';
 	li->item.loc.filename = p;
 	strcpy(p, ds->filename);
-	p += strlen(li->item.loc.filename) + 1;
+	memcpy(p, ds->filename, ds->filename_len);
+	p += ds->filename_len;
+	*p++ = '\0';
 	li->item.loc.start_index = ds->comm_loc.start_index;
 	li->item.loc.end_index = ds->comm_loc.end_index;
 	li->item.loc.start_line = ds->comm_loc.start_line;
@@ -788,7 +786,7 @@ static int memreserves(struct dts_state *ds, char c)
 	if (isspace(c) || c == ';') {
 		if (get_accumulator_size(ds) > 0) {
 			buf = get_accumulator(ds);
-			if (!is_valid_int(buf)) {
+			if (!get_accumulator_size(ds)) {
 				dts_error(ds, "bad memreserve item %s\n", buf);
 				return -1;
 			}
@@ -1379,10 +1377,12 @@ static int property(struct dts_state *ds, char c)
 static int string(struct dts_state *ds, char c)
 {
 	const char *buf;
+	int len;
 	struct dts_emit_list_item *li;
 
 	buf = get_accumulator(ds);
-	switch (is_string_or_char_done(buf, c, '"')) {
+	len = get_accumulator_size(ds);
+	switch (is_string_or_char_done(buf, len, c, '"')) {
 	case -1:
 		dts_error(ds, "bad string \"%s%c\"\n", buf, c);
 		return -1;
@@ -1774,10 +1774,12 @@ static int item_expr(struct dts_state *ds, char c)
 static int item_char(struct dts_state *ds, char c)
 {
 	const char *buf;
+	int len;
 	struct dts_emit_list_item *li;
 
 	buf = get_accumulator(ds);
-	switch (is_string_or_char_done(buf, c, '\'')) {
+	len = get_accumulator_size(ds);
+	switch (is_string_or_char_done(buf, len, c, '\'')) {
 	case -1:
 		dts_error(ds, "bad char item '%s%c'\n", buf, c);
 		return -1;
@@ -1803,7 +1805,7 @@ static int item_int(struct dts_state *ds, char c)
 
 	if (c == '>' || isspace(c)) {
 		buf = get_accumulator(ds);
-		if (!is_valid_int(buf)) {
+		if (!get_accumulator_size(ds)) {
 			dts_error(ds, "bad int item %s\n", buf);
 			return -1;
 		}
@@ -1925,10 +1927,11 @@ static int include_arg(struct dts_state *ds, char c)
 {
 	const char *buf;
 	struct dts_emit_list_item *li;
-	int ret;
+	int len, ret;
 
 	buf = get_accumulator(ds);
-	switch (is_string_or_char_done(buf, c, '"')) {
+	len = get_accumulator_size(ds);
+	switch (is_string_or_char_done(buf, len, c, '"')) {
 	case -1:
 		dts_error(ds, "bad include \"%s%c\"\n", buf, c);
 		return -1;
@@ -2242,6 +2245,7 @@ int dts_setup(struct dts_state *ds, const char *filename, int tabs,
 	if (filename == NULL)
 		filename = "<stdin>";
 	ds->filename = strdup(filename);
+	ds->filename_len = strlen(ds->filename);
 	ds->fs = s_start;
 	ds->last_c = 0;
 	ds->index = 0;

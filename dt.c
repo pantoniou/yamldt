@@ -3127,8 +3127,9 @@ int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)
 			if (!int_val_in_range(tag, val, is_unsigned, is_hex)) {
 				if (!uint_val_in_range(tag, val, is_hex))
 					return -ERANGE;
-				dt_warning_at(dt, &to_dt_ref(ref)->m,
-					"treating as unsigned\n");
+				/* TODO revisit this warning */
+				/* dt_warning_at(dt, &to_dt_ref(ref)->m,
+					"treating as unsigned\n"); */
 			}
 
 			to_dt_ref(ref)->is_int = true;

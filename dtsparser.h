@@ -195,6 +195,7 @@ struct dts_emit_data {
 
 struct dts_state {
 	char *filename;
+	size_t filename_len;
 
 	struct acc_state acc_body;
 	struct dts_location acc_loc;
