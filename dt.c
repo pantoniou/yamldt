@@ -584,16 +584,43 @@ static struct yaml_dt_input *
 dt_input_create(struct yaml_dt_state *dt, const char *file,
 		struct yaml_dt_input *in_parent)
 {
+	struct yaml_dt_config *cfg = &dt->cfg;
 	struct yaml_dt_input *in;
 	char *s;
 	size_t bufsz, nread, adv, filesz, alloc;
 	FILE *fp;
 	struct stat st;
+	char *tmpfile = NULL;
+	int flen, plen;
+	char * const *pathv;
 
 	if (strcmp(file, "-")) {
 		fp = fopen(file, "rb");
-		if (!fp)
-			return NULL;
+		if (!fp) {
+			/* try include path when we have a parent */
+			if (!in_parent || !cfg->search_path || !cfg->search_path[0])
+				return NULL;
+			flen = strlen(file);
+			if (!flen)
+				return NULL;
+			pathv = cfg->search_path;
+			while (*pathv) {
+				plen = strlen(*pathv);
+				while (plen > 1 && (*pathv)[plen - 1] == '/')
+					plen--;
+				tmpfile = malloc(plen + 1 + flen + 1);
+				assert(tmpfile);
+				memcpy(tmpfile, *pathv, plen);
+				tmpfile[plen] = '/';
+				strcpy(tmpfile + plen + 1, file);
+				fp = fopen(tmpfile, "rb");
+				if (fp) {
+					file = tmpfile;
+					break;
+				}
+				pathv++;
+			}
+		}
 	} else {
 		file = "<stdin>";
 		fp = stdin;
@@ -605,6 +632,8 @@ dt_input_create(struct yaml_dt_state *dt, const char *file,
 	memset(in, 0, sizeof(*in));
 	in->name = strdup(file);
 	assert(in->name);
+	if (tmpfile)
+		free(tmpfile);
 
 	INIT_LIST_HEAD(&in->includes);
 
@@ -734,6 +763,16 @@ static void dt_dts_debug(struct dts_state *ds, const char *fmt, ...)
 	free(buf);
 }
 
+static void dts_loc_to_yaml_mark(const struct dts_location *loc, struct dt_yaml_mark *m)
+{
+	m->start.index = loc->start_index;
+	m->start.line = loc->start_line;
+	m->start.column = loc->start_col - 1;
+	m->end.index = loc->end_index;
+	m->end.line = loc->end_line;
+	m->end.column = loc->end_col;
+}
+
 static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
 		const struct dts_location *loc, const char *fmt, ...)
 {
@@ -760,14 +799,8 @@ static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
 
 	memset(&m, 0, sizeof(m));
 
-	if (loc) {
-		m.start.index = loc->start_index;
-		m.start.line = loc->start_line;
-		m.start.column = loc->start_col;
-		m.end.index = loc->end_index;
-		m.end.line = loc->end_line;
-		m.end.column = loc->end_col;
-	}
+	if (loc)
+		dts_loc_to_yaml_mark(loc, &m);
 
 	switch (type) {
 	case dmt_info:
@@ -781,16 +814,6 @@ static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
 		break;
 	}
 	free(buf);
-}
-
-static void dts_loc_to_yaml_mark(const struct dts_location *loc, struct dt_yaml_mark *m)
-{
-	m->start.index = loc->start_index;
-	m->start.line = loc->start_line;
-	m->start.column = loc->start_col - 1;
-	m->end.index = loc->end_index;
-	m->end.line = loc->end_line;
-	m->end.column = loc->end_col;
 }
 
 static int dt_dts_emit(struct dts_state *ds, int depth,
@@ -919,7 +942,12 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		dt_debug(dt, "include %s\n", data->include->contents);
 		assert(dt->curr_in);
 		in = dt_input_create(dt, data->include->contents, dt->curr_in);
-		assert(in);
+		if (!in) {
+			dts_error_at(ds, &data->include->loc,
+				"Unable to open include file \"%s\"\n",
+				data->include->contents);
+			return -1;
+		}
 		dt->curr_in = in;
 
 		assert(dt->curr_span);
@@ -1649,7 +1677,8 @@ void dt_cleanup(struct yaml_dt_state *dt, bool abnormal)
 
 	rm_file = abnormal && dt->output && dt->output != stdout &&
 		  strcmp(dt->cfg.output_file, "-") &&
-		  strcmp(dt->cfg.output_file, "/dev/null");
+		  strcmp(dt->cfg.output_file, "/dev/null") &&
+		  !dt->cfg.force;
 
 	if (dt->current_event)
 		yaml_event_delete(dt->current_event);

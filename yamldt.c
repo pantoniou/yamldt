@@ -84,6 +84,11 @@ static struct option opts[] = {
 	{ "space",		required_argument, 0, 'S' },
 	{ "align",		required_argument, 0, 'a' },
 	{ "pad",		required_argument, 0, 'p' },
+	{ "warning",		required_argument, 0, 'W' },
+	{ "error",		required_argument, 0, 'E' },
+	{ "sort",		no_argument,       0, 's' },
+	{ "force",		no_argument,       0, 'f' },
+	{ "include",		required_argument, 0, 'i' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -112,10 +117,17 @@ static void help(void)
 "   -a, --align=X         Make the DTB blob align to X bytes\n"
 "   -p, --pad=X           Pad the DTB blob with X bytes\n"
 "   -H, --phandle=X       Set phandle format [legacy|epapr|both]\n"
+"   -W, --warning=X       Enable/disable warning (NOP)\n"
+"   -E, --error=X         Enable/disable error (NOP)\n"
 "   -h, --help            Help\n"
 "   -v, --version         Display version\n"
 		);
 }
+
+struct include_entry {
+	struct list_head node;
+	const char *include;
+};
 
 int main(int argc, char *argv[])
 {
@@ -126,6 +138,10 @@ int main(int argc, char *argv[])
 	struct list_head checkers;
 	struct yaml_dt_emitter *selected_emitter = NULL;
 	struct yaml_dt_checker *selected_checker = NULL;
+	struct list_head includes;
+	struct include_entry *ie = NULL, *ien;
+	int i, include_count = 0;
+	const char **includev;
 	const char *s;
 	bool input_output_optional = false;
 
@@ -142,6 +158,8 @@ int main(int argc, char *argv[])
 	list_add_tail(&null_checker.node, &checkers);
 	list_add_tail(&dtb_checker.node, &checkers);
 
+	INIT_LIST_HEAD(&includes);
+
 	memset(cfg, 0, sizeof(*cfg));
 	cfg->color = -1;
 
@@ -150,7 +168,7 @@ int main(int argc, char *argv[])
 	optind = 0;
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:I:O:d:V:R:S:a:p:H:cC@g:vh?", opts, &option_index)) != -1) {
+			"qo:I:O:d:V:R:S:a:p:H:W:E:sfi:cC@g:vh?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -217,6 +235,30 @@ int main(int argc, char *argv[])
 		case 'H':
 			cfg->phandle_format = optarg;
 			break;
+		case 'W':
+		case 'E':
+			/* ignored for now */
+			break;
+		case 's':
+			cfg->sort = true;
+			break;
+		case 'f':
+			cfg->force = true;
+			break;
+		case 'i':
+			ie = malloc(sizeof(*ie));
+			if (!ie) {
+				fprintf(stderr, "Out of memory\n");
+				list_for_each_entry_safe(ie, ien, &includes, node) {
+					list_del(&ie->node);
+					free(ie);
+				}
+				return EXIT_FAILURE;
+			}
+			ie->include = optarg;
+			list_add_tail(&ie->node, &includes);
+			include_count++;
+			break;
 		case 'c':
 			cfg->object = true;
 			break;
@@ -237,6 +279,24 @@ int main(int argc, char *argv[])
 			help();
 			return cc == 'h' ? 0 : EXIT_FAILURE;
 		}
+	}
+
+	if (include_count > 0) {
+		includev = alloca(sizeof(char *) * (include_count + 1));
+		i = 0;
+		list_for_each_entry_safe(ie, ien, &includes, node) {
+			list_del(&ie->node);
+			if (includev)
+				includev[i++] = ie->include;
+			free(ie);
+		}
+		if (includev)
+			includev[i] = NULL;
+		if (!includev) {
+			fprintf(stderr, "Out of memory\n");
+			return EXIT_FAILURE;
+		}
+		cfg->search_path = (char * const *) includev;
 	}
 
 	/* they're optional when saving the schema only */
@@ -333,6 +393,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Illegal phandle format %s\n", cfg->phandle_format);
 		return EXIT_FAILURE;
 	}
+
+	if (cfg->sort)
+		fprintf(stderr, "sort not yet implemented\n");
 
 	/* when selecting a dtb schema, we use the dtb checker */
 	if (cfg->schema)
