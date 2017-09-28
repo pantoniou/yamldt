@@ -1,15 +1,17 @@
 # yamldt
 
-+`yamldt` is a YAML to DT blob generator/compiler and validator, utilizing a YAML schema
-that is functionaly equivalent to DTS and supports all DTS features.
++`yamldt` is a YAML/DTS to DT blob generator/compiler and validator.
+The YAML schema is functionaly equivalent to DTS and supports all DTS features,
+while as a DTS compiler is bit-exact compatible with DTC.
 
-Validation is performed against another YAML schema that defines properties
+Validation is performed against a YAML schema that defines properties
 and constraints. A checker uses the schema to generate small code fragments that
 are compiled to ebpf and executed for the specific validation of each
 DT node the rule selects in the output tree.
 
-`yamldl` parses a device tree description (source) file in YAML format
-and outputs a device tree blob (which can be bit-exact if the -C option is used).
+`yamldt` parses a device tree description (source) file in YAML/DTS format
+and outputs a device tree blob (which can be bit-exact to the one generated
+from the reference dtc compiler if the -C option is used).
 
 # dts2yaml
 
@@ -407,46 +409,91 @@ The `yamldt` options available are:
 ```
 yamldt [options] <input-file>
  options are:
-   -o, --output        Output file
-   -d, --debug         Debug messages
-   -c                  Don't resolve references (object mode)
-   -C, --compatible    Compatible mode
-   -s, --dts           DTS mode
-   -y, --yaml          YAML mode
-   -S, --schema        Use schema (all yaml files in dir/)
-   -g, --codegen       Code generator configuration file
-       --save-temps    Save temporary files
-       --silent        Be really silent
-       --color         [auto|off|on]
-   -h, --help          Help
-   -v, --version       Display version
+   -q, --quiet           Suppress; -q (warnings) -qq (errors) -qqq (everything)
+   -I, --in-format=X     Input format type X=[auto|yaml|dts]
+   -O, --out-format=X    Output format type X=[auto|yaml|dtb|dts|null]
+   -o, --out=X           Output file
+   -c                    Don't resolve references (object mode)
+   -g, --codegen         Code generator configuration file
+       --schema          Use schema (all yaml files in dir/)
+       --save-temps      Save temporary files
+       --schema-save     Save schema to given file
+       --color           [auto|off|on]
+       --debug           Debug messages
+   -h, --help            Help
+   -v, --version         Display version
+
+   DTB specific options
+
+   -V, --out-version=X   DTB blob version to produce (only 17 supported)
+   -C, --compatible      Bit-exact DTC compatibility mode
+   -@, --symbols         Generate symbols node
+   -A, --auto-alias      Generate aliases for all labels
+   -R, --reserve=X       Make space for X reserve map entries
+   -S, --space=X         Make the DTB blob at least X bytes long
+   -a, --align=X         Make the DTB blob align to X bytes
+   -p, --pad=X           Pad the DTB blob with X bytes
+   -H, --phandle=X       Set phandle format [legacy|epapr|both]
+   -W, --warning=X       Enable/disable warning (NOP)
+   -E, --error=X         Enable/disable error (NOP)
+   -b, --boot-cpu=X      Force boot cpuid to X
 ```
 
-The `-C/--compatible` option generates a bit-exact DTB file.
+`-q/--quiet` suppresses message output.
 
-The `-c/--object` option generates an YAML object file that can be
-used in linking, similar to the way C sources and object files work.
+The `-I/--in-format` option selects the input format type. By
+default is set to auto which is capable of selecting based on
+file extension and input format source patterns.
 
-The `-s/--dts` option selects a DTS output format instead of DTB.
+The `-O/--out-format` option selects the output format type. By
+default is set to auto which uses the output file extension.
 
-The `-y/--yaml` option output a _pure_ YAML format file. A _pure_
-YAML file is one that is containing no comments and integer values
-have been calculated if possible. It is guaranteed to be a valid
-YAML file suitable for use by other external tools.
+`-o/--out` set the output file.
 
-The `-S/--schema` option will use the given file(s) as
-input for the checker. As an extension, if given a directory name
-with a terminating slash (i.e. dir/) it will recursively collect
-and use all YAML files within.
+The `-c` option causes unresolved references to remain in the
+output file resuling in an object file. If the output format
+is set to DTB/DTS it will generate an overlay, if set to yaml
+results to a YAML file which can be subsequently recompiled
+as an intermediate object file.
 
 The `-g/--codegen` option will use the given YAML file(s)
 (or dir/ as in the schema option) as input for the code generator.
 
+The `--schema` option will use the given file(s) as
+input for the checker. As an extension, if given a directory name
+with a terminating slash (i.e. dir/) it will recursively collect
+and use all YAML files within.
+
 The `--save-temps` option will save all intermediate files/blobs.
 
-The `--silent` option will supress all informational messages.
+`schema-save` will save the processed schema and codegen file including
+all compiled validation filters. Using it speeds validation of
+multiple files since it can be used as an input via the --schema option.
 
-`--color` controls color output in the terminal.
+`--color` controls color output in the terminal, while `--debug` enables
+the generation of a considerable amount of debugging messages.
+
+The following DTB specific options are supported:
+
+`-V/--out-version` selects the DTB blob version; currently only version 17
+is supported.
+
+The `-C/--compatible` option generates a bit-exact DTB file as the DTC
+compiler.
+
+The `-@/--symbols` and `-A/--auto-alias` options generate a __symbols__ and
+alias entries for all the defined labels in the source files.
+
+The `-R/--reserve`, `-S/--space`, `-a/--align` and `-p/--pad` options work
+the same way as in DTC. `-R` add reserve memreserve entries, `-S` adds extra
+space, `-a` aligns and `-p` pads extra space end of the DTB blob.
+
+The `-H/--phandle` option selects either legacy/epapr or both phandle styles.
+
+The `-W/--warning` and `-E/--error` options are there for command line compatibility
+with dtc and are ignored.
+
+Finally `-d/--boot-cpu` forces the boot cpuid.
 
 Automatic suffix detection does what you expect (i.e. an output file
 ending in .dtb if selecting the DTB generation option, .yaml if selecting the yaml
@@ -606,6 +653,72 @@ $ ls -l *.dtb
 Plese note that the CPP command line is the same, so no changes to header files
 is required. dts2yaml is smart enough to detect macro usage and convert from
 the space delimited form that DTC uses to the comma one that YAML does.
+
+# yamldt as a DTC compiler
+
+yamldt supports almost all DTC options so using it as a DTC replacement
+is straightforward.
+
+Using it for compiling in Linux Kernel DTS files is as simple as:
+
+```
+$ make DTC=yamldt dtbs
+```
+
+Note that by default the compatible option (-C) so if you need to be
+bit-compatible with DTC pass the -C flag as follows:
+
+```
+$ make DTC=yamldt DTC_FLAGS="-C"
+```
+
+Generally `yamldt` is a little bit faster than `dtc` and generates somewhat
+smaller DTB files (if not using the -C option). However due to internally
+tracking all parsed tokens and their locations in files it is capable
+of generating accurate error messages that are parseable by all editors
+for automatic movement to the error by a programmer's editor like vim.
+
+For instance a file containing an error:
+
+```
+/* duplicate label */
+/dts-v1/;
+/ {
+	a: foo { foo; };
+	a: bar { bar; };
+};
+```
+
+yamldt will generate the following error:
+
+```
+$ yamldt -I dts -o dts -C duplabel.dts
+duplabel.dts:8:2: error: duplicate label a at "/bar"
+  a: bar {
+  ^
+duplabel.dts:4:2: error: duplicate label a is defined also at "/foo"
+  a: foo {
+  ^
+```
+
+while dtc will generate:
+
+```
+$ yamldt -I dts -o dts -C duplabel.dts
+dts: ERROR (duplicate_label): Duplicate label 'a' on /bar and /foo
+ERROR: Input tree has errors, aborting (use -f to force output)
+```
+
+Known features of DTC that are not available are:
+
+* Only version 17 DT blobs are supported. Passing a -V argument requesting a
+  different one will result in error.
+* Assembly output is not supported.
+* Assembly and filesystem inputs are not supported.
+* The sort option is not yet supported.
+* The warning and error options are accepted but they don't do anything.
+  yamldt uses a validation schema for application specific error and warnings
+  so those options are superfluous.
 
 ## Notes on DTS to DTS conversion
 
