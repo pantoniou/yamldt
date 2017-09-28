@@ -138,6 +138,7 @@ struct label *label_add_nolink(struct tree *t, struct node *np,
 
 	l = label_alloc(t, label);
 	l->np = np;
+	l->len = strlen(label);
 	return l;
 }
 
@@ -238,7 +239,7 @@ static struct node *__node_lookup_by_label(struct tree *t, struct node *np,
 	struct label *l;
 
 	for_each_label_of_node(np, l) {
-		if (strlen(l->label) == len &&
+		if (l->len == len &&
 		    !memcmp(l->label, label, len))
 			return np;
 	}

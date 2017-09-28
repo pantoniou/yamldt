@@ -800,10 +800,10 @@ static void dt_dts_message(struct dts_state *ds, enum dts_message_type type,
 	while (s > buf && s[-1] == '\n')
 		*--s = '\0';
 
-	memset(&m, 0, sizeof(m));
-
 	if (loc)
 		dts_loc_to_yaml_mark(loc, &m);
+	else
+		memset(&m, 0, sizeof(m));
 
 	switch (type) {
 	case dmt_info:

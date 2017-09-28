@@ -72,6 +72,7 @@ struct label {
 	struct list_head node;
 	struct node *np;
 	char *label;
+	size_t len;
 };
 
 enum ref_type {
