@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 
-CFLAGS = -Wall -ggdb -O2 -Os
+CFLAGS = -Wall -ggdb -O2
 include_HEADERS =
 
 AM_YFLAGS = -d

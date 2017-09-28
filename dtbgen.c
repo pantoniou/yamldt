@@ -69,6 +69,8 @@ struct dtb_node {
 	/* DTB generation */
 	unsigned int phandle;
 	bool marker : 1;	/* generic marker */
+	bool reference_check_done : 1;
+	bool referenced : 1;
 };
 #define to_dtb_node(_n) 	\
 	container_of(container_of(_n, struct dt_node, n), struct dtb_node, dt)
@@ -103,6 +105,11 @@ struct fixup {
 	struct list_head refs;
 };
 
+struct noderef {
+	struct list_head node;
+	struct node *np;
+};
+
 struct dtb_emit_state {
 	/* DTB generation state */
 	unsigned int next_phandle;
@@ -117,6 +124,7 @@ struct dtb_emit_state {
 	} area[dt_area_max + 1];
 
 	struct list_head fixups;
+	struct list_head noderefs;
 };
 
 #define to_dtb(_dt) ((struct dtb_emit_state *)(_dt)->emitter_state)
@@ -514,25 +522,11 @@ static void resolve(struct yaml_dt_state *dt, struct node *npt,
 static bool is_node_referenced(struct yaml_dt_state *dt,
 				struct node *np, struct node *npref)
 {
-	struct node *child;
-	struct property *prop;
-	struct ref *ref;
-	bool ret;
+	struct dtb_emit_state *dtb = to_dtb(dt);
+	struct noderef *nr;
 
-	for_each_property_of_node(np, prop) {
-
-		for_each_ref_of_property(prop, ref) {
-			if (ref->type != r_anchor ||
-			    !to_dt_ref(ref)->is_resolved)
-				continue;
-			if (to_dt_ref(ref)->npref == npref)
-				return true;
-		}
-	}
-
-	for_each_child_of_node(np, child) {
-		ret = is_node_referenced(dt, child, npref);
-		if (ret)
+	list_for_each_entry(nr, &dtb->noderefs, node) {
+		if (nr->np == npref)
 			return true;
 	}
 	return false;
@@ -572,11 +566,51 @@ static void append_auto_properties(struct yaml_dt_state *dt, struct node *np)
 		append_auto_properties(dt, child);
 }
 
+static void generate_noderefs(struct yaml_dt_state *dt, struct node *np)
+{
+	struct dtb_emit_state *dtb = to_dtb(dt);
+	struct node *child;
+	struct property *prop;
+	struct ref *ref;
+	struct noderef *nr;
+	bool found;
+
+	for_each_property_of_node(np, prop) {
+
+		for_each_ref_of_property(prop, ref) {
+			if (ref->type != r_anchor ||
+			    !to_dt_ref(ref)->is_resolved)
+				continue;
+
+			found = false;
+			list_for_each_entry(nr, &dtb->noderefs, node) {
+				if (nr->np == to_dt_ref(ref)->npref) {
+					found = true;
+					break;
+				}
+			}
+
+			if (found)
+				continue;
+
+			nr = malloc(sizeof(*nr));
+			assert(nr);
+			nr->np = to_dt_ref(ref)->npref;
+			list_add_tail(&nr->node, &dtb->noderefs);
+
+		}
+	}
+
+	for_each_child_of_node(np, child)
+		generate_noderefs(dt, child);
+}
+
 static void dtb_append_auto_properties(struct yaml_dt_state *dt)
 {
 	if (!tree_root(to_tree(dt)))
 		return;
 
+	generate_noderefs(dt, tree_root(to_tree(dt)));
 	append_auto_properties(dt, tree_root(to_tree(dt)));
 }
 
@@ -1454,6 +1488,7 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dt->emitter_state = dtb;
 
 	INIT_LIST_HEAD(&dtb->fixups);
+	INIT_LIST_HEAD(&dtb->noderefs);
 
 	dt_debug(dt, "DTB emitter configuration:\n");
 	dt_debug(dt, " compatible = %s\n", dt->cfg.compatible ? "true" : "false");
@@ -1473,6 +1508,13 @@ void dtb_cleanup(struct yaml_dt_state *dt)
 	struct dtb_emit_state *dtb = to_dtb(dt);
 	enum dt_data_area area;
 	struct fixup *f, *fn;
+	struct noderef *nr, *nrn;
+
+	/* cleanup noderefs */
+	list_for_each_entry_safe(nr, nrn, &dtb->noderefs, node) {
+		list_del(&nr->node);
+		free(nr);
+	}
 
 	/* cleanup local fixups */
 	list_for_each_entry_safe(f, fn, &dtb->fixups, node) {
