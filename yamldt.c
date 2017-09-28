@@ -70,48 +70,47 @@ static struct option opts[] = {
 	{ "in-format",		required_argument, 0, 'I' },
 	{ "out-format",		required_argument, 0, 'O' },
 	{ "out",	 	required_argument, 0, 'o' },
-	{ "debug",	 	no_argument,	   0, 'd' },
+	{ "out-version",	required_argument, 0, 'V' },
+	{ "debug",	 	no_argument,	   0,  0  },
 	{ "",			no_argument,	   0, 'c' },
 	{ "compatible",		no_argument,	   0, 'C' },
-	{ "yaml",		no_argument,	   0, 'y' },
-	{ "dts",		no_argument,	   0, 's' },
-	{ "schema",		required_argument, 0, 'S' },
+	{ "schema",		required_argument, 0,  0  },
 	{ "codegen",		required_argument, 0, 'g' },
 	{ "save-temps",		no_argument, 	   0,  0  },
 	{ "schema-save",	required_argument, 0,  0  },
 	{ "color",		required_argument, 0,  0  },
 	{ "symbols",		no_argument, 	   0, '@' },
-	{ "reserve",		required_argument, 0,  0, },
-	{ "space",		required_argument, 0,  0, },
-	{ "align",		required_argument, 0,  0, },
-	{ "pad",		required_argument, 0,  0, },
+	{ "reserve",		required_argument, 0, 'R' },
+	{ "space",		required_argument, 0, 'S' },
+	{ "align",		required_argument, 0, 'a' },
+	{ "pad",		required_argument, 0, 'p' },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
 };
 
-static void help(struct list_head *emitters, struct list_head *checkers)
+static void help(void)
 {
 	printf(
 "yamldt [options] <input-file> [<input-file>...]\n"
 " options are:\n"
 "   -q, --quiet           Suppress; -q (warnings) -qq (errors) -qqq (everything)\n"
 "   -I, --in-format=X     Input format type X=[auto|yaml|dts]\n"
+"   -O, --out-format=X    Output format type X=[auto|yaml|dtb|dts|null]\n"
 "   -o, --out=X           Output file\n"
-"   -d, --debug           Debug messages\n"
+"   -V, --out-version=X   DTB blob version to produce (only 17 supported)\n"
 "   -c                    Don't resolve references (object mode)\n"
-"   -C, --compatible      Compatible mode\n"
-"   -s, --dts             DTS mode\n"
-"   -y, --yaml            YAML mode\n"
-"   -S, --schema          Use schema (all yaml files in dir/)\n"
+"   -C, --compatible      Bit-exact DTC compatibility mode\n"
 "   -g, --codegen         Code generator configuration file\n"
+"       --schema          Use schema (all yaml files in dir/)\n"
 "       --save-temps      Save temporary files\n"
 "       --schema-save     Save schema to given file\n"
 "       --color           [auto|off|on]\n"
-"       --reserve=X       Make space for X reserve map entries\n"
-"       --space=X         Make the DTB blob at least X bytes long\n"
-"       --align=X         Make the DTB blob align to X bytes\n"
-"       --pad=X           Pad the DTB blob with X bytes\n"
+"       --debug           Debug messages\n"
+"   -R, --reserve=X       Make space for X reserve map entries\n"
+"   -S, --space=X         Make the DTB blob at least X bytes long\n"
+"   -a, --align=X         Make the DTB blob align to X bytes\n"
+"   -p, --pad=X           Pad the DTB blob with X bytes\n"
 "   -h, --help            Help\n"
 "   -v, --version         Display version\n"
 		);
@@ -150,7 +149,7 @@ int main(int argc, char *argv[])
 	optind = 0;
 	opterr = 1;
 	while ((cc = getopt_long(argc, argv,
-			"qo:I:O:dcvCys@S:g:h?", opts, &option_index)) != -1) {
+			"qo:I:O:d:V:R:S:a:p:cC@g:vh?", opts, &option_index)) != -1) {
 
 		if (cc == 0 && option_index >= 0) {
 			s = opts[option_index].name;
@@ -173,20 +172,12 @@ int main(int argc, char *argv[])
 				cfg->schema_save = optarg;
 				continue;
 			}
-			if (!strcmp(s, "reserve")) {
-				cfg->reserve = strtoul(optarg, NULL, 0);
+			if (!strcmp(s, "debug")) {
+				cfg->debug = true;
 				continue;
 			}
-			if (!strcmp(s, "space")) {
-				cfg->space = strtoul(optarg, NULL, 0);
-				continue;
-			}
-			if (!strcmp(s, "align")) {
-				cfg->align = strtoul(optarg, NULL, 0);
-				continue;
-			}
-			if (!strcmp(s, "pad")) {
-				cfg->pad = strtoul(optarg, NULL, 0);
+			if (!strcmp(s, "schema")) {
+				cfg->schema = optarg;
 				continue;
 			}
 		}
@@ -205,7 +196,22 @@ int main(int argc, char *argv[])
 			cfg->output_format = optarg;
 			break;
 		case 'd':
-			cfg->debug = true;
+			cfg->depname = optarg;
+			break;
+		case 'V':
+			cfg->out_version = strtoul(optarg, NULL, 0);
+			break;
+		case 'R':
+			cfg->reserve = strtoul(optarg, NULL, 0);
+			break;
+		case 'S':
+			cfg->space = strtoul(optarg, NULL, 0);
+			break;
+		case 'a':
+			cfg->align = strtoul(optarg, NULL, 0);
+			break;
+		case 'p':
+			cfg->pad = strtoul(optarg, NULL, 0);
 			break;
 		case 'c':
 			cfg->object = true;
@@ -216,15 +222,6 @@ int main(int argc, char *argv[])
 		case '@':
 			cfg->symbols = true;
 			break;
-		case 'y':
-			cfg->yaml = true;
-			break;
-		case 's':
-			cfg->dts = true;
-			break;
-		case 'S':
-			cfg->schema = optarg;
-			break;
 		case 'g':
 			cfg->codegen = optarg;
 			break;
@@ -233,7 +230,7 @@ int main(int argc, char *argv[])
 			return 0;
 		case 'h':
 		case '?':
-			help(&emitters, &checkers);
+			help();
 			return cc == 'h' ? 0 : EXIT_FAILURE;
 		}
 	}
@@ -314,6 +311,14 @@ int main(int argc, char *argv[])
 		selected_emitter = &yaml_emitter;
 	else
 		selected_emitter = &null_emitter;
+
+	if (!cfg->out_version)
+		cfg->out_version = 17;
+
+	if (cfg->out_version != 17) {
+		fprintf(stderr, "We only support version 17 of the DTB format\n");
+		return EXIT_FAILURE;
+	}
 
 	/* when selecting a dtb schema, we use the dtb checker */
 	if (cfg->schema)

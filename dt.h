@@ -126,18 +126,14 @@ struct yaml_dt_config {
 
 	/* for dtb */
 	bool compatible;
-	bool dts;
 	bool symbols;
 	unsigned int quiet;
 	unsigned int reserve;
 	unsigned int space;
 	unsigned int align;
 	unsigned int pad;
-
-	/* for YAML */
-	bool yaml;
-
-	/* for checkers */
+	unsigned int out_version;
+	const char *depname;
 	const char *schema;
 	const char *schema_save;
 	const char *codegen;

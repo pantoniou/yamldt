@@ -36,8 +36,8 @@ DTCFLAGS ?= -@ -q
 FDTDUMP ?= fdtdump
 YAMLDT ?= $(TOPDIR)/yamldt
 YAMLDTFLAGS_VALIDATE ?= \
-		       -g $(TOPDIR)/validate/schema/codegen.yaml \
-		       -S $(TOPDIR)/validate/bindings/ \
+		       --codegen=$(TOPDIR)/validate/schema/codegen.yaml \
+		       --schema=$(TOPDIR)/validate/bindings/ \
 		       --schema-save=schema.yaml
 YAMLDTFLAGS ?= -@ -C
 FDTDUMPFLAGS ?=
@@ -46,7 +46,7 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 
 %.o.yaml: %.yaml
 	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
-		$(YAMLDT) $(YAMLDTFLAGS) -y -c - -o $@
+		$(YAMLDT) $(YAMLDTFLAGS) -I yaml -O yaml -c - -o $@
 
 %.cpp.yaml: %.yaml
 	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< >$@
@@ -55,7 +55,7 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 	$(YAMLDT) $(YAMLDTFLAGS) -C $< -o $@
 
 %.dts: %.yaml
-	$(YAMLDT) $(YAMLDTFLAGS) -s $< -o $@
+	$(YAMLDT) $(YAMLDTFLAGS) -I yaml -O dts $< -o $@
 
 %.yaml.dts: %.pure.yaml
 	$(YAMLDT) $(YAMLDTFLAGS) -s $< -o $@
@@ -84,9 +84,9 @@ check: $(DTCDTBS) $(DTBS) $(DTSS) $(DIFFS)
 validate: am335x-boneblack-rules.pure.yaml
 
 am335x-boneblack.pure.yaml: $(YAMLSO)
-	$(YAMLDT) $(YAMLDTFLAGS) -y $^ -o $@
+	$(YAMLDT) $(YAMLDTFLAGS) -I yaml -O yaml $^ -o $@
 
 am335x-boneblack-rules.pure.yaml: $(CPPYAMLS) rule-check.cpp.yaml
-	$(YAMLDT) $(YAMLDTFLAGS) $(YAMLDTFLAGS_VALIDATE) -y $^ -o $@
+	$(YAMLDT) $(YAMLDTFLAGS) $(YAMLDTFLAGS_VALIDATE) -I yaml -O yaml $^ -o $@
 
 -include $(YDEPS) $(DDEPS)

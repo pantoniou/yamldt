@@ -16,7 +16,8 @@ YAMLDT ?= $(TOPDIR)/yamldt
 # pass extra validate flags
 YAMLDTFLAGS ?= -C \
 	$(if $(findstring validate, $(MAKECMDGOALS)), \
-		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
+		--codegen=$(TOPDIR)/validate/schema/codegen.yaml \
+		--schema=$(TOPDIR)/validate/bindings/)
 
 FDTDUMPFLAGS ?=
 YDEPFLAGS = -MT $@ -MMD -MP -MF $*.Yd

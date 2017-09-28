@@ -26,7 +26,7 @@ VALIDATE ?= $(if $(findstring validate, $(MAKECMDGOALS)), 1)
 
 # pass extra validate flags
 YAMLDTFLAGS ?= -C \
-	$(if $(findstring 1, $(VALIDATE)), -S $(SCHEMA))
+	$(if $(findstring 1, $(VALIDATE)), --schema=$(SCHEMA))
 
 DTS2YAMLFLAGS ?=
 FDTDUMPFLAGS ?=

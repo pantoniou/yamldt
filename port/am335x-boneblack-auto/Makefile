@@ -19,7 +19,8 @@ DTS2YAML ?= $(TOPDIR)/dts2yaml
 # pass extra validate flags
 YAMLDTFLAGS ?= -C -@ \
 	$(if $(findstring validate, $(MAKECMDGOALS)), \
-		-g $(TOPDIR)/validate/schema/codegen.yaml -S $(TOPDIR)/validate/bindings/)
+		--codegen=$(TOPDIR)/validate/schema/codegen.yaml \
+		--schema=$(TOPDIR)/validate/bindings/)
 
 DTS2YAMLFLAGS ?=
 FDTDUMPFLAGS ?=

@@ -1279,26 +1279,17 @@ static const struct dts_ops dt_dts_ops = {
 	.emit		= dt_dts_emit,
 };
 
-static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in)
+static bool dt_tag_exists(struct yaml_dt_state *dt, struct yaml_dt_input *in,
+		const char *tag)
 {
-	struct yaml_dt_config *cfg = &dt->cfg;
 	const char *s, *start, *ls, *le, *p;
-
-	if (!strcmp(cfg->input_format, "yaml"))
-		return false;
-
-	if (!strcmp(cfg->input_format, "dts")) {
-		in->dts = true;
-		return true;
-	}
-
-	/* anything else is auto */
+	int taglen = strlen(tag);
 
 	start = in->content;
 
 	/* NOTE content is always terminated by zero */
 	/* so this is guaranteed to work */
-	s = strstr(start, "/dts-v1/");
+	s = strstr(start, tag);
 	if (!s)
 		return false;
 
@@ -1316,10 +1307,28 @@ static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in
 	p = ls;
 	while (isspace(*p))
 		p++;
-	if (le - p < 8 /* /dts-v1/ */ || memcmp(p, "/dts-v1/", 8))
+
+	return (le - p >= taglen) && !memcmp(p, tag, taglen);
+}
+
+static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in)
+{
+	struct yaml_dt_config *cfg = &dt->cfg;
+
+	if (!strcmp(cfg->input_format, "yaml"))
 		return false;
 
-	in->dts = true;
+	if (!strcmp(cfg->input_format, "dts"))
+		in->dts = true;
+	else
+		in->dts = dt_tag_exists(dt, in, "/dts-v1/");
+
+	if (!in->dts)
+		return false;
+
+	/* turn on object mode if plugin tag exists */
+	if (!cfg->object && dt_tag_exists(dt, in, "/plugin/"))
+		cfg->object = true;
 
 	return true;
 }

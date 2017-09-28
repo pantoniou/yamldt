@@ -1416,7 +1416,6 @@ int dtb_setup(struct yaml_dt_state *dt)
 	dt_debug(dt, "DTB emitter configuration:\n");
 	dt_debug(dt, " compatible = %s\n", dt->cfg.compatible ? "true" : "false");
 	dt_debug(dt, " object     = %s\n", dt->cfg.object ? "true" : "false");
-	dt_debug(dt, " dts        = %s\n", dt->cfg.dts ? "true" : "false");
 	dt_debug(dt, " symbols    = %s\n", dt->cfg.symbols ? "true" : "false");
 	dt_debug(dt, " reserve    = %u\n", dt->cfg.reserve);
 	dt_debug(dt, " space      = %u\n", dt->cfg.space);
@@ -1741,7 +1740,7 @@ int dtb_emit(struct yaml_dt_state *dt)
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */
-	if (dt->cfg.dts)
+	if (!strcmp(dt->cfg.output_format, "dts"))
 		return dts_emit(dt);
 
 	dtb_append_auto_properties(dt);
