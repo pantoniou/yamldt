@@ -107,6 +107,6 @@ genblackyamls:
 	@echo "dts2yaml DONE"
 
 $(SCHEMA): $(CODEGEN) $(BINDING_FILES)
-	$(YAMLDT) -g $(CODEGEN) -S $(BINDINGS)/ --schema-save=$(SCHEMA)
+	$(YAMLDT) -g $(CODEGEN) --schema $(BINDINGS)/ --schema-save=$(SCHEMA)
 
 validate: $(SCHEMA) check
