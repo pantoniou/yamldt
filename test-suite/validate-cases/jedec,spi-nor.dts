@@ -1,0 +1,17 @@
+/dts-v1/;
+
+/ {
+	spi {
+		compatible = "foo,spi";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		jedec-spi-nor {
+			compatible = "s25fl256s1";
+			spi-max-frequency = <76800000>;
+			reg = <0>;
+			spi-tx-bus-width = <1>;
+			spi-rx-bus-width = <3>;
+		};
+	};
+};
