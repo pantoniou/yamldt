@@ -3,8 +3,11 @@
 reg:
   title: Contraint for reg properties
 
+  class: constraint
+  virtual: true
+
   properties:
-    status: &reg-valid
+    reg: &reg-valid
       category: required
       type: intseq
       description: The register property
