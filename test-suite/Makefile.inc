@@ -28,6 +28,8 @@ VALIDATE ?= $(if $(findstring validate, $(MAKECMDGOALS)), 1)
 YAMLDTFLAGS ?= -C \
 	$(if $(findstring 1, $(VALIDATE)), --schema=$(SCHEMA))
 
+YAMLDTSCHEMAFLAGS ?=
+
 DTS2YAMLFLAGS ?=
 FDTDUMPFLAGS ?=
 
@@ -110,6 +112,6 @@ genblackyamls:
 	@echo "dts2yaml DONE"
 
 $(SCHEMA): $(CODEGEN) $(BINDING_FILES)
-	$(YAMLDT) -g $(CODEGEN) --schema $(BINDINGS)/ --schema-save=$(SCHEMA)
+	$(YAMLDT) -g $(CODEGEN) --schema $(BINDINGS)/ --schema-save=$(SCHEMA) $(YAMLDTSCHEMAFLAGS)
 
 validate: $(SCHEMA) check

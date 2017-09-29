@@ -6,12 +6,21 @@
 		status = "okay";
 		#address-cells = <1>;
 		#size-cells = <0>;
-		jedec-spi-nor {
+		jedec-spi-nor@0 {
 			compatible = "s25fl256s1";
 			spi-max-frequency = <76800000>;
+			status = "okay";
 			reg = <0>;
 			spi-tx-bus-width = <1>;
-			spi-rx-bus-width = <3>;
+			spi-rx-bus-width = <3>;	/* <- error here */
+		};
+		jedec-spi-nor@1 {
+			compatible = "s25fl256s1";
+			spi-max-frequency = <76800000>;
+			status = "okay";
+			reg = <1>;
+			spi-tx-bus-width = <1>;
+			spi-rx-bus-width = <2>;	/* <- no error here */
 		};
 	};
 };
