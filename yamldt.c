@@ -413,11 +413,10 @@ int main(int argc, char *argv[])
 	if (cfg->sort)
 		fprintf(stderr, "sort not yet implemented\n");
 
+	selected_checker = &null_checker;
 	/* when selecting a dtb schema, we use the dtb checker */
 	if (cfg->schema)
 		selected_checker = &dtb_checker;
-	else
-		selected_checker = &null_checker;
 
 	err = dt_setup(dt, cfg, selected_emitter, selected_checker);
 	if (err)
