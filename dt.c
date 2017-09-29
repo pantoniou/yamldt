@@ -2602,9 +2602,11 @@ int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
 
 	if (!yaml_parser_parse(&dt->parser, &event)) {
 		m.start = m.end = dt->parser.problem_mark;
-		span->m.end = m.end;
-		span->end_pos = span->start_pos +
-				(span->m.end.index - span->m.start.index);
+		if (span) {
+			span->m.end = m.end;
+			span->end_pos = span->start_pos +
+					(span->m.end.index - span->m.start.index);
+		}
 		dt_error_at(dt, &m, "%s\n", dt->parser.problem);
 		return -1;
 	}
@@ -2692,8 +2694,11 @@ int dt_parse(struct yaml_dt_state *dt)
 
 	/* we must start with stream start */
 	err = dt_parse_yaml(dt, &token_type);
-	if (err || token_type != YAML_STREAM_START_TOKEN)
-		dt_fatal(dt, "YAML parser not starting with stream start\n");
+	if (err || token_type != YAML_STREAM_START_TOKEN) {
+		if (!err)
+			dt_error(dt, "YAML parser not starting with stream start\n");
+		dt_exit_failure(dt);
+	}
 
 	do {
 		dt_parse_dts(dt);
@@ -2706,7 +2711,7 @@ int dt_parse(struct yaml_dt_state *dt)
 	return dt->error_flag ? -1 : 0;
 }
 
-static void get_error_location(struct yaml_dt_state *dt,
+static int get_error_location(struct yaml_dt_state *dt,
 			size_t idx,
 		        char *filebuf, size_t filebufsize,
 			char *linebuf, size_t linebufsize,
@@ -2747,8 +2752,8 @@ static void get_error_location(struct yaml_dt_state *dt,
 
 	/* not found? */
 	if (!found) {
-		fprintf(stderr, "Could not find corresponding span idx=%zu\n", idx);
-		return;
+		dt_debug(dt, "Could not find corresponding span idx=%zu\n", idx);
+		return -1;
 	}
 	in = span->in;
 
@@ -2823,13 +2828,25 @@ static void get_error_location(struct yaml_dt_state *dt,
 	filebuf[sz] = '\0';
 
 	*linep = lines + 1;
+
+	return 0;
+}
+
+void dt_exit_failure(struct yaml_dt_state *dt)
+{
+	/* if we have a parent, propagate upwards */
+	while (dt->parent)
+		dt = dt->parent;
+	dt_cleanup(dt, true);
+
+	exit(EXIT_FAILURE);
 }
 
 void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
 	char str[1024];
-	int len;
+	int len, ret;
 	char linebuf[1024];
 	char filebuf[PATH_MAX + 1];
 	size_t line, column, end_line, end_column;
@@ -2861,28 +2878,30 @@ void dt_fatal(struct yaml_dt_state *dt, const char *fmt, ...)
 		if (end_line != line)
 			end_column = strlen(linebuf) + 1;
 
-		get_error_location(dt, dt->current_mark.start.index,
+		ret = get_error_location(dt, dt->current_mark.start.index,
 				filebuf, sizeof(filebuf),
 				linebuf, sizeof(linebuf),
 				&line);
 
-		fprintf(stderr, "%s%s:%zd:%zd: %s%s%s\n %s\n %*s%s^%s",
-				emph, filebuf, line, column + 1,
-				kind, str, reset,
-				linebuf,
-				(int)column, "", marker, reset);
-		if (column > 0 && end_column > 0) {
-			while (++column < end_column)
-				fprintf(stderr, "~");
+		if (!ret) {
+			fprintf(stderr, "%s%s:%zd:%zd: %s%s%s\n %s\n %*s%s^%s",
+					emph, filebuf, line, column + 1,
+					kind, str, reset,
+					linebuf,
+					(int)column, "", marker, reset);
+			if (column > 0 && end_column > 0) {
+				while (++column < end_column)
+					fprintf(stderr, "~");
+			}
+			fprintf(stderr, "\n");
+		} else {
+			fprintf(stderr, "%s%s%s\n", kind, str, reset);
 		}
-		fprintf(stderr, "\n");
 	} else
 		fprintf(stderr, "%s\n", str);
 
 	dt_stream_end(dt);
-	dt_cleanup(dt, true);
-
-	exit(EXIT_FAILURE);
+	dt_exit_failure(dt);
 }
 
 static void dt_print_at_msg(struct yaml_dt_state *dt,
@@ -2893,6 +2912,7 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	char filebuf[PATH_MAX + 1];
 	size_t line, column, end_line, end_column;
 	const char *emph = "", *kind = "", *marker = "", *reset = "";
+	int ret;
 
 	/* handle quiet */
 	if (dt->cfg.quiet >= 3 ||
@@ -2924,18 +2944,22 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	if (end_line != line)
 		end_column = strlen(linebuf) + 1;
 
-	get_error_location(dt, m->start.index,
+	ret = get_error_location(dt, m->start.index,
 			filebuf, sizeof(filebuf),
 			linebuf, sizeof(linebuf),
 			&line);
 
-	fprintf(stderr, "%s%s:%zd:%zd: %s%s:%s %s%s\n %s\n %*s%s^",
-			emph, filebuf, line, column + 1,
-			kind, type, emph, msg, reset,
-			linebuf, (int)column, "", marker);
-	while (++column < end_column)
-		fprintf(stderr, "~");
-	fprintf(stderr, "%s\n", reset);
+	if (!ret) {
+		fprintf(stderr, "%s%s:%zd:%zd: %s%s:%s %s%s\n %s\n %*s%s^",
+				emph, filebuf, line, column + 1,
+				kind, type, emph, msg, reset,
+				linebuf, (int)column, "", marker);
+		while (++column < end_column)
+			fprintf(stderr, "~");
+		fprintf(stderr, "%s\n", reset);
+	} else
+		fprintf(stderr, "%s%s:%s %s%s\n",
+				kind, type, emph, msg, reset);
 }
 
 void dt_print_at(struct yaml_dt_state *dt,

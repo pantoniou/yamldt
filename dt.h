@@ -305,6 +305,9 @@ void dt_info(struct yaml_dt_state  *dt, const char *fmt, ...)
 void dt_error(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
 
+void dt_exit_failure(struct yaml_dt_state *dt)
+		__attribute__ ((noreturn));
+
 void dt_fatal(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)))
 		__attribute__ ((noreturn));
