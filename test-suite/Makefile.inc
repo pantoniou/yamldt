@@ -38,6 +38,7 @@ DIFFS    := $(addsuffix .diff, $(basename $(YAMLS)))
 YDIFFS   := $(addsuffix .y.diff, $(basename $(YAMLS)))
 DTBS     := $(addsuffix .dtb, $(basename $(YAMLS)))
 YAMLDTBS := $(addsuffix .yaml.dtb, $(basename $(YAMLS)))
+YDTCDTBS := $(addsuffix .ydtc.dtb, $(basename $(YAMLS)))
 FDTDUMPS := $(addsuffix .fdtdump, $(basename $(DTBS))) $(addsuffix .fdtdump, $(basename $(YAMLDTBS)))
 CPPS     := $(addsuffix .cpp, $(basename $(DTBS))) $(addsuffix .yaml.cpp, $(basename $(YAMLDTBS)))
 
@@ -65,7 +66,7 @@ BLACKYDIFFS   := $(addsuffix .y.diff, $(BLACKLIST))
 	$(CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I dts -O dtb - -o $@
 
 %.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
-	$(CPP) $(YAMLDT_CPPFLAGS) $^ | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
+	$(CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.dtc.yaml: %.dts
 	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O yaml - -o $@
@@ -95,6 +96,8 @@ clean:
 
 $(YAMLS): $(DTSS)
 $(YAMLS): genyamls
+
+$(DTBS) $(YAMLDTBS) $(YDTCDTBS): $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
 
 genyamls:
 	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $(DTSS) || true
