@@ -65,6 +65,13 @@
 
 #define NPSTACK_SIZE	8
 
+#define SELECT_BASE	100000
+#define ERROR_BASE	4000
+#define BADTYPE_BASE	3000
+#define EXISTS_BASE	2000
+#define PROPC_BASE	1000
+#define NODEC_BASE	0
+
 struct frag {
 	struct list_head node;
 	const char *template;
@@ -670,7 +677,8 @@ static void add_constraint(struct yaml_dt_state *dt,
 	list_add_tail(&cd->node, lh);
 
 	(*idxp)++;
-#if 0
+
+	/*
 	{
 	char namebuf[NODE_FULLNAME_MAX];
 	const char *typename;
@@ -721,7 +729,7 @@ static void add_constraint(struct yaml_dt_state *dt,
 	fprintf(stderr, "    nptype=%s\n", dn_fullname(nptype, namebuf, sizeof(namebuf)));
 	fprintf(stderr, "    npcategory=%s\n", dn_fullname(npcategory, namebuf, sizeof(namebuf)));
 	}
-#endif
+	*/
 }
 
 static void free_constraint(struct yaml_dt_state *dt, struct constraint_desc *cd)
@@ -879,7 +887,7 @@ static void collect_constraint_node(struct yaml_dt_state *dt,
 
 static int prepare_schema_node(struct yaml_dt_state *dt,
 		struct yaml_dt_state *sdt, struct node *np,
-		enum constraint_type type, int *idxp)
+		int *idxp)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct property *prop;
@@ -907,28 +915,17 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	struct constraint_desc *cd, *cdn;
 	struct node *npstack[NPSTACK_SIZE];
 	struct node *npt;
-	int ret;
+	int idx, ret;
 
-	switch (type) {
-	case t_select:
-		source_name = "selected-rule-source";
-		output_name = "selected-rule-output";
-		prolog = dtbchk->cg_node_select_prolog;
-		epilog = dtbchk->cg_node_select_epilog;
-		break;
-	case t_check:
-		source_name = "check-rule-source";
-		output_name = "check-rule-output";
-		prolog = dtbchk->cg_node_check_prolog;
-		epilog = dtbchk->cg_node_check_epilog;
-		break;
-	default:
-		return -1;
-	}
+	source_name = "check-rule-source";
+	output_name = "check-rule-output";
+	prolog = dtbchk->cg_node_check_prolog;
+	epilog = dtbchk->cg_node_check_epilog;
 
 	INIT_LIST_HEAD(&clist);
 	npstack[0] = np;
-	collect_constraint_node(dt, npstack, 0, ARRAY_SIZE(npstack), type, &clist, idxp);
+	collect_constraint_node(dt, npstack, 0, ARRAY_SIZE(npstack), t_select, &clist, idxp);
+	collect_constraint_node(dt, npstack, 0, ARRAY_SIZE(npstack), t_check, &clist, idxp);
 
 	/* nothing to do */
 	if (list_empty(&clist))
@@ -963,9 +960,13 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	list_for_each_entry_safe(cd, cdn, &clist, node) {
 
 		/* update variables */
-		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", cd->idx);
+		idx = cd->idx;
+		if (cd->type == t_select)
+			idx += SELECT_BASE;	/* select errors return values under 100000 */
+		snprintf(idxbuf, sizeof(idxbuf) - 1, "%d", idx);
 		idxbuf[sizeof(idxbuf) - 1] = '\0';
 		vars[PROPERTY_INDEX_IDX].value = idxbuf;
+
 		vars[PROPERTY_NAME_IDX].value = cd->propname;
 		vars[RULE_NAME_IDX].value = cd->np->name;
 
@@ -1007,7 +1008,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 	dt_resolve_ref(sdt, ref);
 
 	if (dtbchk->save_temps)
-		save_file(dt, np->name, type, dtbchk->input_ext,
+		save_file(dt, np->name, t_check, dtbchk->input_ext,
 				buf, size);
 
 	/* and compile it */
@@ -1027,7 +1028,7 @@ static int prepare_schema_node(struct yaml_dt_state *dt,
 					&b64_output_size);
 
 	if (dtbchk->save_temps)
-		save_file(dt, np->name, type, dtbchk->output_ext,
+		save_file(dt, np->name, t_check, dtbchk->output_ext,
 				output, output_size);
 
 	if (!b64_output) {
@@ -1081,11 +1082,15 @@ static int prepare_schema(struct yaml_dt_state *dt)
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *root, *np;
 	int ret, idx;
-	const char *check, *select;
-	size_t check_size, select_size;
-	struct node *npsel, *npchk;
+	const char *check;
+	size_t check_size;
+	struct node *npchk;
 
 	root = tree_root(to_tree(sdt));
+	if (!root)
+		return 0;
+
+	dt_debug(dt, "preparing schema\n");
 
 	idx = 1;
 	for_each_child_of_node(root, np) {
@@ -1095,29 +1100,22 @@ static int prepare_schema(struct yaml_dt_state *dt)
 		if (ret == 1)
 			continue;
 
-		npsel = node_get_child_by_name(to_tree(sdt), np,
-				"selected-rule-output", 0);
-		select = dt_get_binary(sdt, npsel, "ebpf", 0, 0, &select_size);
-
 		npchk = node_get_child_by_name(to_tree(sdt), np,
 				"check-rule-output", 0);
 		check = dt_get_binary(sdt, npchk, "ebpf", 0, 0, &check_size);
 
-		if (select && check) {
+		if (check) {
 			dt_debug(dt, "skipping schema_node %s:\n", np->name);
 			continue;
 		}
 
+		dt_debug(dt, "preparing schema_node %s:\n", np->name);
 
-		ret = prepare_schema_node(dt, sdt, np, t_select, &idx);
-		if (ret)
-			dt_fatal(dt, "Failed to prepare selector %s\n",
-					np->name);
-
-		ret = prepare_schema_node(dt, sdt, np, t_check, &idx);
+		ret = prepare_schema_node(dt, sdt, np, &idx);
 		if (ret)
 			dt_fatal(dt, "Failed to prepare checker %s\n",
 					np->name);
+
 	}
 
 	return 0;
@@ -1296,7 +1294,7 @@ static int parse_constraint_ret(uint64_t vmret,
 		idx = -(ret + 1000);
 		*errtype = cet_property_constraint_failed;
 	} else {	 		/* node constraint */
-		idx = -(ret + 1000);
+		idx = -ret;
 		*errtype = cet_node_constraint_failed;
 	}
 	*errmsg = constraint_error_txt(*errtype);
@@ -1305,7 +1303,6 @@ static int parse_constraint_ret(uint64_t vmret,
 
 static void check_node_single(struct yaml_dt_state *dt,
 		       struct node *np, struct node *snp,
-		       struct ebpf_dt_ctx *select_ctx,
 		       struct ebpf_dt_ctx *check_ctx)
 {
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
@@ -1332,27 +1329,17 @@ static void check_node_single(struct yaml_dt_state *dt,
 		reset = RESET;
 	}
 
-	dt_debug(dt, "%s: against %s - running select\n",
-			dn_fullname(np, namebuf, sizeof(namebuf)),
-			snp->name ? : "/");
-
-	vmret = ebpf_exec(&select_ctx->vm, np, 0, &err);
-	if (err)
-		dt_fatal(dt, "exec failed with code %d (%s)\n",
-				err, strerror(-err));
-
-	if (vmret != 0)
-		goto cont;
-
-	dt_debug(dt, "select match at node %s against %s\n",
-		dn_fullname(np, namebuf, sizeof(namebuf)),
-		snp->name);
-
 	/* now running check */
 	vmret = ebpf_exec(&check_ctx->vm, np, 0, &err);
 	if (err)
 		dt_fatal(dt, "exec failed with code %d (%s)\n",
 				err, strerror(-err));
+
+	/* select errors means the node was not selected */
+	if ((long long)vmret < -SELECT_BASE)
+		goto cont;
+
+	/* success; node passes validation */
 	if (vmret == 0) {
 		dt_info(dt, "%s%s:%s %s%s%s %sOK%s\n",
 			marker, snp->name, reset,
@@ -1361,6 +1348,7 @@ static void check_node_single(struct yaml_dt_state *dt,
 		goto cont;
 	}
 
+	/* it's an error alright */
 	idx = parse_constraint_ret(vmret, &errtype, &errmsg);
 
 	dt_info(dt, "%s%s:%s %s%s%s %sFAIL (%lld)%s\n",
@@ -1452,7 +1440,7 @@ static void check_node_single(struct yaml_dt_state *dt,
 
 cont:
 	for_each_child_of_node(np, child)
-		check_node_single(dt, child, snp, select_ctx, check_ctx);
+		check_node_single(dt, child, snp, check_ctx);
 }
 
 int dtbchk_check(struct yaml_dt_state *dt)
@@ -1460,13 +1448,11 @@ int dtbchk_check(struct yaml_dt_state *dt)
 	struct dtb_check_state *dtbchk = to_dtbchk(dt);
 	struct yaml_dt_state *sdt = dtbchk->sdt;
 	struct node *snp, *sroot = tree_root(to_tree(sdt));
-	size_t check_size, select_size;
-	const char *check, *select;
-	struct ebpf_dt_ctx select_ctx;
+	size_t check_size;
+	const char *check;
 	struct ebpf_dt_ctx check_ctx;
-	struct ebpf_vm *select_vm;
 	struct ebpf_vm *check_vm;
-	struct node *npsel, *npchk;
+	struct node *npchk;
 	int ret;
 
 	if (!sroot)
@@ -1475,31 +1461,16 @@ int dtbchk_check(struct yaml_dt_state *dt)
 	/* check each rule in the root */
 	for_each_child_of_node(sroot, snp) {
 
-		npsel = node_get_child_by_name(to_tree(sdt), snp,
-				"selected-rule-output", 0);
-		select = dt_get_binary(sdt, npsel, "ebpf", 0, 0, &select_size);
-
 		npchk = node_get_child_by_name(to_tree(sdt), snp,
 				"check-rule-output", 0);
 		check = dt_get_binary(sdt, npchk, "ebpf", 0, 0, &check_size);
 
 		/* can't check this node */
-		if (!select || !check)
+		if (!check)
 			continue;
 
-		select_vm = &select_ctx.vm;
-		select_ctx.dt = dt;
 		check_ctx.dt = dt;
 		check_vm = &check_ctx.vm;
-
-		/* setup the select and check vms */
-		ret = ebpf_setup(select_vm, bpf_dt_cb, NULL, NULL, NULL);
-		if (ret)
-			dt_fatal(dt, "Failed to setup select vm ebpf\n");
-
-		ret = ebpf_load_elf(select_vm, select, select_size);
-		if (ret)
-			dt_fatal(dt, "Failed to load select vm ebpf\n");
 
 		ret = ebpf_setup(check_vm, bpf_dt_cb, NULL, NULL, NULL);
 		if (ret)
@@ -1510,10 +1481,10 @@ int dtbchk_check(struct yaml_dt_state *dt)
 			dt_fatal(dt, "Failed to load check vm ebpf\n");
 
 		check_node_single(dt, tree_root(to_tree(dt)), snp,
-				&select_ctx, &check_ctx);
+				&check_ctx);
 
-		ebpf_cleanup(select_vm);
 		ebpf_cleanup(check_vm);
+
 	}
 
 	return 0;

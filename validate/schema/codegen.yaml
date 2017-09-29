@@ -56,6 +56,13 @@ common:
     static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, uint64_t *flagsp) =
             (void *) 10;
 
+    #define SELECT_BASE  100000
+    #define ERROR_BASE     4000
+    #define BADTYPE_BASE   3000
+    #define EXISTS_BASE    2000
+    #define PROPC_BASE     1000
+    #define NODEC_BASE        0
+
   epilog: |
     /* ${NODE_NAME} ends */
 node:
@@ -90,10 +97,10 @@ property:
       if (!(
     epilog: |+
       ))
-          return -1000 - ${PROPERTY_INDEX};
+          return -PROPC_BASE - ${PROPERTY_INDEX};
     badtype-prolog: |+
       if (badtype)
-          return -3000 - ${PROPERTY_INDEX};
+          return -BADTYPE_BASE - ${PROPERTY_INDEX};
 
     badtype-epilog: |+
 
@@ -164,7 +171,7 @@ property:
       required:
         prolog: |+
           if (!exists)
-              return -2000 - ${PROPERTY_INDEX};
+              return -EXISTS_BASE - ${PROPERTY_INDEX};
 
         epilog: |+
 
