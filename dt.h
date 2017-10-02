@@ -125,7 +125,6 @@ struct yaml_dt_config {
 	bool debug;
 	int color;
 	bool save_temps;
-	bool sort;
 	bool force;
 	char * const *search_path;
 	bool warnings_are_errors;
@@ -134,6 +133,7 @@ struct yaml_dt_config {
 	bool object;
 
 	/* for dtb */
+	bool sort;
 	bool compatible;
 	bool symbols;
 	bool auto_alias;

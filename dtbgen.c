@@ -1816,6 +1816,82 @@ static int dts_emit(struct yaml_dt_state *dt)
 	return !ferror(dt->output) ? 0 : -1;
 }
 
+static int qsort_prop(const void *arg1, const void *arg2)
+{
+	const struct property * const *propp1 = arg1;
+	const struct property * const *propp2 = arg2;
+	const char *name1, *name2;
+
+	name1 = (*propp1)->name;
+	name2 = (*propp2)->name;
+	return strcmp(name1, name2);
+}
+
+static int qsort_node(const void *arg1, const void *arg2)
+{
+	const struct node * const *npp1 = arg1;
+	const struct node * const *npp2 = arg2;
+	const char *name1, *name2;
+
+	name1 = (*npp1)->name;
+	name2 = (*npp2)->name;
+	return strcmp(name1, name2);
+}
+
+static void dtb_sort_node(struct yaml_dt_state *dt, struct node *np)
+{
+	struct node *child, *childn;
+	struct node **childp;
+	struct property *prop, *propn;
+	struct property **propp;
+	int i, count;
+
+	/* sort proprerties */
+	count = 0;
+	for_each_property_of_node(np, prop)
+		count++;
+	if (count > 0) {
+		propp = alloca(sizeof(*propp) * count);
+		i = 0;
+		for_each_property_of_node_safe(np, prop, propn) {
+			list_del(&prop->node);
+			propp[i++] = prop;
+		}
+		qsort(propp, count, sizeof(*propp), qsort_prop);
+		for (i = 0; i < count; i++) {
+			prop = propp[i];
+			list_add_tail(&prop->node, &np->properties);
+		}
+	}
+
+	/* sort children */
+	count = 0;
+	for_each_child_of_node(np, child)
+		count++;
+	if (count > 0) {
+		childp = alloca(sizeof(*childp) * count);
+		i = 0;
+		for_each_child_of_node_safe(np, child, childn) {
+			list_del(&child->node);
+			childp[i++] = child;
+		}
+		qsort(childp, count, sizeof(*childp), qsort_node);
+		for (i = 0; i < count; i++) {
+			child = childp[i];
+			list_add_tail(&child->node, &np->children);
+		}
+	}
+
+	for_each_child_of_node(np, child)
+		dtb_sort_node(dt, child);
+}
+
+static void dtb_sort(struct yaml_dt_state *dt)
+{
+	if (tree_root(to_tree(dt)))
+		dtb_sort_node(dt, tree_root(to_tree(dt)));
+}
+
 int dtb_emit(struct yaml_dt_state *dt)
 {
 	struct dtb_emit_state *dtb = to_dtb(dt);
@@ -1839,8 +1915,11 @@ int dtb_emit(struct yaml_dt_state *dt)
 	dtb_resolve_phandle_refs(dt);
 
 	/* we can output the DTS here (we don't want the extra nodes) */
-	if (!strcmp(dt->cfg.output_format, "dts"))
+	if (!strcmp(dt->cfg.output_format, "dts")) {
+		if (dt->cfg.sort)
+			dtb_sort(dt);
 		return dts_emit(dt);
+	}
 
 	dtb_append_auto_properties(dt);
 
@@ -1851,6 +1930,9 @@ int dtb_emit(struct yaml_dt_state *dt)
 		dtb_add_fixups(dt);
 		dtb_add_local_fixups(dt);
 	}
+
+	if (dt->cfg.sort)
+		dtb_sort(dt);
 
 	if (dt->cfg.debug)
 		dtb_dump(dt);

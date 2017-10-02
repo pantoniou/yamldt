@@ -119,6 +119,7 @@ static void help(void)
 "\n"
 "   -V, --out-version=X   DTB blob version to produce (only 17 supported)\n"
 "   -C, --compatible      Bit-exact DTC compatibility mode\n"
+"   -s, --sort            Sort properties and nodes\n"
 "   -@, --symbols         Generate symbols node\n"
 "   -A, --auto-alias      Generate aliases for all labels\n"
 "   -R, --reserve=X       Make space for X reserve map entries\n"
@@ -415,9 +416,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Illegal phandle format %s\n", cfg->phandle_format);
 		return EXIT_FAILURE;
 	}
-
-	if (cfg->sort)
-		fprintf(stderr, "sort not yet implemented\n");
 
 	selected_checker = &null_checker;
 	/* when selecting a dtb schema, we use the dtb checker */
