@@ -531,6 +531,34 @@ err_out:
 	return (uint64_t)(intptr_t)intp;
 }
 
+static uint64_t bpf_get_depth(uint64_t arg0, uint64_t arg1,
+			       uint64_t arg2, uint64_t arg3,
+			       uint64_t arg4, struct ebpf_ctx *ctx)
+{
+	const struct ebpf_vm *vm = ctx->vm;
+	struct yaml_dt_state *dt = ctx_to_dt(vm_to_ctx(vm));
+	struct node *np = get_and_verify_node(dt, tree_root(to_tree(dt)), arg0);
+	struct node *npt;
+	char namebuf[NODE_FULLNAME_MAX];
+	int depth;
+
+	if (!np)
+		return ctx->errcode = -EINVAL;
+
+	depth = 0;
+	npt = np;
+	while (npt->parent) {
+		npt = npt->parent;
+		depth++;
+	}
+
+	ebpf_debug(vm, "%s %s=%d\n", __func__,
+		dn_fullname(np, namebuf, sizeof(namebuf)),
+		depth);
+
+	return (uint64_t)depth;
+}
+
 const struct ebpf_callback bpf_dt_cb[] = {
 	[0] = {
 		.name = "unresolved",
@@ -575,6 +603,10 @@ const struct ebpf_callback bpf_dt_cb[] = {
 	[10] = {
 		.name = "get_intseq",
 		.func = bpf_get_intseq,
+	},
+	[11] = {
+		.name = "get_depth",
+		.func = bpf_get_depth,
 	},
 	{ NULL, NULL }
 };
