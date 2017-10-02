@@ -641,6 +641,15 @@ static int d2y_emit(struct dts_state *ds, int depth,
 			return ret;
 		break;
 
+	case det_incbin:
+		if (data->incbin.property->atom != dea_name ||
+		    data->incbin.filename->atom != dea_string) {
+			dts_error(ds, "bad incbin atom\n");
+			return -1;
+		}
+		fprintf(stderr, "include bin directive not yet implemented\n");
+		break;
+
 	case det_memreserve:
 		fprintf(d2y->outfp, "/memreserve/: [ %s, %s ]\n",
 			data->memreserves[0]->contents,

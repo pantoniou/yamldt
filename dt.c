@@ -840,7 +840,7 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 	struct ref *ref;
 	struct label *l;
 	bool found_existing;
-	const char *name, *label;
+	const char *name, *label, *filename;
 	char *nname, *strunesc;
 	const struct dts_property_item *pi;
 	const struct dts_emit_item *ei;
@@ -850,6 +850,15 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 	const char *refdata;
 	int reflen;
 	char bytebuf[4 + 1];	/* 0xFF */
+	void *incbin_data;
+	size_t incbin_offset, incbin_size, nread;
+	void *b64_output;
+	size_t b64_output_size;
+	char * const *pathv;
+	char *tmpfile;
+	int flen, plen, ret;
+	struct stat st;
+	FILE *fp;
 
 	switch (type) {
 	case det_separator:
@@ -968,6 +977,146 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 		dt->curr_span->m.end = span->m.start;
 
 		dt->curr_span = span;
+
+		break;
+
+	case det_incbin:
+		if (data->incbin.property->atom != dea_name ||
+		    data->incbin.filename->atom != dea_string) {
+			dts_error(ds, "bad incbin atom\n");
+			return -1;
+		}
+
+		np = dt->current_np;
+		if (!np)
+			dt_fatal(dt, "incbin without node\n");
+
+		name = data->incbin.property->contents;
+		filename = data->incbin.filename->contents;
+		dts_loc_to_yaml_mark(&data->incbin.filename->loc, &m);
+
+		fp = fopen(filename, "rb");
+		if (!fp && (pathv = dt->cfg.search_path) != NULL) {
+			flen = strlen(filename);
+			while (*pathv) {
+				plen = strlen(*pathv);
+				while (plen > 1 && (*pathv)[plen - 1] == '/')
+					plen--;
+				tmpfile = malloc(plen + 1 + flen + 1);
+				assert(tmpfile);
+				memcpy(tmpfile, *pathv, plen);
+				tmpfile[plen] = '/';
+				strcpy(tmpfile + plen + 1, filename);
+				fp = fopen(tmpfile, "rb");
+				free(tmpfile);
+				if (fp)
+					break;
+				pathv++;
+			}
+		}
+		if (!fp) {
+			dts_loc_to_yaml_mark(&data->incbin.filename->loc,
+					&m);
+			dt_error_at(dt, &m, "unable to open file\n");
+			break;
+		}
+
+		found_existing = false;
+		for_each_property_of_node_withdel(np, prop) {
+			if (!strcmp(prop->name, name)) {
+				found_existing = true;
+				/* bring it back to life */
+				if (prop->deleted) {
+					prop->deleted = false;
+					prop->is_delete = false;
+				}
+				break;
+			}
+		}
+		if (!found_existing)
+			prop = NULL;
+
+		if (!prop)
+			prop = prop_alloc(to_tree(dt), name);
+		else
+			prop_ref_clear(to_tree(dt), prop);
+		assert(prop);
+
+		dts_loc_to_yaml_mark(&data->incbin.property->loc,
+				     &to_dt_property(prop)->m);
+
+		dt_debug(dt, "%s incbin property %s at %s\n",
+			found_existing ? "existing" : "new",
+			prop->name[0] ? prop->name : "-",
+			np ? dn_fullname(np, namebuf, sizeof(namebuf)) : "<NULL>");
+
+		incbin_data = NULL;
+
+		if (data->incbin.offset && data->incbin.size) {
+			incbin_offset = strtoul(data->incbin.offset->contents, NULL, 0);
+			incbin_size = strtoul(data->incbin.size->contents, NULL, 0);
+
+			if (incbin_offset) {
+				ret = fseek(fp, incbin_offset, SEEK_SET);
+				if (ret == -1) {
+					dt_error_at(dt, &m, "unable to seek to %zu\n",
+							incbin_offset);
+					fclose(fp);
+					break;
+				}
+			}
+
+		} else {
+			incbin_offset = 0;
+			/* get the file size if we can */
+			incbin_size = 0;
+			if (fstat(fileno(fp), &st) != -1 && S_ISREG(st.st_mode))
+				incbin_size = st.st_size;
+			else {
+				dt_error_at(dt, &m, "can't include; not a regular file\n");
+				fclose(fp);
+				break;
+			}
+		}
+
+		incbin_data = malloc(incbin_size);
+		assert(incbin_data);
+		nread = fread(incbin_data, 1, incbin_size, fp);
+		fclose(fp);
+
+		if (nread != incbin_size) {
+			free(incbin_data);
+			dt_error_at(dt, &m, "unable to read %zu bytes (read %zu)\n",
+					incbin_size, nread);
+			break;
+		}
+
+		b64_output = base64_encode(incbin_data, incbin_size,
+						&b64_output_size);
+		free(incbin_data);
+
+		if (!b64_output) {
+			dt_error_at(dt, &m, "unable to convert %zu bytes to base64\n",
+					incbin_size);
+			break;
+		}
+
+		ref = ref_alloc(to_tree(dt), r_scalar,
+				b64_output, b64_output_size,
+				"!base64");
+		free(b64_output);
+
+		ref->prop = prop;
+		list_add_tail(&ref->node, &prop->refs);
+
+		/* the ref mark is the name of the filename */
+		dts_loc_to_yaml_mark(&data->incbin.filename->loc,
+				     &to_dt_ref(ref)->m);
+
+		if (!found_existing) {
+			prop->np = np;
+			list_add_tail(&prop->node, &np->properties);
+		}
 
 		break;
 

@@ -93,7 +93,8 @@ static inline bool state_with_comments(enum file_state fs)
 	       fs != s_string && fs != s_item_char &&
 	       fs != s_in_c_comment && fs != s_in_cpp_comment &&
 	       fs != s_include_arg &&
-	       fs != s_backslash && fs != s_backslash_space;
+	       fs != s_backslash && fs != s_backslash_space &&
+	       fs != s_incbin_file;
 }
 
 static inline bool state_with_preproc(enum file_state fs)
@@ -152,6 +153,14 @@ static const char *states_txt[] = {
 	[s_prop_del_name]		= "prop_del_name",
 	[s_prop_macro]			= "prop_macro",
 	[s_prop_macro_args]		= "prop_macro_args",
+	[s_incbin]			= "incbin",
+	[s_incbin_arg]			= "incbin_arg",
+	[s_incbin_file]			= "incbin_file",
+	[s_incbin_file_comma]		= "incbin_file_comma",
+	[s_incbin_offset]		= "incbin_offset",
+	[s_incbin_offset_comma]		= "incbin_offset_comma",
+	[s_incbin_size]			= "incbin_size",
+	[s_incbin_end]			= "incbin_end",
 };
 
 struct dts_emit_list_item {
@@ -540,7 +549,6 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 	INIT_LIST_HEAD(&pi_list);
 
 	switch (type) {
-	case det_incbin:
 	case det_plugin:
 		/* TODO */
 		reset_item_list(ds);
@@ -656,6 +664,27 @@ static int dts_emit(struct dts_state *ds, enum dts_emit_type type)
 			}
 		}
 
+		break;
+
+	case det_incbin:
+		d.incbin.property = NULL;
+		d.incbin.filename = NULL;
+		d.incbin.offset = NULL;
+		d.incbin.size = NULL;
+		list_for_each_entry(li, &ds->items, node) {
+			if (li->item.atom == dea_name) {
+				d.incbin.property = &li->item;
+			} else if (li->item.atom == dea_string) {
+				d.incbin.filename = &li->item;
+			} else if (li->item.atom == dea_int) {
+				if (!d.incbin.offset)
+					d.incbin.offset = &li->item;
+				else if (!d.incbin.size)
+					d.incbin.size = &li->item;
+			}
+		}
+		assert(d.incbin.property);
+		assert(d.incbin.filename);
 		break;
 
 	case det_property:
@@ -1486,12 +1515,16 @@ static int slash_directive(struct dts_state *ds, char c)
 		ret = -1;
 		break;
 	case s_property:
-		if (strcmp(buf, "/bits/")) {
-			dts_error(ds, "Expected /bits/ got %s\n", buf);
-			ret = -1;
+		if (!strcmp(buf, "/bits/")) {
+			goto_state(ds, s_property_bits);
 			break;
 		}
-		goto_state(ds, s_property_bits);
+		if (!strcmp(buf, "/incbin/")) {
+			goto_state(ds, s_incbin);
+			break;
+		}
+		dts_error(ds, "Illegal %s property directive\n", buf);
+		ret = -1;
 		break;
 	case s_nodes_and_properties:
 		if (!strcmp(buf, "/delete-property/")) {
@@ -2187,6 +2220,169 @@ static int prop_macro_args(struct dts_state *ds, char c)
 	return 0;
 }
 
+static int incbin(struct dts_state *ds, char c)
+{
+	if (isspace(c))
+		return 0;
+	if (c != '(') {
+		dts_error(ds, "Expecting ( got %s\n", c);
+		return -1;
+	}
+	goto_state(ds, s_incbin_arg);
+	return 0;
+}
+
+static int incbin_arg(struct dts_state *ds, char c)
+{
+	if (isspace(c))
+		return 0;
+	if (c == '"') {
+		reset_accumulator(ds);
+		goto_state(ds, s_incbin_file);
+		return 0;
+	}
+	dts_error(ds, "Expecting \" got %s\n", c);
+	return -1;
+}
+
+static int incbin_file(struct dts_state *ds, char c)
+{
+	struct dts_emit_list_item *li;
+	const char *buf;
+	int len;
+
+	buf = get_accumulator(ds);
+	len = get_accumulator_size(ds);
+	switch (is_string_or_char_done(buf, len, c, '"')) {
+	case -1:
+		dts_error(ds, "bad string \"%s%c\"\n", buf, c);
+		return -1;
+	case 0:
+		accumulate(ds, c);
+		break;
+	case 1:
+		dts_debug(ds, "incbin file \"%s\"\n", buf);
+		li = item_from_accumulator(ds, dea_string);
+		if (!li)
+			return -1;
+		reset_accumulator(ds);
+		goto_state(ds, s_incbin_file_comma);
+		break;
+	}
+
+	return 0;
+}
+
+static int incbin_file_comma(struct dts_state *ds, char c)
+{
+	if (isspace(c))
+		return 0;
+	if (c == ',') {
+		goto_state(ds, s_incbin_offset);
+		return 0;
+	}
+	if (c == ')') {
+		dts_emit(ds, det_incbin);
+		goto_state(ds, s_semicolon);
+		return 0;
+	}
+	dts_error(ds, "expecting either , or ) got %s\n", c);
+	return -1;
+}
+
+static int incbin_offset(struct dts_state *ds, char c)
+{
+	const char *buf;
+	struct dts_emit_list_item *li;
+
+	if (isspace(c) || c == ',') {
+		if (!get_accumulator_size(ds)) {
+			if (c == ',') {
+				dts_error(ds, "missing offset\n");
+				return -1;
+			}
+			return 0;
+		}
+		buf = get_accumulator(ds);
+		li = item_from_accumulator(ds, dea_int);
+		if (!li)
+			return -1;
+		dts_debug(ds, "incbin offset %s\n", buf);
+		reset_accumulator(ds);
+		goto_state(ds, c == ',' ? s_incbin_size :
+				s_incbin_offset_comma);
+		return 0;
+	}
+
+	if (isxdigit(c) || ((c == 'x' || c == 'X') &&
+			    !strcmp(get_accumulator(ds), "0"))) {
+		accumulate(ds, c);
+		return 0;
+	}
+
+	dts_error(ds, "bad incbin offset char '%c'\n", c);
+	return -1;
+}
+
+static int incbin_offset_comma(struct dts_state *ds, char c)
+{
+	if (isspace(c))
+		return 0;
+	if (c == ',') {
+		goto_state(ds, s_incbin_size);
+		return 0;
+	}
+	dts_error(ds, "expecting , got %s\n", c);
+	return -1;
+}
+
+static int incbin_size(struct dts_state *ds, char c)
+{
+	const char *buf;
+	struct dts_emit_list_item *li;
+
+	if (isspace(c) || c == ')') {
+		if (!get_accumulator_size(ds)) {
+			if (c == ')') {
+				dts_error(ds, "missing size\n");
+				return -1;
+			}
+			return 0;
+		}
+		buf = get_accumulator(ds);
+		li = item_from_accumulator(ds, dea_int);
+		if (!li)
+			return -1;
+		dts_debug(ds, "incbin size %s\n", buf);
+		reset_accumulator(ds);
+		dts_emit(ds, det_incbin);
+		goto_state(ds, c == ')' ? s_semicolon :
+				s_incbin_end);
+		return 0;
+	}
+
+	if (isxdigit(c) || ((c == 'x' || c == 'X') &&
+			    !strcmp(get_accumulator(ds), "0"))) {
+		accumulate(ds, c);
+		return 0;
+	}
+
+	dts_error(ds, "bad incbin size char '%c'\n", c);
+	return -1;
+}
+
+static int incbin_end(struct dts_state *ds, char c)
+{
+	if (isspace(c))
+		return 0;
+	if (c == ')') {
+		goto_state(ds, s_semicolon);
+		return 0;
+	}
+	dts_error(ds, "expecting ) goto '%c'\n", c);
+	return -1;
+}
+
 static int (*states[])(struct dts_state *ds, char c) = {
 	[s_start] 			= start,
 	[s_headers]			= headers,
@@ -2228,6 +2424,14 @@ static int (*states[])(struct dts_state *ds, char c) = {
 	[s_prop_del_name]		= prop_del_name,
 	[s_prop_macro]			= prop_macro,
 	[s_prop_macro_args]		= prop_macro_args,
+	[s_incbin]			= incbin,
+	[s_incbin_arg]			= incbin_arg,
+	[s_incbin_file]			= incbin_file,
+	[s_incbin_file_comma]		= incbin_file_comma,
+	[s_incbin_offset]		= incbin_offset,
+	[s_incbin_offset_comma]		= incbin_offset_comma,
+	[s_incbin_size]			= incbin_size,
+	[s_incbin_end]			= incbin_end,
 	NULL
 };
 

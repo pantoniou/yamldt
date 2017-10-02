@@ -78,9 +78,17 @@ enum file_state {
 	s_prop_del_name,
 	s_prop_macro,
 	s_prop_macro_args,
+	s_incbin,
+	s_incbin_arg,
+	s_incbin_file,
+	s_incbin_file_comma,
+	s_incbin_offset,
+	s_incbin_offset_comma,
+	s_incbin_size,
+	s_incbin_end,
 
 	s_first = s_start,
-	s_last = s_prop_macro_args,
+	s_last = s_incbin_end,
 };
 
 enum dts_message_type {
@@ -190,6 +198,12 @@ struct dts_emit_data {
 			int nr_items;
 			const struct dts_property_item **items;
 		} pn;	/* prop node */
+		struct {
+			const struct dts_emit_item *property;
+			const struct dts_emit_item *filename;
+			const struct dts_emit_item *offset;
+			const struct dts_emit_item *size;
+		} incbin;
 	};
 };
 

@@ -401,6 +401,10 @@ static void ref_resolve(struct yaml_dt_state *dt, struct ref *ref)
 			val32 = cpu_to_fdt32((uint32_t)to_dt_ref(ref)->val);
 			data = &val32;
 			size = sizeof(val32);
+		} else if (!strcmp(tag, "!base64")) {
+			data = to_dt_ref(ref)->binary;
+			size = to_dt_ref(ref)->binary_size;
+			assert(data);
 		} else {
 			tree_error_at_ref(to_tree(dt), ref,
 				"Unsupported tag %s: %s\n", tag,
@@ -1563,6 +1567,8 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 	bool output_name = false;
 	bool found_true_bool = false;
 	char *pfx;
+	const void *bin;
+	size_t bin_size;
 
 	/* no data, don't print */
 	if (list_empty(&prop->refs))
@@ -1652,6 +1658,8 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			fputc('<', fp);
 		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
 			fputc('[', fp);
+		else if (!strcmp(stag, "!base64"))
+			fputc('[', fp);
 
 		i = 0;
 		reft = list_entry(ref->node.prev, struct ref, node);
@@ -1677,7 +1685,12 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 			if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
 				fprintf(fp, "%02x", to_dt_ref(reft)->is_int ?
 					    (unsigned int)to_dt_ref(reft)->val & 0xff : 0);
-			else
+			else if (!strcmp(stag, "!base64")) {
+				bin = dt_ref_binary(dt, ref, &bin_size);
+				assert(bin);
+				for (i = 0; i < bin_size; i++)
+					fprintf(fp, "%02x", *((uint8_t *)bin + i));
+			} else
 				fwrite(reft->data, reft->len, 1, fp);
 
 			if (!strcmp(stag, "!char"))
@@ -1703,6 +1716,8 @@ static void dts_emit_prop(struct yaml_dt_state *dt, struct property *prop, int d
 		    !strcmp(stag, "!char"))
 			fputc('>', fp);
 		else if (!strcmp(stag, "!int8") || !strcmp(stag, "!uint8"))
+			fputc(']', fp);
+		else if (!strcmp(stag, "!base64"))
 			fputc(']', fp);
 
               skip:
