@@ -91,6 +91,7 @@ static struct option opts[] = {
 	{ "force",		no_argument,       0, 'f' },
 	{ "include",		required_argument, 0, 'i' },
 	{ "boot-cpu",		required_argument, 0, 'b' },
+	{ "warnings-are-errors",no_argument,	   0,  0  },
 	{ "help",	 	no_argument, 	   0, 'h' },
 	{ "version",     	no_argument,       0, 'v' },
 	{0, 0, 0, 0}
@@ -112,6 +113,7 @@ static void help(void)
 "       --schema-save     Save schema to given file\n"
 "       --color           [auto|off|on]\n"
 "       --debug           Debug messages\n"
+"       --warnings-are-errors Treat warnings as errors\n"
 "\n"
 "   DTB specific options\n"
 "\n"
@@ -206,6 +208,10 @@ int main(int argc, char *argv[])
 			}
 			if (!strcmp(s, "schema")) {
 				cfg->schema = optarg;
+				continue;
+			}
+			if (!strcmp(s, "warnings-are-errors")) {
+				cfg->warnings_are_errors = true;
 				continue;
 			}
 		}

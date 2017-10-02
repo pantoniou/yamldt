@@ -2914,6 +2914,11 @@ static void dt_print_at_msg(struct yaml_dt_state *dt,
 	const char *emph = "", *kind = "", *marker = "", *reset = "";
 	int ret;
 
+	if (!dt->error_flag)
+		dt->error_flag = !strcmp(type, "error") ||
+		         (dt->cfg.warnings_are_errors &&
+			  !strcmp(type, "warning"));
+
 	/* handle quiet */
 	if (dt->cfg.quiet >= 3 ||
 	    (dt->cfg.quiet >= 2 && !strcmp(type, "error")) ||
@@ -3020,7 +3025,6 @@ void dt_error_at(struct yaml_dt_state *dt,
 		str[--len] = '\0';
 
 	dt_print_at_msg(dt, m, "error", str);
-	dt->error_flag = true;
 }
 
 void dt_debug(struct yaml_dt_state *dt, const char *fmt, ...)
@@ -3051,12 +3055,32 @@ void dt_error(struct yaml_dt_state *dt, const char *fmt, ...)
 {
 	va_list ap;
 
+	if (!dt->error_flag)
+		dt->error_flag = true;
+
 	if (dt->cfg.quiet >= 2)
 		return;
 
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
+}
+
+void dt_warning(struct yaml_dt_state *dt, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!dt->error_flag && dt->cfg.warnings_are_errors)
+		dt->error_flag = true;
+
+	if (dt->cfg.quiet >= 1)
+		return;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+
+	dt->error_flag = true;
 }
 
 int dt_resolve_ref(struct yaml_dt_state *dt, struct ref *ref)

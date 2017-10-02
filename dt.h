@@ -128,6 +128,7 @@ struct yaml_dt_config {
 	bool sort;
 	bool force;
 	char * const *search_path;
+	bool warnings_are_errors;
 
 	/* for dtb & yaml */
 	bool object;
@@ -303,6 +304,9 @@ void dt_info(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
 
 void dt_error(struct yaml_dt_state  *dt, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 2, 0)));
+
+void dt_warning(struct yaml_dt_state  *dt, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
 
 void dt_exit_failure(struct yaml_dt_state *dt)
