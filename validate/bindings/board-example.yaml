@@ -1,0 +1,50 @@
+%YAML 1.1
+---
+board-example: &board-example
+  version: 1
+
+  title: A board example using compatible and model properties
+
+  maintainer:
+    name: Skeleton Person <skel@kernel.org>
+
+  class: board
+
+  # this binding is selected when the compatible property constraint matches
+  selected: "compatible"
+
+  description: >
+    A board binding example. Matches on a top-level compatible string and model.
+
+  properties:
+
+    compatible:
+      category: required
+      type: strseq
+      description: |
+        Compatible strings for the board example.
+        The depth of the node must be zero, i.e. root.
+
+      constraint: |
+        get_depth(np) == 0 && ( 
+        anystreq(v, "example,evm") ||
+        anystreq(v, "example,evm2") ||
+        anystreq(v, "example,base"))
+
+    model:
+      category: required
+      type: str
+      description: models that this board family supports
+      constraint: |
+        streq(v, "Example EVM") ||
+        streq(v, "Example EVM2")
+
+  example:
+    dts: |
+      / {
+          compatible = "example,evm", "example,base";
+          model = "Example EVM";
+      };
+    yaml: |
+      compatible: [ "example,evm", "example,base" ] ;
+      model: "Example EVM";

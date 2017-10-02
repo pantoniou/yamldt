@@ -1,0 +1,6 @@
+/dts-v1/;
+
+/ {
+	compatible = "example,evm", "example,base";
+	model = "Example EVM";
+};
