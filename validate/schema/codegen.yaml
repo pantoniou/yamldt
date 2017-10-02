@@ -56,6 +56,9 @@ common:
     static const int64_t *(*get_intseq)(struct node *np, const char *name, int64_t *countp, uint64_t *flagsp) =
             (void *) 10;
 
+    static const int64_t (*get_depth)(struct node *np) =
+            (void *) 11;
+
     #define SELECT_BASE  100000
     #define ERROR_BASE     4000
     #define BADTYPE_BASE   3000
