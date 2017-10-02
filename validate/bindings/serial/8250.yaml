@@ -1,0 +1,146 @@
+%YAML 1.1
+---
+uart8250:
+  version: 1
+
+  title: >
+    UART (Universal Asynchronous Receiver/Transmitter)
+
+  maintainer:
+    name: Unknown
+
+  inherits: *device-compatible
+
+  note: >
+    * fsl,ns16550:
+    ------------
+    Freescale DUART is very similar to the PC16552D (and to a
+    pair of NS16550A), albeit with some nonstandard behavior such as
+    erratum A-004737 (relating to incorrect BRK handling).
+
+    Represents a single port that is compatible with the DUART found
+    on many Freescale chips (examples include mpc8349, mpc8548,
+    mpc8641d, p4080 and ls2085a).
+
+  properties:
+    reg:
+      category: required
+      type: int
+      description: offset and length of the register set for the device
+
+    compatible:
+      category: required
+      type: strseq
+      description: >
+        A list of supported compatible list follows
+      constraint: |
+        anystreq(v,               "ns8250") ||
+        anystreq(v,              "ns16450") ||
+        anystreq(v,             "ns16550a") ||
+        anystreq(v,              "ns16550") ||
+        anystreq(v,              "ns16750") ||
+        anystreq(v,              "ns16850") ||
+        anystreq(v,  "nvidia,tegra20-uart") ||
+        anystreq(v,  "nvidia,tegra30-uart") ||
+        anystreq(v, "nvidia,tegra114-uart") ||
+        anystreq(v, "nvidia,tegra124-uart") ||
+        anystreq(v, "nvidia,tegra132-uart") ||
+        anystreq(v, "nvidia,tegra210-uart") ||
+        anystreq(v,     "nxp,lpc3220-uart") ||
+        anystreq(v,   "ralink,rt2880-uart") ||
+        anystreq(v,    "altr,16550-FIFO32") ||
+        anystreq(v,    "altr,16550-FIFO64") ||
+        anystreq(v,   "altr,16550-FIFO128") ||
+        anystreq(v,     "fsl,16550-FIFO64") ||
+        anystreq(v,          "fsl,ns16550") ||
+        anystreq(v,        "ti,da830-uart") ||
+        anystreq(v, "aspeed,ast2400-vuart") ||
+        anystreq(v, "aspeed,ast2500-vuart") ||
+        anystreq(v,               "serial")
+
+    interrupts:
+      category: required
+      type: int
+      description: should contain uart interrupt.
+
+    clock-frequency:
+      category: optional
+      type: int
+      description: the input clock frequency for the UART
+
+#    clocks:
+#      category: optional
+#      type: *clk
+#      description: clocks phandle to refer to the clk used
+
+    current-speed:
+      category: optional
+      type: int
+      description: the current active speed of the UART.
+
+    reg-offset:
+      category: optional
+      type: int
+      description: offset to apply to the mapbase from the start of the registers.
+
+    reg-shift:
+      category: optional
+      type: int
+      description: quantity to shift the register offsets by.
+
+    reg-io-width:
+      category: optional
+      type: int
+      description: |
+        the size (in bytes) of the IO accesses that should be
+        performed on the device.  There are some systems that require 32-bit
+        accesses to the UART (e.g. TI davinci).
+
+    used-by-rtas:
+      category: optional
+      type: bool
+      description: |
+        set to indicate that the port is in use by the OpenFirmware
+        RTAS and should not be registered.
+
+    no-loopback-test:
+      category: optional
+      type: bool
+      description: |
+        set to indicate that the port does not implements loopback test mode
+
+    fifo-size:
+      category: optional
+      type: int
+      description: the fifo size of the UART.
+
+    auto-flow-control:
+      category: optional
+      type: bool
+      description: |
+        one way to enable automatic flow control support.
+        The driver is allowed to detect support for the capability even
+        without this property. Set to indicate that the port does not
+        implements loopback test mode
+
+    tx-threshold:
+      category: optional
+      type: int
+      description: |
+        Specify the TX FIFO low water indication for parts with programmable
+        TX FIFO thresholds.
+
+#    resets:
+#      category: optional
+#      type: *reset
+#      description: phandle + reset specifier pairs
+
+  example:
+    dts: |
+      uart@80230000 {
+        compatible = "ns8250";
+        reg = <0x80230000 0x100>;
+        clock-frequency = <3686400>;
+        interrupts = <10>;
+        reg-shift = <2>;
+      };
