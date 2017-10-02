@@ -351,18 +351,19 @@ void yaml_dt_node_free(struct tree *t, struct node *np);
 
 void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 		__attribute__ ((__format__ (__printf__, 2, 0)));
-void yaml_dt_tree_error_at_node(struct tree *t, struct node *np,
-		const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 3, 0)));
-void yaml_dt_tree_error_at_property(struct tree *t, struct property *prop,
-		const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 3, 0)));
-void yaml_dt_tree_error_at_ref(struct tree *t, struct ref *ref,
-		const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 3, 0)));
-void yaml_dt_tree_error_at_label(struct tree *t, struct label *l,
-		const char *fmt, ...)
-		__attribute__ ((__format__ (__printf__, 3, 0)));
+
+void yaml_dt_tree_msg_at_node(struct tree *t, struct node *np,
+			      const char *type, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 4, 0)));
+void yaml_dt_tree_msg_at_property(struct tree *t, struct property *prop,
+				  const char *type, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 4, 0)));
+void yaml_dt_tree_msg_at_ref(struct tree *t, struct ref *ref,
+			     const char *type, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 4, 0)));
+void yaml_dt_tree_msg_at_label(struct tree *t, struct label *l,
+			       const char *type, const char *fmt, ...)
+		__attribute__ ((__format__ (__printf__, 4, 0)));
 
 int dt_setup(struct yaml_dt_state *dt, struct yaml_dt_config *cfg, 
 	     struct yaml_dt_emitter *emitter, struct yaml_dt_checker *checker);

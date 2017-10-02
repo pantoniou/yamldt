@@ -421,88 +421,71 @@ void yaml_dt_tree_debugf(struct tree *t, const char *fmt, ...)
 	va_end(ap);
 }
 
-void yaml_dt_tree_error_at_node(struct tree *t, struct node *np,
-				const char *fmt, ...)
+static void yaml_dt_msg_at_internal(struct yaml_dt_state *dt,
+				    const struct dt_yaml_mark *m,
+				    const char *type, const char *fmt,
+				    va_list ap)
 {
-	va_list ap;
-	char str[1024];
+	char *str;
 	int len;
 
-	va_start(ap, fmt);
-	vsnprintf(str, sizeof(str) - 1, fmt, ap);
-	va_end(ap);
-	str[sizeof(str) - 1] = '\0';
-
-	len = strlen(str);
+	len = vasprintf(&str, fmt, ap);
+	if (len == -1)
+		dt_fatal(dt, "Out of memory");
 	while (len > 1 && str[len - 1] == '\n')
 		str[--len] = '\0';
 
-	dt_print_at_msg(to_dt(t), &to_dt_node(np)->m, "error", str);
-	to_dt(t)->error_flag = true;
+	dt_print_at_msg(dt, m, type, str);
+
+	free(str);
 }
 
-void yaml_dt_tree_error_at_property(struct tree *t,
-				    struct property *prop, const char *fmt, ...)
+void yaml_dt_tree_msg_at_node(struct tree *t, struct node *np,
+			      const char *type, const char *fmt, ...)
 {
 	va_list ap;
-	char str[1024];
-	int len;
 
 	va_start(ap, fmt);
-	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	yaml_dt_msg_at_internal(to_dt(t), &to_dt_node(np)->m,
+				type, fmt, ap);
 	va_end(ap);
-	str[sizeof(str) - 1] = '\0';
-
-	len = strlen(str);
-	while (len > 1 && str[len - 1] == '\n')
-		str[--len] = '\0';
-
-	dt_print_at_msg(to_dt(t), &to_dt_property(prop)->m, "error", str);
-	to_dt(t)->error_flag = true;
 }
 
-void yaml_dt_tree_error_at_ref(struct tree *t,
-			       struct ref *ref, const char *fmt, ...)
+void yaml_dt_tree_msg_at_property(struct tree *t, struct property *prop,
+				  const char *type, const char *fmt, ...)
 {
 	va_list ap;
-	char str[1024];
-	int len;
 
 	va_start(ap, fmt);
-	vsnprintf(str, sizeof(str) - 1, fmt, ap);
+	yaml_dt_msg_at_internal(to_dt(t), &to_dt_property(prop)->m,
+				type, fmt, ap);
 	va_end(ap);
-	str[sizeof(str) - 1] = '\0';
-
-	len = strlen(str);
-	while (len > 1 && str[len - 1] == '\n')
-		str[--len] = '\0';
-
-	dt_print_at_msg(to_dt(t), &to_dt_ref(ref)->m, "error", str);
-	to_dt(t)->error_flag = true;
 }
 
-void yaml_dt_tree_error_at_label(struct tree *t,
-			         struct label *l, const char *fmt, ...)
+void yaml_dt_tree_msg_at_ref(struct tree *t, struct ref *ref,
+			     const char *type, const char *fmt, ...)
 {
 	va_list ap;
-	char str[1024];
-	int len;
+
+	va_start(ap, fmt);
+	yaml_dt_msg_at_internal(to_dt(t), &to_dt_ref(ref)->m,
+				type, fmt, ap);
+	va_end(ap);
+}
+
+void yaml_dt_tree_msg_at_label(struct tree *t, struct label *l,
+			       const char *type, const char *fmt, ...)
+{
 	const struct dt_yaml_mark *m;
-
-	va_start(ap, fmt);
-	vsnprintf(str, sizeof(str) - 1, fmt, ap);
-	va_end(ap);
-	str[sizeof(str) - 1] = '\0';
-
-	len = strlen(str);
-	while (len > 1 && str[len - 1] == '\n')
-		str[--len] = '\0';
+	va_list ap;
 
 	m = &to_dt_label(l)->m;
 	if (dt_mark_is_unset(m))
 		m = &to_dt_node(l->np)->m;
-	dt_print_at_msg(to_dt(t), m, "error", str);
-	to_dt(t)->error_flag = true;
+
+	va_start(ap, fmt);
+	yaml_dt_msg_at_internal(to_dt(t), m, type, fmt, ap);
+	va_end(ap);
 }
 
 static void dt_stream_start(struct yaml_dt_state *dt)

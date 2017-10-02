@@ -119,18 +119,18 @@ struct tree_ops {
 
 	void (*debugf)(struct tree *t, const char *fmt, ...)
 			__attribute__ ((__format__ (__printf__, 2, 0)));
-	void (*error_at_node)(struct tree *t, struct node *np,
-			const char *fmt, ...)
-			__attribute__ ((__format__ (__printf__, 3, 0)));
-	void (*error_at_property)(struct tree *t, struct property *prop,
-			const char *fmt, ...)
-			__attribute__ ((__format__ (__printf__, 3, 0)));
-	void (*error_at_ref)(struct tree *t, struct ref *ref,
-			const char *fmt, ...)
-			__attribute__ ((__format__ (__printf__, 3, 0)));
-	void (*error_at_label)(struct tree *t, struct label *l,
-			const char *fmt, ...)
-			__attribute__ ((__format__ (__printf__, 3, 0)));
+	void (*msg_at_node)(struct tree *t, struct node *np,
+			const char *type, const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 4, 0)));
+	void (*msg_at_property)(struct tree *t, struct property *prop,
+			const char *type, const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 4, 0)));
+	void (*msg_at_ref)(struct tree *t, struct ref *ref,
+			const char *type, const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 4, 0)));
+	void (*msg_at_label)(struct tree *t, struct label *l,
+			const char *type, const char *fmt, ...)
+			__attribute__ ((__format__ (__printf__, 4, 0)));
 };
 
 #ifndef LABEL_HASH_SIZE
@@ -300,23 +300,77 @@ const char *dn_fullname(struct node *np, char *buf, int bufsize);
 
 #define tree_error_at_node(_t, _np, _fmt, ...) \
 	do { \
-		if (_t->ops->error_at_node) \
-			_t->ops->error_at_node(_t, _np, _fmt, ##__VA_ARGS__); \
+		if (_t->ops->msg_at_node) \
+			_t->ops->msg_at_node(_t, _np, "error", \
+					_fmt, ##__VA_ARGS__); \
 	} while(0)
 #define tree_error_at_property(_t, _prop, _fmt, ...) \
 	do { \
-		if (_t->ops->error_at_property) \
-			_t->ops->error_at_property(_t, _prop, _fmt, ##__VA_ARGS__); \
+		if (_t->ops->msg_at_property) \
+			_t->ops->msg_at_property(_t, _prop, "error", \
+					_fmt, ##__VA_ARGS__); \
 	} while(0)
 #define tree_error_at_ref(_t, _ref, _fmt, ...) \
 	do { \
-		if (_t->ops->error_at_ref) \
-			_t->ops->error_at_ref(_t, _ref, _fmt, ##__VA_ARGS__); \
+		if (_t->ops->msg_at_ref) \
+			_t->ops->msg_at_ref(_t, _ref, "error", \
+					_fmt, ##__VA_ARGS__); \
 	} while(0)
 #define tree_error_at_label(_t, _ref, _fmt, ...) \
 	do { \
-		if (_t->ops->error_at_label) \
-			_t->ops->error_at_label(_t, _ref, _fmt, ##__VA_ARGS__); \
+		if (_t->ops->msg_at_label) \
+			_t->ops->msg_at_label(_t, _ref, "error", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+
+#define tree_warning_at_node(_t, _np, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_node) \
+			_t->ops->msg_at_node(_t, _np, "warning", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_warning_at_property(_t, _prop, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_property) \
+			_t->ops->msg_at_property(_t, _prop, "warning", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_warning_at_ref(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_ref) \
+			_t->ops->msg_at_ref(_t, _ref, "warning", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_warning_at_label(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_label) \
+			_t->ops->msg_at_label(_t, _ref, "warning", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+
+#define tree_info_at_node(_t, _np, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_node) \
+			_t->ops->msg_at_node(_t, _np, "info", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_info_at_property(_t, _prop, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_property) \
+			_t->ops->msg_at_property(_t, _prop, "info", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_info_at_ref(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_ref) \
+			_t->ops->msg_at_ref(_t, _ref, "info", \
+					_fmt, ##__VA_ARGS__); \
+	} while(0)
+#define tree_info_at_label(_t, _ref, _fmt, ...) \
+	do { \
+		if (_t->ops->msg_at_label) \
+			_t->ops->msg_at_label(_t, _ref, "info", \
+					_fmt, ##__VA_ARGS__); \
 	} while(0)
 
 #endif

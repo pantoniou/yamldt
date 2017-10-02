@@ -106,10 +106,10 @@ static const struct tree_ops yaml_tree_ops = {
 	.node_alloc		= yaml_node_alloc,
 	.node_free		= yaml_node_free,
 	.debugf			= yaml_dt_tree_debugf,
-	.error_at_node		= yaml_dt_tree_error_at_node,
-	.error_at_property	= yaml_dt_tree_error_at_property,
-	.error_at_ref		= yaml_dt_tree_error_at_ref,
-	.error_at_label		= yaml_dt_tree_error_at_label,
+	.msg_at_node		= yaml_dt_tree_msg_at_node,
+	.msg_at_property	= yaml_dt_tree_msg_at_property,
+	.msg_at_ref		= yaml_dt_tree_msg_at_ref,
+	.msg_at_label		= yaml_dt_tree_msg_at_label,
 };
 
 static void ref_output_single(struct tree *t, FILE *fp,
