@@ -1373,13 +1373,15 @@ static void check_node_single(struct yaml_dt_state *dt,
 	case cet_bad_property_type:
 		if (!ref || !propname)
 			break;
-		tree_error_at_ref(to_tree(dt), ref, "property %s%s%s has bad type\n",
+		tree_warning_at_ref(to_tree(dt), ref,
+				"property %s%s%s has bad type\n",
 				marker, propname, reset);
 		break;
 	case cet_missing_property:
 		if (!np || !propname)
 			break;
-		tree_error_at_node(to_tree(dt), np, "property %s%s%s is missing\n",
+		tree_warning_at_node(to_tree(dt), np,
+				"property %s%s%s is missing\n",
 				marker, propname, reset);
 		break;
 	case cet_property_constraint_failed:
@@ -1412,7 +1414,8 @@ static void check_node_single(struct yaml_dt_state *dt,
 				if (!constraint)
 					continue;
 
-				tree_error_at_ref(to_tree(dt), ref, "%s%s%s %s constraint:%s%s%s%s\n",
+				tree_warning_at_ref(to_tree(dt), ref,
+						"%s%s%s %s constraint:%s%s%s%s\n",
 						marker, propname, reset,
 						count == 1 ? "failed" : "possibly-failed",
 						!strchr(constraint, '\n') ? " " : "\n",
@@ -1420,7 +1423,8 @@ static void check_node_single(struct yaml_dt_state *dt,
 			}
 
 		} else {
-			tree_error_at_ref(to_tree(dt), ref, "%s%s%s failed constraint:%s%s%s%s\n",
+			tree_warning_at_ref(to_tree(dt), ref,
+					"%s%s%s failed constraint:%s%s%s%s\n",
 					marker, propname, reset,
 					!strchr(constraint, '\n') ? " " : "\n",
 					constr, constraint, reset);
@@ -1429,7 +1433,8 @@ static void check_node_single(struct yaml_dt_state *dt,
 	case cet_node_constraint_failed:
 		if (!np || !constraint)
 			break;
-		tree_error_at_node(to_tree(dt), np, "%s%s%s failed constraint:%s%s%s%s\n",
+		tree_warning_at_node(to_tree(dt), np,
+				"%s%s%s failed constraint:%s%s%s%s\n",
 				marker, np->name, reset,
 				!strchr(constraint, '\n') ? " " : "\n",
 				constr, constraint, reset);
