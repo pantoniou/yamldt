@@ -2726,7 +2726,7 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 	dt->current_event = NULL;
 }
 
-int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
+int dt_parse_yaml(struct yaml_dt_state *dt, yaml_event_type_t *event_type)
 {
 	struct yaml_dt_span *span = dt->curr_span;
 	yaml_event_t event;
@@ -2745,7 +2745,7 @@ int dt_parse_yaml(struct yaml_dt_state *dt, yaml_token_type_t *token_type)
 
 	process_yaml_event(dt, &event);
 
-	*token_type = event.type;
+	*event_type = event.type;
 
 	yaml_event_delete(&event);
 
@@ -2821,12 +2821,12 @@ int dt_parse_dts(struct yaml_dt_state *dt)
 
 int dt_parse(struct yaml_dt_state *dt)
 {
-	yaml_token_type_t token_type;
+	yaml_event_type_t event_type;
 	int err;
 
 	/* we must start with stream start */
-	err = dt_parse_yaml(dt, &token_type);
-	if (err || token_type != YAML_STREAM_START_TOKEN) {
+	err = dt_parse_yaml(dt, &event_type);
+	if (err || event_type != YAML_STREAM_START_EVENT) {
 		if (!err)
 			dt_error(dt, "YAML parser not starting with stream start\n");
 		dt_exit_failure(dt);
@@ -2835,8 +2835,8 @@ int dt_parse(struct yaml_dt_state *dt)
 	do {
 		dt_parse_dts(dt);
 
-		err = dt_parse_yaml(dt, &token_type);
-		if (err == 0 && token_type == YAML_STREAM_END_TOKEN)
+		err = dt_parse_yaml(dt, &event_type);
+		if (err == 0 && event_type == YAML_STREAM_END_EVENT)
 			break;
 	} while (err == 0);
 
