@@ -26,6 +26,7 @@ DIFFS      := $(addsuffix .diff, $(basename $(YAMLS)))
 CPPYAMLS  := $(addsuffix .cpp.yaml, $(basename $(YAMLSS)))
 
 CPP ?= cpp
+YAML_CPP ?= $(CPP)
 CPPFLAGS ?= -I ./ -I $(TOPDIR)/port \
 	 -I $(TOPDIR)/include \
 	 -I $(TOPDIR)/include/dt-bindings/input \
@@ -45,11 +46,11 @@ YDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.o.Yd
 DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 
 %.o.yaml: %.yaml
-	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
+	$(YAML_CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
 		$(YAMLDT) $(YAMLDTFLAGS) -I yaml -O yaml -c - -o $@
 
 %.cpp.yaml: %.yaml
-	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< >$@
+	$(YAML_CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< >$@
 
 %.dtb: %.yaml
 	$(YAMLDT) $(YAMLDTFLAGS) -C $< -o $@
@@ -61,7 +62,7 @@ DDEPFLAGS ?= -MT $@ -MMD -MP -MF $*.Dd
 	$(YAMLDT) $(YAMLDTFLAGS) -s $< -o $@
 
 %.dtc.dtb: %.dts
-	$(CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
+	$(YAML_CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
 		$(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
 %.fdtdump: %.dtb

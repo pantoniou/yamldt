@@ -5,6 +5,7 @@
 .SUFFIXES:
 
 CPP ?= cpp
+YAML_CPP ?= $(CPP)
 CPPFLAGS ?= -I ./ -I $(TOPDIR)/test-suite \
 	 -I $(TOPDIR)/include \
 	 -I $(TOPDIR)/include/dt-bindings/input \
@@ -56,22 +57,22 @@ BLACKYDIFFS   := $(addsuffix .y.diff, $(BLACKLIST))
 	-cmp -s $^ || (diff -u $^ | tee $@)
 
 %.cpp.dts: %.dts
-	$(CPP) $(CPPFLAGS) $< > $@
+	$(YAML_CPP) $(CPPFLAGS) $< > $@
 
 %.cpp.yaml: %.yaml
-	$(CPP) $(YAMLDT_CPPFLAGS) $< > $@
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< > $@
 
 %.dtb: %.dts
-	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
+	$(YAML_CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
 %.ydtc.dtb: %.dts
-	$(CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I dts -O dtb - -o $@
+	$(YAML_CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I dts -O dtb - -o $@
 
 %.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
-	$(CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.dtc.yaml: %.dts
-	$(CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O yaml - -o $@
+	$(YAML_CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O yaml - -o $@
 
 # will also generate all yamli included files
 # %.yaml: %.dts

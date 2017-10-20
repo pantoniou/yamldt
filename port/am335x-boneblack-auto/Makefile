@@ -5,6 +5,7 @@ YAMLS := $(addsuffix .yaml, $(basename $(DTSS)))
 YAMLIS := $(addsuffix .yamli, $(basename $(DTSIS)))
 
 CPP ?= cpp
+YAML_CPP ?= $(CPP)
 CPPFLAGS ?= -I ./ -I $(TOPDIR)/port \
 	 -I $(TOPDIR)/include \
 	 -I $(TOPDIR)/include/dt-bindings/input \
@@ -45,21 +46,21 @@ DDEPS    := $(addsuffix .Dd, $(basename $(YAMLS)))
 	-cmp -s $^ || (diff -u $^ | tee $@)
 
 %.cpp.yaml: %.yaml
-	$(CPP) $(CPPFLAGS) -D__DTS__ $< > $@
+	$(YAML_CPP) $(CPPFLAGS) -D__DTS__ $< > $@
 
 %.cpp.dts: %.dts
-	$(CPP) $(CPPFLAGS) -D__DTS__ $< > $@
+	$(YAML_CPP) $(CPPFLAGS) -D__DTS__ $< > $@
 
 %.dtb: %.yaml
-	$(CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
+	$(YAML_CPP) $(YDEPFLAGS) $(CPPFLAGS) -D__DTS__ -D__YAML__ $< | \
 		$(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.dtc.dtb: %.dts
-	$(CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
+	$(YAML_CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
 		$(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
 
 %.ydtc.dtb: %.dts
-	$(CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
+	$(YAML_CPP) $(DDEPFLAGS) $(CPPFLAGS) -D__DTS__ $< | \
 		$(YAMLDT) $(YAMLDTFLAGS) - -o $@
 
 %.fdtdump: %.dtb
