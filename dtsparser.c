@@ -52,14 +52,6 @@
 
 #include "dtsparser.h"
 
-static inline bool isexprc(char c)
-{
-	return c == '+' || c == '-' || c == '*' || c == '/' || c == '~' ||
-	       c == '!' || c == '^' || c == '%' || c == '<' || c == '>' ||
-	       c == '^' || c == '=' || c == '&' || c == '|' ||
-	       isxdigit(c) || c == 'x' || c == 'X';
-}
-
 static inline bool ispropnodec(char c)
 {
 	return c == ',' || c == '.' || c == '_' || c == '+' || c == '*' ||
@@ -79,12 +71,6 @@ static inline bool islabelc(char c, bool first)
 static inline bool ismacroc(char c, bool first)
 {
 	return islabelc(c, first);
-}
-
-static inline bool isescc(char c)
-{
-	return c == 'a' || c == 'b' || c == 't' || c == 'n' || c == 'v' ||
-	       c == 'f' || c == 'r';
 }
 
 static inline bool state_with_comments(enum file_state fs)
