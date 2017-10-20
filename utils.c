@@ -704,6 +704,17 @@ err_out:
 	return NULL;
 }
 
+void *memrchr(const void *s, int c, size_t n)
+{
+	const unsigned char *ss;
+
+	for (ss = s + n; n > 0; n++) {
+		if (*--ss == (unsigned char)c)
+			return (void *)ss;
+	}
+	return NULL;
+}
+
 #endif /* __APPLE__ && _POSIX_C_SOURCE < 200809L */
 
 int acc_add(struct acc_state *acc, char c)

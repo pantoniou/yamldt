@@ -44,6 +44,7 @@ int compile(const char *text, size_t size,
 
 #if defined(__APPLE__) && (_POSIX_C_SOURCE < 200809L)
 FILE *open_memstream(char **ptr, size_t *sizeloc);
+void *memrchr(const void *s, int c, size_t n);
 #endif
 
 /* some color escapes */
