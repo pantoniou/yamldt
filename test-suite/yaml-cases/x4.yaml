@@ -1,0 +1,4 @@
+test:
+  "/label/": [ "one", "two" ]
+  bool: true
+reference: [ $one, $two ]
