@@ -1,0 +1,12 @@
+compatible: [ "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx" ]
+interrupt-parent: *intr
+"#address-cells": 1
+"#size-cells": 1
+model: "TI AM335x BeagleBone Black"
+interrupt-controller: &intr
+  compatible: "ti,am33xx-intc"
+  interrupt-controller: true
+  "#interrupt-cells": 1
+  reg: [ 0x48200000, 0x00001000 ]
+chosen:
+  stdout-path: "/ocp/serial@44e09000"

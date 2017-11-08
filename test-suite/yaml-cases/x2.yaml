@@ -1,0 +1,6 @@
+test: true
+more: [ 10, 122, 0x10 ]
+yet-another: "string"
+subnode:
+  key: 12
+foo: null

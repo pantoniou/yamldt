@@ -1,0 +1,85 @@
+.SUFFIXES:
+
+CPP ?= cpp
+YAML_CPP ?= $(CPP)
+CPPFLAGS ?= -I ./ -I $(TOPDIR)/test-suite \
+	 -I $(TOPDIR)/include \
+	 -I $(TOPDIR)/include/dt-bindings/input \
+	 -nostdinc -undef -D__DTS__ -x assembler-with-cpp
+YAMLDT_CPPFLAGS ?= $(CPPFLAGS) # -traditional-cpp -Wtraditional
+DTC ?= dtc
+DTCFLAGS ?= -q
+FDTDUMP ?= fdtdump
+YAMLDT ?= $(TOPDIR)/yamldt
+DTS2YAML ?= $(TOPDIR)/dts2yaml
+
+SCHEMA ?= schema.yaml
+
+CODEGEN ?= $(TOPDIR)/validate/schema/codegen.yaml
+BINDINGS ?= $(TOPDIR)/validate/bindings
+BINDING_FILES ?= $(shell find $(BINDINGS) -name '*.yaml' -print)
+
+VALIDATE ?= $(if $(findstring validate, $(MAKECMDGOALS)), 1)
+
+# pass extra validate flags
+YAMLDTFLAGS ?= -C \
+	$(if $(findstring 1, $(VALIDATE)), --schema=$(SCHEMA))
+
+YAMLDTSCHEMAFLAGS ?=
+
+DTS2YAMLFLAGS ?=
+FDTDUMPFLAGS ?=
+
+YAMLS    := $(addsuffix .yaml, $(filter-out $(basename $(BLACKLIST)),$(basename $(BOARDS))))
+DTSS     := $(addsuffix .dts, $(filter-out $(basename $(BLACKLIST)),$(basename $(BOARDS))))
+DTCYAMLS := $(addsuffix .dtc.yaml, $(basename $(BOARDS)))
+DIFFS    := $(addsuffix .diff, $(basename $(YAMLS)))
+YDIFFS   := $(addsuffix .y.diff, $(basename $(YAMLS)))
+DTBS     := $(addsuffix .dtb, $(basename $(YAMLS)))
+YAMLDTBS := $(addsuffix .yaml.dtb, $(basename $(YAMLS)))
+YDTCDTBS := $(addsuffix .ydtc.dtb, $(basename $(YAMLS)))
+FDTDUMPS := $(addsuffix .fdtdump, $(basename $(DTBS))) $(addsuffix .fdtdump, $(basename $(YAMLDTBS)))
+CPPS     := $(addsuffix .cpp, $(basename $(DTBS))) $(addsuffix .yaml.cpp, $(basename $(YAMLDTBS)))
+
+BLACKYAMLS    := $(addsuffix .yaml, $(BLACKLIST))
+BLACKDTSS     := $(addsuffix .dts, $(BLACKLIST))
+BLACKDIFFS    := $(addsuffix .diff, $(BLACKLIST))
+BLACKYDIFFS   := $(addsuffix .y.diff, $(BLACKLIST))
+
+%.diff: %.yaml.fdtdump %.fdtdump
+	cmp -s $^ || (diff -u $^ | tee $@; false)
+
+%.y.diff: %.ydtc.fdtdump %.fdtdump
+	-cmp -s $^ || (diff -u $^ | tee $@)
+
+%.cpp.dts: %.dts
+	$(YAML_CPP) $(CPPFLAGS) $< > $@
+
+%.cpp.yaml: %.yaml
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< > $@
+
+%.dtb: %.dts
+	$(YAML_CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O dtb - -o $@
+
+%.ydtc.dtb: %.dts
+	$(YAML_CPP) $(CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I dts -O dtb - -o $@
+
+%.yaml.dtb: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I yaml -O dtb - -o $@
+
+%.yaml.yaml: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I yaml -O yaml - -o $@
+
+%.yaml.json: %.yaml | genyamls $(if $(findstring 1, $(VALIDATE)), $(SCHEMA))
+	$(YAML_CPP) $(YAMLDT_CPPFLAGS) $< | $(YAMLDT) $(YAMLDTFLAGS) -I yaml -O json - -o $@
+
+%.dtc.yaml: %.dts
+	$(YAML_CPP) $(CPPFLAGS) $< | $(DTC) $(DTCFLAGS) -I dts -O yaml - -o $@
+
+# will also generate all yamli included files
+# %.yaml: %.dts
+#	$(DTS2YAML) $(DTS2YAMLFLAGS) -r $^
+
+%.fdtdump: %.dtb
+	$(FDTDUMP) $(FDTDUMPFLAGS) 2>/dev/null $< >$@
+

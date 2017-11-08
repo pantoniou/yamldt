@@ -1,0 +1,6 @@
+compatible: [ "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx" ]
+node: &intr
+  a: foo
+  b: bar
+noderef: !pathref intr
+bug: true
