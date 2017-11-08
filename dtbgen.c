@@ -1037,7 +1037,7 @@ static void dtb_create_overlay_structure(struct yaml_dt_state *dt)
 		ov->parent = root;
 		list_add_tail(&ov->node, &ov->parent->children);
 
-		if (np->name[0] == '*') {
+		if (is_node_ref_char(np->name[0])) {
 			prop = prop_alloc(to_tree(dt), "target");
 			ref = ref_alloc(to_tree(dt), r_anchor, np->name + 1,
 					strlen(np->name) - 1, "!anchor");

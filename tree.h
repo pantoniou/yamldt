@@ -373,4 +373,10 @@ const char *dn_fullname(struct node *np, char *buf, int bufsize);
 					_fmt, ##__VA_ARGS__); \
 	} while(0)
 
+static inline bool is_node_ref_char(const char c)
+{
+	/* we allow both $ and * as node reference characters */
+	return c == '*' || c == '$';
+}
+
 #endif

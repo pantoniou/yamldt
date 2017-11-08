@@ -344,7 +344,7 @@ struct node *node_lookup(struct tree *t, const char *key, int len)
 	if (!len)
 		return NULL;
 
-	if (*key == '*')
+	if (is_node_ref_char(*key))
 		return node_lookup_by_label(t, key + 1, len - 1);
 
 	if (*key == '/')
@@ -653,7 +653,7 @@ void tree_apply_ref_nodes(struct tree *t, bool object, bool compatible)
 
 		npref = node_lookup(t, np->name, -1);
 		if (!npref && !object) {
-			if (np->name[0] == '*')
+			if (is_node_ref_char(np->name[0]))
 				tree_error_at_node(t, np,
 					"reference to unknown label %s\n",
 					np->name + 1);
