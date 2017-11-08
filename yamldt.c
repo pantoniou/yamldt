@@ -350,6 +350,7 @@ int main(int argc, char *argv[])
 
 	if (strcmp(cfg->output_format, "auto") &&
 	    strcmp(cfg->output_format, "yaml") &&
+	    strcmp(cfg->output_format, "json") &&
 	    strcmp(cfg->output_format, "dts") &&
 	    strcmp(cfg->output_format, "dtb") &&
 	    strcmp(cfg->output_format, "null")) {
@@ -370,6 +371,8 @@ int main(int argc, char *argv[])
 		s = strrchr(cfg->input_file[0], '.');
 		if (s && !strcmp(s, ".yaml"))
 			cfg->input_format = "yaml";
+		else if (s && !strcmp(s, ".json"))
+			cfg->input_format = "json";
 		else if (s && !strcmp(s, ".dts"))
 			cfg->input_format = "dts";
 	}
@@ -378,6 +381,8 @@ int main(int argc, char *argv[])
 		s = strrchr(cfg->output_file, '.');
 		if (s && !strcmp(s, ".yaml"))
 			cfg->output_format = "yaml";
+		if (s && !strcmp(s, ".json"))
+			cfg->output_format = "json";
 		else if (s && !strcmp(s, ".dtb"))
 			cfg->output_format = "dtb";
 		else if (s && !strcmp(s, ".dts"))
@@ -394,7 +399,8 @@ int main(int argc, char *argv[])
 	if (!strcmp(cfg->output_format, "dtb") ||
 	    !strcmp(cfg->output_format, "dts"))
 		selected_emitter = &dtb_emitter;
-	else if (!strcmp(cfg->output_format, "yaml"))
+	else if (!strcmp(cfg->output_format, "yaml") ||
+		 !strcmp(cfg->output_format, "json"))
 		selected_emitter = &yaml_emitter;
 	else
 		selected_emitter = &null_emitter;

@@ -73,6 +73,7 @@ static const char *get_builtin_tag(const char *tag)
 {
 	static const char *tags[] = {
 		"!anchor",
+		"!ref",		/* alias of anchor */
 		"!pathref",
 		"!int",
 		"!bool",
@@ -1250,8 +1251,12 @@ static int dt_dts_emit(struct dts_state *ds, int depth,
 				/* in compatible mode we allow it */
 			}
 			l = label_add_nolink(to_tree(dt), np, label);
-			if (!l)
+			if (!l) {
+				dt_warning_at(dt, &dt->current_mark,
+					"node %s failed on label %s\n",
+					name, label);
 				break;
+			}
 
 			/* mark the location of the label */
 			dts_loc_to_yaml_mark(&data->pn.labels[i]->loc, &to_dt_label(l)->m);
@@ -1502,7 +1507,8 @@ static bool dt_yaml_parse_dts(struct yaml_dt_state *dt, struct yaml_dt_input *in
 {
 	struct yaml_dt_config *cfg = &dt->cfg;
 
-	if (!strcmp(cfg->input_format, "yaml"))
+	if (!strcmp(cfg->input_format, "yaml") ||
+	    !strcmp(cfg->input_format, "json"))
 		return false;
 
 	if (!strcmp(cfg->input_format, "dts"))
@@ -1902,6 +1908,7 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 	struct node *np, *child, *childn;
 	struct property *prop;
 	struct ref *ref, *refn;
+	struct label *l;
 	int nrefs, nnulls;
 
 	if (!dt)
@@ -1926,7 +1933,32 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 				dn_fullname(np, namebuf, sizeof(namebuf)));
 		prop_free(to_tree(dt), prop);
 		prop = NULL;
+	} else if (!strcmp(prop->name, "/label/")) {
+		dt_debug(dt, "/label/ property\n");
+		for_each_ref_of_property(prop, ref) {
 
+			if (ref->type != r_scalar)
+				continue;
+
+			/* ref->data guaranteed to be NULL terminated */
+			l = label_add_nolink(to_tree(dt), np, ref->data);
+			if (!l) {
+				tree_error_at_ref(to_tree(dt), ref,
+						"Unable to add label %s\n",
+						ref->data);
+			} else {
+				/* mark the location */
+				to_dt_label(l)->m = to_dt_ref(ref)->m;
+
+				/* in compatible mode we add the label at the head */
+				if (!dt->cfg.compatible)
+					list_add_tail(&l->node, &np->labels);
+				else
+					list_add(&l->node, &np->labels);
+			}
+		}
+		prop_free(to_tree(dt), prop);
+		prop = NULL;
 	} else {
 
 		/* detect whether it's a delete property */
@@ -2135,6 +2167,8 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 
 			/* everything scalar but pathref */
 			rt = r_scalar;	/* default scalar */
+			if (tag && !strcmp(tag, "!ref"))
+				rt = r_anchor;
 			if (tag && !strcmp(tag, "!pathref"))
 				rt = r_path;
 			else if (tag && !strcmp(tag, "!anchor"))
@@ -2331,6 +2365,12 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 						list_add_tail(&l->node, &np->labels);
 					else
 						list_add(&l->node, &np->labels);
+				} else {
+					dt_debug(dt,
+						"node %s with duplicate label %s\n",
+						dn_fullname(np, namebuf, sizeof(namebuf)),
+						label);
+					label = NULL;
 				}
 			}
 
@@ -2458,7 +2498,7 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			len = strlen(dt->map_key);
 			if (dt->map_key &&
 			    ((dt->map_key[0] == '/' && dt->map_key[len - 1] != '/') ||
-				dt->map_key[0] == '*'))
+				is_node_ref_char(dt->map_key[0])))
 				dt_fatal(dt, "Illegal sequence context\n");
 
 			found_existing = false;
@@ -2476,6 +2516,7 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 					}
 				}
 			}
+
 			if (!found_existing)
 				prop = NULL;
 
@@ -2589,7 +2630,7 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 
 			len = strlen(dt->map_key);
 			if ((dt->map_key[0] == '/' && dt->map_key[len - 1] != '/') ||
-			     dt->map_key[0] == '*') {
+			     is_node_ref_char(dt->map_key[0])) {
 				if (dt->depth != 1)
 					dt_fatal(dt, "Bare references not allowed on non root level\n");
 				if (!dt->current_np_ref)

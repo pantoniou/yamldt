@@ -114,7 +114,7 @@ static const struct tree_ops yaml_tree_ops = {
 
 static void ref_output_single(struct tree *t, FILE *fp,
 			      struct ref *ref, bool object,
-			      int depth)
+			      bool json, int depth)
 {
 	struct yaml_dt_state *dt = to_dt(t);
 	struct node *np;
@@ -127,6 +127,7 @@ static void ref_output_single(struct tree *t, FILE *fp,
 	char *refname;
 	int refnamelen;
 	const char *s, *e;
+	char c2buf[C2STR_BUF_MAX];
 
 	prop = ref->prop;
 	assert(prop);
@@ -171,11 +172,19 @@ static void ref_output_single(struct tree *t, FILE *fp,
 
 		/* object mode, just leave references here */
 		if (!np) {
-			if (ref->type == r_anchor)
-				fputc('*', fp);
-			else
-				fputs("!pathref ", fp);
-			fwrite(ref->data, ref->len, 1, fp);
+			if (!json) {
+				if (ref->type == r_anchor)
+					fputc('*', fp);
+				else
+					fputs("!pathref ", fp);
+				fwrite(ref->data, ref->len, 1, fp);
+			} else {
+				fprintf(fp, "[ \"\\f%s\", \"",
+						ref->type == r_anchor ?
+						"!anchor" : "!pathref");
+				fwrite(ref->data, ref->len, 1, fp);
+				fputs("\" ]", fp);
+			}
 			break;
 		}
 
@@ -196,51 +205,75 @@ static void ref_output_single(struct tree *t, FILE *fp,
 				    refname, l->label);
 		}
 
-		if (ref->type == r_anchor)
-			fprintf(fp, "*%s", l->label);
-		else
-			fprintf(fp, "!pathref %s", l->label);
+		if (!json) {
+			if (ref->type == r_anchor)
+				fprintf(fp, "*%s", l->label);
+			else
+				fprintf(fp, "!pathref %s", l->label);
+		} else {
+			fprintf(fp, "[ \"\\f%s\", \"%s\" ]",
+					ref->type == r_anchor ?
+					"!anchor" : "!pathref",
+					l->label);
+		}
 		break;
 
 	case r_scalar:
 		tag = to_dt_ref(ref)->tag;
 
 		/* output explicit tag (which is not a string) */
-		if (xtag && strcmp(xtag, "!str"))
+		if (!json && xtag && strcmp(xtag, "!str"))
 			fprintf(fp, "%s ", xtag);
 
 		val = to_dt_ref(ref)->val;
 		if (to_dt_ref(ref)->is_int) {
-			if (to_dt_ref(ref)->is_hex) {
-				if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8"))
-					fprintf(fp, "0x%llx", val & 0xff);
-				else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16"))
-					fprintf(fp, "0x%llx", val & 0xffff);
-				else if (!strcmp(tag, "!int32") || !strcmp(tag, "!uint32"))
-					fprintf(fp, "0x%llx", val & 0xffffffff);
+			if (!json) {
+				if (to_dt_ref(ref)->is_hex) {
+					if (!strcmp(tag, "!int8") || !strcmp(tag, "!uint8"))
+						fprintf(fp, "0x%llx", val & 0xff);
+					else if (!strcmp(tag, "!int16") || !strcmp(tag, "!uint16"))
+						fprintf(fp, "0x%llx", val & 0xffff);
+					else if (!strcmp(tag, "!int32") || !strcmp(tag, "!uint32"))
+						fprintf(fp, "0x%llx", val & 0xffffffff);
+					else
+						fprintf(fp, "0x%llx", val);
+				} else if (to_dt_ref(ref)->is_unsigned)
+					fprintf(fp, "%llu", val);
 				else
-					fprintf(fp, "0x%llx", val);
-			} else if (to_dt_ref(ref)->is_unsigned)
-				fprintf(fp, "%llu", val);
-			else
-				fprintf(fp, "%lld", (long long)val);
+					fprintf(fp, "%lld", (long long)val);
+			} else {
+				if (xtag && strcmp(xtag, "!int32"))
+					fprintf(fp, "[ \"\\f%s\", ", tag);
+				if (to_dt_ref(ref)->is_unsigned)
+					fprintf(fp, "%llu", val);
+				else
+					fprintf(fp, "%lld", (long long)val);
+				if (xtag && strcmp(xtag, "!int32"))
+					fputs(" ]", fp);
+			}
 
 		} else if (!strcmp(tag, "!bool")) {
 			fputs(val ? "true" : "false", fp);
 		} else if (!strcmp(tag, "!null")) {
-			fputc('~', fp);
+			if (!json)
+				fputc('~', fp);
+			else
+				fputs("null", fp);
 		} else {
 
 			if (strcmp(tag, "!str"))
-				tree_debug(t, "Unknown tag %s: %s\n",
+				tree_debug(t, "Non builtin tag %s: %s\n",
 						tag, refname);
+
+			if (json && tag && strcmp(tag, "!str"))
+				fprintf(fp, "[ \"\\f%s\", ", tag);
 
 			/* no newlines? easy */
 			if (!memchr(ref->data, '\n', ref->len)) {
 				fputc('"', fp);
 				fwrite(ref->data, ref->len, 1, fp);
 				fputc('"', fp);
-			} else {
+			} else if (!json) {
 				fputs("|+", fp);
 				s = ref->data;
 				while (s && s < (char *)ref->data + ref->len) {
@@ -251,8 +284,16 @@ static void ref_output_single(struct tree *t, FILE *fp,
 					fwrite(s, e - s, 1, fp);
 					s = e < ((char *)ref->data + ref->len) ? e + 1 : NULL;
 				}
+			} else {
+				fputc('"', fp);
+				s = ref->data;
+				while (s && s < (char *)ref->data + ref->len)
+					fputs(c2str(*s++, c2buf, sizeof(c2buf)), fp);
+				fputc('"', fp);
 			}
 
+			if (json && tag && strcmp(tag, "!str"))
+				fputs(" ]", fp);
 		}
 		break;
 
@@ -315,6 +356,21 @@ void yaml_assign_temp_labels(struct tree *t)
 	__yaml_assign_temp_labels(t, tree_root(t), &next);
 }
 
+static bool needs_quotes(const char *str)
+{
+	char c;
+
+	/* quote empty */
+	if (*str == '\0')
+		return true;
+
+	while ((c = *str++)) {
+		if (c == '#' || isspace(c))
+			return true;
+	}
+	return false;
+}
+
 void __yaml_flatten_node(struct tree *t, FILE *fp,
 			 struct node *np, bool object,
 			 int depth)
@@ -327,7 +383,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 
 	if (depth > 0) {
 		fprintf(fp, "%*s", (depth - 1) * 2, "");
-		if (strchr(np->name, '#'))
+		if (needs_quotes(np->name))
 			fprintf(fp, "\"%s\":", np->name);
 		else
 			fprintf(fp, "%s:", np->name);
@@ -348,7 +404,7 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 		fprintf(fp, "%*s", depth * 2, "");
 		if (prop->name[0] == '\0')
 			fprintf(fp, "-");
-		else if (strchr(prop->name, '#'))
+		else if (needs_quotes(prop->name))
 			fprintf(fp, "\"%s\":", prop->name);
 		else
 			fprintf(fp, "%s:", prop->name);
@@ -378,7 +434,8 @@ void __yaml_flatten_node(struct tree *t, FILE *fp,
 			if (ref->type == r_null)
 				fputc('~', fp);
 			else
-				ref_output_single(t, fp, ref, object, depth);
+				ref_output_single(t, fp, ref, object,
+						  false, depth);
 			i++;
 		}
 
@@ -412,10 +469,125 @@ void yaml_flatten_node(struct tree *t, FILE *fp, bool object)
 	__yaml_flatten_node(t, fp, tree_root(t), object, 0);
 }
 
+void __json_flatten_node(struct tree *t, FILE *fp,
+			 struct node *np, bool object,
+			 bool last, int depth)
+{
+	struct node *child;
+	struct property *prop;
+	struct ref *ref;
+	struct label *l;
+	int label_count, prop_count, children_count, item_count, count, i, j;
+
+	if (np != tree_root(t))
+		fprintf(fp, "%*s\"%s\": {\n", depth * 2, "", np->name);
+	else
+		fprintf(fp, "%*s{\n", depth * 2, "");
+
+	label_count = 0;
+	for_each_label_of_node(np, l)
+		label_count++;
+
+	prop_count = 0;
+	for_each_property_of_node(np, prop)
+		prop_count++;
+
+	children_count = 0;
+	for_each_child_of_node(np, child)
+		children_count++;
+
+	item_count = (label_count > 0) + prop_count + children_count;
+
+	j = 0;
+
+	/* output labels */
+	if (label_count > 0) {
+		fprintf(fp, "%*s", (depth + 1) * 2, "");
+		fprintf(fp, "\"%s\":", "/label/");
+		if (label_count > 1)
+			fputs(" [", fp);
+		i = 0;
+		for_each_label_of_node(np, l) {
+			fprintf(fp, " \"%s\"", l->label);
+			if (label_count > 1 && i < (label_count - 1))
+				fputc(',', fp);
+		}
+		if (label_count > 1)
+			fputs(" ]", fp);
+		if (++j < item_count)
+			fputc(',', fp);
+		fputc('\n', fp);
+	}
+
+	for_each_property_of_node(np, prop) {
+
+		if (!prop->name[0]) {
+			tree_error_at_property(t, prop,
+				"JSON can't handle bare sequences\n");
+			continue;
+		}
+
+		fprintf(fp, "%*s", (depth + 1) * 2, "");
+		/* JSON always needs quotes for key */
+		fprintf(fp, "\"%s\":", prop->name);
+
+		count = 0;
+		for_each_ref_of_property(prop, ref) {
+			if (ref->type == r_seq_start ||
+			    ref->type == r_seq_end)
+				continue;
+			count++;
+		}
+
+		if (count > 1)
+			fputs(" [", fp);
+
+		i = 0;
+		for_each_ref_of_property(prop, ref) {
+
+			if (ref->type == r_seq_start ||
+			    ref->type == r_seq_end)
+				continue;
+
+			if (i > 0)
+				fputc(',', fp);
+			fputc(' ', fp);
+
+			if (ref->type == r_null)
+				fputs("null", fp);
+			else
+				ref_output_single(t, fp, ref, object,
+						  true, depth);
+			i++;
+		}
+
+		if (count > 1)
+			fputs(" ]", fp);
+		if (++j < item_count)
+			fputc(',', fp);
+		fputc('\n', fp);
+	}
+
+	for_each_child_of_node(np, child)
+		__json_flatten_node(t, fp, child, object,
+				    ++j == item_count, depth + 1);
+
+	fprintf(fp, "%*s}", depth * 2, "");
+	if (!last)
+		fputc(',', fp);
+	fputc('\n', fp);
+}
+
+void json_flatten_node(struct tree *t, FILE *fp, bool object)
+{
+	__json_flatten_node(t, fp, tree_root(t), object, true, 0);
+}
+
 int yaml_setup(struct yaml_dt_state *dt)
 {
 	dt_debug(dt, "YAML configuration:\n");
-	dt_debug(dt, " object     = %s\n", dt->cfg.object ? "true" : "false");
+	dt_debug(dt, " object        = %s\n", dt->cfg.object ? "true" : "false");
+	dt_debug(dt, " output_format = %s\n", dt->cfg.output_format);
 	return 0;
 }
 
@@ -430,7 +602,10 @@ int yaml_emit(struct yaml_dt_state *dt)
 	if (!dt->cfg.object)
 		tree_detect_duplicate_labels(to_tree(dt), tree_root(to_tree(dt)));
 	yaml_assign_temp_labels(to_tree(dt));
-	yaml_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
+	if (!strcmp(dt->cfg.output_format, "json"))
+		json_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
+	else
+		yaml_flatten_node(to_tree(dt), dt->output, dt->cfg.object);
 
 	return 0;
 }
