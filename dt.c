@@ -2159,6 +2159,18 @@ static void append_to_current_property(struct yaml_dt_state *dt,
 			/* try to find implicitly a type */
 			tag = (char *)event->data.scalar.tag;
 
+			/* a scalar that's an alias reference */
+			if (!tag && len > 1 && is_node_ref_char(*p)) {
+				len--;
+				p++;
+				ref_label = p;
+				ref_label_len = len;
+				rt = r_anchor;
+				xtag = "!anchor";
+				tag = xtag;
+				break;
+			}
+
 			/* if no tag and we're on a tagged sequence */
 			if (!tag && dt->prop_seq_depth > 0 &&
 					dt->prop_seq_tag[dt->prop_seq_depth - 1])
