@@ -1,4 +1,5 @@
 test:
-  "/label/": [ "one", "two" ]
+  /label/: [ one, two ]
+  other: [ 1, 2, 3 ]
   bool: true
 reference: [ $one, $two ]
