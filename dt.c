@@ -2618,15 +2618,19 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			 * due to the weird /memreserve/ stuff, there must not be
 			 * a terminating /
 			 */
-			if (len > 1 && s[0] == '/' && s[len-1] != '/' ) {
-				/* path reference key (path alias) */
+			if (len > 1 && ((s[0] == '/' && s[len-1] != '/') || is_node_ref_char(s[0]))) {
 
+				/* path reference key (path alias) or non alias reference */
 				if (dt->depth != 1)
 					dt_fatal(dt, "Bare references not allowed on non root level\n");
 				if (dt->current_np_ref)
 					dt_fatal(dt, "Can't do more than one level of ref\n");
-				dt->current_np_ref = true;
 
+				/* always convert to '*' if a node ref */
+				if (is_node_ref_char(s[0]))
+					dt->map_key[0] = '*';
+
+				dt->current_np_ref = true;
 				dt->last_alias_mark = dt->current_mark;
 
 				dt_debug(dt, "next up is a ref to %s\n", dt->map_key);
@@ -2770,7 +2774,7 @@ static void process_yaml_event(struct yaml_dt_state *dt, yaml_event_t *event)
 			finalize_current_property(dt);
 		break;
 	default:
-		dt_fatal(dt, "unkonwn YAML type not allowed\n");
+		dt_fatal(dt, "unknown YAML type not allowed\n");
 	}
 
 	dt->current_event = NULL;
