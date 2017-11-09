@@ -1950,11 +1950,8 @@ static void finalize_current_property(struct yaml_dt_state *dt)
 				/* mark the location */
 				to_dt_label(l)->m = to_dt_ref(ref)->m;
 
-				/* in compatible mode we add the label at the head */
-				if (!dt->cfg.compatible)
-					list_add_tail(&l->node, &np->labels);
-				else
-					list_add(&l->node, &np->labels);
+				/* always add the label at the tail */
+				list_add_tail(&l->node, &np->labels);
 			}
 		}
 		prop_free(to_tree(dt), prop);

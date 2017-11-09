@@ -509,7 +509,7 @@ void __json_flatten_node(struct tree *t, FILE *fp,
 		i = 0;
 		for_each_label_of_node(np, l) {
 			fprintf(fp, " \"%s\"", l->label);
-			if (label_count > 1 && i < (label_count - 1))
+			if (label_count > 1 && ++i < label_count)
 				fputc(',', fp);
 		}
 		if (label_count > 1)
